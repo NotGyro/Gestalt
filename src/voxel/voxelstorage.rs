@@ -18,25 +18,18 @@ pub trait VoxelStorage<T, P: PrimInt> {
     }
     
     //Throws if we are read-only.
-    pub fn set(&self, x: P, y: P, z: P, value: T);
-    pub fn set(&self, Coord3<P> coord, T value) {
+    pub fn set(&mut self, x: P, y: P, z: P, value: T);
+    pub fn set(&mut self, Coord3<P> coord, T value) {
         self.set(coord.x, coord.y, coord.z, value);
     }
 
     //Intializes a voxel storage, with each cell set to default value.
-    pub fn init(&self, sizeX: P, sizeY: P, sizeZ: P, T default);
+    pub fn init(&mut self, sizeX: P, sizeY: P, sizeZ: P, T default);
     //Uninitialized version of the above. Still allocates, probably.
-    pub fn init(&self, sizeX: P, sizeY: P, sizeZ: P);
-
-    //Intializes a voxel storage, with each cell set to default value.
-    pub fn init(&self, size: Coord3<P>, default: T) {
-        self.init(size.x, size.y, size.z, default)
-    }
-
-    //Uninitialized version of the above. Still allocates, probably.
-    pub fn init(&self, size: Coord3<P>) {
-        self.init(size.x, size.y, size.z)
-    }
-
+    pub fn init(&mut self, sizeX: P, sizeY: P, sizeZ: P);
+    
+    //Returns a buffer to write to.
+    pub fn start_load(&mut self) -> &mut[u8];
+    pub fn finish_load(&mut self);
 }
 
