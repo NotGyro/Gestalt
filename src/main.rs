@@ -1,18 +1,22 @@
-#![feature(collections)]
+//#![feature(collections)]
 
 pub mod voxel;
-use voxel::VoxelStorage;
-use voxel::VoxelArray;
+//extern crate std;
+use std::vec::Vec;
+use voxel::voxelstorage::VoxelStorage;
+use voxel::voxelarray::VoxelArray;
 
 fn main() {
-    const oursize : usize  = 16 * 16 * 16;
-    let testchunk: [mut u8; oursize] = [0, oursize];
+    const OURSIZE : usize  = 16 * 16 * 16;
+    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
+    for i in 0 .. OURSIZE {
+    	test_chunk.push(i as u8);
+    }
 
-    let testVA : VoxelArray<u8, u16> = VoxelArray { sizeX : 16,
-        sizeY : 16,
-        sizeZ : 16,
-        data : &testchunk,
-    };
+    let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
     
-    println!("Hello, world!");
+    println!("Our value = {}", test_va.get(14,14,14).unwrap());
+    println!("Setting...");
+    test_va.set(14,14,14,9);
+    println!("Our value = {}", test_va.get(14,14,14).unwrap());
 }

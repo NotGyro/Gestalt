@@ -1,3 +1,6 @@
+#Eclipse stuff
+.project
+
 # Whatever this is.
 *.swp
 
