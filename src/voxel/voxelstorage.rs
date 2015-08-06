@@ -3,10 +3,11 @@ use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
 use std::string::String;
 use std::vec::Vec;
-use voxel::coord3::Coord3;
+use util::coord3::Coord3;
+use util::axis::Axis;
 
-/* A basic trait for any 3d grid of data.
-Type arguments are type of element, type of position / index.
+/* A basic trait for any 3d grid data structure.
+Type arguments is type of element.
 
 For this trait, a single level of detail is assumed.
 
@@ -15,8 +16,7 @@ assume that the level of detail is a signed integer, and
 calling these methods / treating them as "flat" voxel
 structures implies acting on a level of detail of 0. 
 */
-pub trait VoxelStorage<T: Copy, P>
-where P : Eq + Ord + Add<Output=P> + Sub<Output=P> + Mul<Output=P> + Div<Output=P> {
+pub trait VoxelStorage<T: Copy, P = u32> where P : Eq + Ord + Add + Sub + Mul + Div {
 	//Self is mutable here for caching reasons.
     fn get(&mut self, x: P, y: P, z: P) -> Option<T>;
 	//Self is mutable here for caching reasons.
@@ -39,14 +39,22 @@ where P : Eq + Ord + Add<Output=P> + Sub<Output=P> + Mul<Output=P> + Div<Output=
     
     //A value of None means our VoxelStorage is pseudo-infinite in this direction
     fn get_x_sz(&self) -> Option<usize>;
-    
     //A value of None means our VoxelStorage is pseudo-infinite in this direction
     fn get_y_sz(&self)  -> Option<usize>;
-    
     //A value of None means our VoxelStorage is pseudo-infinite in this direction
     fn get_z_sz(&self)  -> Option<usize>;
     
+    /*Takes a raw header (as read from file) and a number of pages. 
+    Takes ownership of pages.*/
+    //fn load(&mut self, header: Vec<u8>, mut pages: Vec<Vec<u8>>);
+    /*Construct VS from saved data. Takes a raw header (as read from file) 
+    and a number of pages. Takes ownership of pages. */
+    //fn load_new(header: Vec<u8>, mut pages: Vec<Vec<u8>>);
+    //fn start_save();
     //TODO: Method to get iterator over all voxels
+    
+    fn get_adjacent(&self, direction : Axis) -> Option<&VoxelStorage<T, P>>;    
+    fn get_adjacent_mut(&mut self, direction : Axis) -> Option<&mut VoxelStorage<T, P>>;
 }
 
 /* TODO: Utility functions to copy a range of one VoxelStorage to a range of another,
