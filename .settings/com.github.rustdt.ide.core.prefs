@@ -1,0 +1,6 @@
+build_targets=<?xml version\="1.0" encoding\="UTF-8" standalone\="no"?>\r\n<build_targets xmlns\="com.github.rustdt.ide.core">\r\n<target config\="crate\#no-tests" enabled\="true"/>\r\n<target config\="crate\#tests" enabled\="true"/>\r\n</build_targets>\r\n
+eclipse.preferences.version=1
+racer_path=
+sdk_path=
+sdk_src_path=
+toolchain_prefs.use_project_settings=false
