@@ -2,10 +2,12 @@
 //#![feature(collections)]
 pub mod util;
 pub mod voxel;
+pub mod render;
 //extern crate std;
 use std::vec::Vec;
 use voxel::voxelstorage::VoxelStorage;
 use voxel::voxelarray::VoxelArray;
+use render::dwarfmode::*;
 use std::path::Path;
 use std::error::Error;
 use std::fs::File;
@@ -103,6 +105,7 @@ fn main() {
 		    }
 	    }
     }
+    render_text(test_va.as_ref(), 14);
     println!("Enter any text to continue...");
 	match io::stdin().read_line(&mut input) {
 	    Ok(n) => {

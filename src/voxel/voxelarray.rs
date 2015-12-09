@@ -36,7 +36,7 @@ impl <T:Copy> VoxelArray<T> {
 }
 
 impl <T: Copy> VoxelStorage<T> for VoxelArray<T> {
-    fn get(&mut self, x: u32, y: u32, z: u32) -> Option<T> {
+    fn get(&self, x: u32, y: u32, z: u32) -> Option<T> {
     	//Bounds-check.
     	if (x >= self.size_x) ||
     		(y >= self.size_y) ||

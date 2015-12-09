@@ -1,2 +1,2 @@
-pub mod coord3;
+pub mod vec3;
 pub mod axis;

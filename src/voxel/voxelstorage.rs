@@ -3,7 +3,7 @@ use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
 use std::string::String;
 use std::vec::Vec;
-use util::coord3::Coord3;
+use util::vec3::Vec3;
 use util::axis::Axis;
 use std::io;
 use std::io::prelude::*;
@@ -20,14 +20,14 @@ structures implies acting on a level of detail of 0.
 */
 pub trait VoxelStorage<T: Copy, P = u32> where P : Eq + Ord + Add + Sub + Mul + Div {
 	//Mutable for caching reasons
-    fn get(&mut self, x: P, y: P, z: P) -> Option<T>;
+    fn get(&self, x: P, y: P, z: P) -> Option<T>;
 	//Mutable for caching reasons
-    fn getv(&mut self, coord: Coord3<P>) -> Option<T> {
+    fn getv(&self, coord: Vec3<P>) -> Option<T> {
         self.get(coord.x, coord.y, coord.z)
     }
 
     fn set(&mut self, x: P, y: P, z: P, value: T);
-    fn setv(&mut self, coord: Coord3<P>, value: T) {
+    fn setv(&mut self, coord: Vec3<P>, value: T) {
         self.set(coord.x, coord.y, coord.z, value);
     }
 
