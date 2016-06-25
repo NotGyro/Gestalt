@@ -95,7 +95,6 @@ fn main() {
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
     
-    let mut mouse_first_moved : bool = false;
     
     let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0}; 
 
@@ -110,6 +109,8 @@ fn main() {
     
     let screen_center_x : i32 = screen_width as i32 /2;
     let screen_center_y : i32 = screen_height as i32 /2;
+    
+    let mut mouse_first_moved : bool = false;
     //---- A mainloop ----
     while keeprunning {
 
@@ -138,16 +139,16 @@ fn main() {
             match ev {
                 Event::Closed => {keeprunning = false},   // the window has been closed by the user
                 Event::MouseMoved(x, y) => {
-                    //if mouse_first_moved {
+                    if mouse_first_moved {
                         horz_angle += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
-                        vert_angle += ((y - screen_center_y) as f32) * (mouse_sensitivity * elapsed);
-                        window.set_cursor_position(screen_center_x, screen_center_y);
-                    //}
-                    //else {
-                    //    mouse_first_moved = true;
-                    //}
+                        vert_angle -= ((y - screen_center_y) as f32) * (mouse_sensitivity * elapsed);
+                    }
+                    else {
+                        mouse_first_moved = true;
+                    }
                     mouse_prev_x = x;
                     mouse_prev_y = y;
+                    window.set_cursor_position(screen_center_x, screen_center_y);
                 },
                 Event::KeyboardInput(state, sc, keyopt) => {
                     let key = keyopt.unwrap();

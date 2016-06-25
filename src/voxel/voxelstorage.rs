@@ -53,3 +53,8 @@ pub trait VoxelStorage<T: Copy, P = u32> where P : Eq + Ord + Add + Sub + Mul + 
     fn load(&mut self, reader: &mut Read);
     fn save(&mut self, writer: &mut Write);
 }
+
+pub struct RunLengthVoxel<T: Copy> {
+    data: Vec<T>,
+    length: usize,
+}
