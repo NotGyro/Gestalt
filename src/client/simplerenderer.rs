@@ -93,13 +93,13 @@ impl PackedVertex {
         val = val >> 18;
         return val;
     }
-    pub fn get_u_high(&mut self) -> bool {
+    pub fn get_u_high(&self) -> bool {
         let bitmask : u32 = 0b0_1_000000000000_000000_000000_000000;
         let mut val = self.vertexdata & bitmask;
         val = val >> 30;
         return val > 0;
     }
-    pub fn get_v_high(&mut self) -> bool {
+    pub fn get_v_high(&self) -> bool {
         let bitmask : u32 = 0b1_0_000000000000_000000_000000_000000;
         let mut val = self.vertexdata & bitmask;
         val = val >> 31;
@@ -213,18 +213,37 @@ pub fn mesh_voxels(vs : &VoxelStorage<bool, u32>, context : &glium::backend::glu
                         //We have a filled cube.
                         //Iterate over faces:
                         for ii in 0..6 {
-                            for jj in 0..6 {
-                                let mut temp_vert = FULL_CUBE[ii][jj];
+                            for vert_iter in 0..6 {
+                                let mut temp_vert = FULL_CUBE[ii][vert_iter];
                                 temp_vert.position[0] += x;
                                 temp_vert.position[1] += y;
                                 temp_vert.position[2] += z;
                                 let mut u : u32 = 0;
                                 let mut v : u32 = 0;
-                                let pv = PackedVertex::from_vertex_uv(temp_vert, u, v);
                                 //println!("{}", pv.vertexdata);
                                 //println!("{}", pv.get_x());
                                 //println!("{}", pv.get_y());
                                 //println!("{}", pv.get_z());
+                                //Do our UV the hacky way.
+                                if (vert_iter == 2) || (vert_iter == 3) {
+                                    u = 0;
+                                    v = 1;
+                                }
+                                else if (vert_iter == 0) || (vert_iter == 5) {
+                                    u = 1;
+                                    v = 0;
+                                }
+                                else if vert_iter == 1 {
+                                    u = 0;
+                                    v = 0;
+                                }
+                                else if vert_iter == 4 {
+                                    u = 1;
+                                    v = 1;
+                                }
+                                let pv = PackedVertex::from_vertex_uv(temp_vert, u, v);
+                                println!("{}", pv.get_u_high());
+                                println!("{}", pv.get_v_high());
                                 localbuffer.push(pv);
                             }
                         }

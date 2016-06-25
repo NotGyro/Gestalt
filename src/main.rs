@@ -13,6 +13,7 @@ pub mod client;
 #[macro_use] extern crate glium;
 #[macro_use] extern crate cgmath;
 extern crate time;
+extern crate image;
 
 use time::*;
 
@@ -63,6 +64,7 @@ fn main() {
     let screen_height : u32 = 600;
     let display = glutin::WindowBuilder::new()
         .with_dimensions(screen_width, screen_height)
+        .with_depth_buffer(24)
         .build_glium()
         .unwrap();
     let mut keeprunning = true;
@@ -86,6 +88,15 @@ fn main() {
     println!(line!());
     let map_verts = client::simplerenderer::mesh_voxels(test_va.as_ref(), &display);
     println!(line!());
+    
+    let params = glium::DrawParameters {
+        depth: glium::Depth {
+            test: glium::draw_parameters::DepthTest::IfLess,
+            write: true,
+            .. Default::default()
+        },
+        .. Default::default()
+    };
     //---- Set up our camera ----
     
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
@@ -118,6 +129,14 @@ fn main() {
     let screen_center_y : i32 = screen_height as i32 /2;
     
     let mut mouse_first_moved : bool = false;
+    //---- Set up our texture ----
+    
+    let mut texfile = File::open("teststone.png").unwrap();
+    let image = image::load(&texfile,
+                        image::PNG).unwrap().to_rgba();
+    let image_dimensions = image.dimensions();
+    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), image_dimensions);
+    let texture = glium::texture::Texture2d::new(&display, image).unwrap();
     //---- A mainloop ----
     while keeprunning {
 
@@ -209,14 +228,15 @@ fn main() {
         let perspective_matrix = Matrix4::from(perspective);
         let mvp_matrix = perspective_matrix * view_matrix * model_matrix;
         let uniforms = uniform! {
-            mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix)
+            mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
+            tex: &texture,
         };
         let mut target = display.draw();
-        target.clear_color(0.0, 0.0, 1.0, 1.0);
+        target.clear_color_and_depth((0.0, 0.0, 1.0, 1.0), 1.0);
         /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
             &Default::default()).unwrap();*/
         target.draw(&map_verts, &indices, &program, &uniforms,
-            &Default::default()).unwrap();
+            &params).unwrap();
         // listing the events produced by the window and waiting to be received
         target.finish().unwrap();
         lastupdate = precise_time_s();
