@@ -1,2 +1,2 @@
 pub mod dwarfmode;
-pub mod renderer;
+pub mod simplerenderer;

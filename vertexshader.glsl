@@ -1,10 +1,7 @@
 #version 140
-    in vec2 position;
-    uniform mat4 matrix;
-    out vec2 pos;
+    in vec3 position;
+    uniform mat4 mvp;
 
     void main() {
-        gl_Position = matrix * vec4(position, 0.0, 1.0);
-        pos.x = gl_Position.x;
-        pos.y = gl_Position.y;
+        gl_Position = mvp * vec4(position, 1.0);
     }

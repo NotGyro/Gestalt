@@ -8,3 +8,9 @@ authors = [ "Samuel Cutlip <gyro@zettabyte.ws>" ]
 [dependencies]
 
 glium = "*"
+piston3d-gfx_voxel = "*"
+cgmath =  "0.10.0"
+
+image = "0.10.0"
+shader_version = "0.2.1"
+time = "*"

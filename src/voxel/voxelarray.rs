@@ -29,8 +29,8 @@ pub struct VoxelArray<T: Copy> {
 
 impl <T:Copy> VoxelArray<T> {
 
-	pub fn load_new(szx: usize, szy: usize, szz: usize, dat: Vec<T>) -> Box<VoxelArray<T>> {
-		return Box::new(VoxelArray{size_x: szx as u32, size_y: szy as u32, size_z: szz as u32, data: dat});
+	pub fn load_new(szx: u32, szy: u32, szz: u32, dat: Vec<T>) -> Box<VoxelArray<T>> {
+		return Box::new(VoxelArray{size_x: szx, size_y: szy, size_z: szz, data: dat});
 	}
 }
 
@@ -80,15 +80,26 @@ impl <T: Copy> VoxelStorage<T> for VoxelArray<T> {
     	return ((size_of::<T>() as u32) * (self.size_x * self.size_y * self.size_z)) as usize;
     }*/
 
-    fn get_x_sz(&self) -> Option<u32> {
+    fn get_x_upper(&self) -> Option<u32> {
     	Some(self.size_x as u32)
     }
-    fn get_y_sz(&self)  -> Option<u32> {
+    fn get_y_upper(&self)  -> Option<u32> {
     	Some(self.size_y as u32)
     }
-    fn get_z_sz(&self)  -> Option<u32> {
+    fn get_z_upper(&self)  -> Option<u32> {
     	Some(self.size_z as u32)
     }
+    
+    fn get_x_lower(&self) -> Option<u32> {
+        Some(0)
+    }
+    fn get_y_lower(&self)  -> Option<u32>{
+        Some(0)
+    }
+    fn get_z_lower(&self)  -> Option<u32>{
+        Some(0)
+    }
+    
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
     fn load(&mut self, reader: &mut Read) { 

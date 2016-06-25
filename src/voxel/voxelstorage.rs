@@ -37,11 +37,18 @@ pub trait VoxelStorage<T: Copy, P = u32> where P : Eq + Ord + Add + Sub + Mul + 
     //fn get_footprint(&self) -> usize;
 
     //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_x_sz(&self) -> Option<P>;
+    fn get_x_upper(&self) -> Option<P>;
     //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_y_sz(&self)  -> Option<P>;
+    fn get_y_upper(&self)  -> Option<P>;
     //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_z_sz(&self)  -> Option<P>;
+    fn get_z_upper(&self)  -> Option<P>;
+    
+    //A value of None means our VoxelStorage is pseudo-infinite in this direction
+    fn get_x_lower(&self) -> Option<P>;
+    //A value of None means our VoxelStorage is pseudo-infinite in this direction
+    fn get_y_lower(&self)  -> Option<P>;
+    //A value of None means our VoxelStorage is pseudo-infinite in this direction
+    fn get_z_lower(&self)  -> Option<P>;
     
     fn load(&mut self, reader: &mut Read);
     fn save(&mut self, writer: &mut Write);
