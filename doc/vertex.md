@@ -19,10 +19,11 @@ However, 12 bits gives us a very respectable 4096 while fitting very snugly.
 8 bits per dimension * = integer position of 0 to 256, 24 bits total. Very nice.
 
 One scenario: 
-Remaining space:    Values
-32 bits
-26 bits             6 bits position X
-20 bits             6 bits position Y
-14 bits             6 bits position Z
-2 bits              12 bits textureID 
-0 bits              2 bits UV
+Pos(start):     Values (in this order)    Remaining space:    
+0 bits                                    32 bits
+0 bits           6 bits position X        26 bits
+6 bits           6 bits position Y        20 bits
+12 bit           6 bits position Z        14 bits
+18 bits          12 bits textureID        2 bits
+30 bits          1 bit U                  1 bits
+31 bits          1 bit V                  1 bits

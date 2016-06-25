@@ -1,4 +1,10 @@
 #![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(unused_parens)]
+#![allow(unused_assignments)]
+#![allow(unused_mut)]
+#![allow(unused_variables)]
+#![allow(unused_must_use)]
 //#![feature(collections)]
 pub mod util;
 pub mod voxel;
@@ -34,15 +40,14 @@ use glium::{DisplayBuild, Surface};
 use glium::glutin;
 use glium::glutin::Event;
 use glium::glutin::VirtualKeyCode;
-
-#[allow(dead_code)]
-#[allow(unused_parens)]
 fn main() {
+    println!(line!());
     //---- Runtime testing stuff ----
     const SIDELENGTH : u32 = 16;
     const OURSIZE : usize  = (SIDELENGTH * SIDELENGTH * SIDELENGTH) as usize;
     let mut test_chunk : Vec<bool> = vec![false; OURSIZE];
 
+    println!(line!());
     let mut test_va : Box<VoxelArray<bool>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
     for x in 0 .. SIDELENGTH {
         for y in 0 .. SIDELENGTH {
@@ -71,14 +76,16 @@ fn main() {
     vshaderfile.read_to_string(&mut vertex_shader_src);
     fshaderfile.read_to_string(&mut fragment_shader_src);
     
+    println!(line!());
     let program = glium::Program::from_source(&display, vertex_shader_src.as_ref(), fragment_shader_src.as_ref(), None).unwrap();
 
     let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
 
     let mut t: f32 = -0.5;
     
+    println!(line!());
     let map_verts = client::simplerenderer::mesh_voxels(test_va.as_ref(), &display);
-
+    println!(line!());
     //---- Set up our camera ----
     
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 

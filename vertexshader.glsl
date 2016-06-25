@@ -1,7 +1,14 @@
 #version 140
-    in vec3 position;
-    uniform mat4 mvp;
+in uint vertexdata;
+uniform mat4 mvp;
 
-    void main() {
-        gl_Position = mvp * vec4(position, 1.0);
-    }
+void main() {
+	uint bitmask = uint(63); //AND with this to get lowest six bits of data.
+	//Extract X:
+	float x = float(vertexdata & bitmask);
+	//Extract Y:
+	float y = float((vertexdata >> 6) & bitmask);
+	//Extract Z:
+	float z = float((vertexdata >> 12) & bitmask);
+    gl_Position = mvp * vec4(x, y, z, 1.0);
+}
