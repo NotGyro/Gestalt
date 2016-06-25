@@ -3,3 +3,8 @@
 name = "gestalt"
 version = "0.0.1"
 authors = [ "Samuel Cutlip <gyro@zettabyte.ws>" ]
+
+
+[dependencies]
+
+glium = "*"

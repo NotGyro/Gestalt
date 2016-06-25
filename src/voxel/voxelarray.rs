@@ -12,7 +12,6 @@ extern crate std;
 use std::mem::size_of;
 use voxel::voxelstorage::VoxelStorage;
 //use voxel::voxelstorage::ContiguousVS;
-use util::axis::Axis;
 use std::io;
 use std::io::prelude::*;
 use std::mem;
@@ -108,14 +107,14 @@ impl <T: Copy> VoxelStorage<T> for VoxelArray<T> {
 #[test]
 fn test_array_raccess() {
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
     for i in 0 .. OURSIZE {
-    	test_chunk.push(i as u8);
+    	test_chunk.push(i as u16);
     }
 
-    let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
 
-    assert!(test_va.get(14,14,14).unwrap() == 238);
+    assert!(test_va.get(14,14,14).unwrap() == 3822);
     test_va.set(14,14,14,9);
     assert!(test_va.get(14,14,14).unwrap() == 9);
 }
@@ -124,12 +123,12 @@ fn test_array_raccess() {
 #[test]
 fn test_array_iterative() {
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
     for _i in 0 .. OURSIZE {
     	test_chunk.push(16);
     }
 
-    let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
     let xsz : u32 = test_va.get_x_sz().unwrap();
     let ysz : u32 = test_va.get_y_sz().unwrap();
     let zsz : u32 = test_va.get_z_sz().unwrap();
@@ -137,24 +136,25 @@ fn test_array_iterative() {
 		for y in 0 .. ysz as u32 {
 			for z in 0 .. zsz as u32 {
 				assert!(test_va.get(x,y,z).unwrap() == 16);
-				test_va.set(x,y,z, (x as u8 % 10));
+				test_va.set(x,y,z, (x as u16 % 10));
 			}
 		}
 	}
 	assert!(test_va.get(10,0,0).unwrap() == 0);
+	assert!(test_va.get(11,0,0).unwrap() == 1);
 }
 
 #[test]
 fn test_array_fileio() {
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
     for i in 0 .. OURSIZE {
-    	test_chunk.push(i as u8);
+    	test_chunk.push(i as u16);
     }
 
-    let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
 
-    assert!(test_va.get(14,14,14).unwrap() == 238);
+    assert!(test_va.get(14,14,14).unwrap() == 3822);
     test_va.set(14,14,14,9);
     assert!(test_va.get(14,14,14).unwrap() == 9);
     
@@ -197,12 +197,12 @@ fn _load_test(path : &Path) -> bool {
         Ok(file) => file,
     };
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
     for _i in 0 .. OURSIZE {
     	test_chunk.push(0);
     }
 	
-    let mut va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
     
     va.load(&mut file);
     
