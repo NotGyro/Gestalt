@@ -17,7 +17,7 @@ assume that the level of detail is a signed integer, and
 calling these methods / treating them as "flat" voxel
 structures implies acting on a level of detail of 0.
 */
-pub trait VoxelStorage<T: Copy, P = u32> where P : Eq + Ord + Add + Sub + Mul + Div {
+pub trait VoxelStorage<T: Clone, P = u32> where P : Eq + Ord + Add + Sub + Mul + Div {
     fn get(&self, x: P, y: P, z: P) -> Option<T>;
     fn getv(&self, coord: Vec3<P>) -> Option<T> {
         self.get(coord.x, coord.y, coord.z)

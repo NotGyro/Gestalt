@@ -3,6 +3,10 @@ Notes
 
 All of this is for later, the representation inside the program is more important right now. 
 
+World layer exists as a file format / loader concept, but, mostly, not as an in-engine concept - not until we want modders to make their own world-parallel layers from a scripting language, that is.
+We need a low-overhead way of specifying "extra" world layers, optional ones, for runtime-created world layers. i.e. it doesn't need to exist in the schema.
+I guess modders could also ask for required world layers but I'm going to just guess right now that it would probably not be so performant and be a pain to implement.
+
 Lighting: For future reference
 -----
 3D chunks in Minecraft clones generally have the one major hurdle of global light / sunlight. 
@@ -15,7 +19,7 @@ World folder
 	Every schema definition file for every schema ever used in this map
 	Map worldgen record
 		Packed array of elements
-			128-byte ASCII string describing the version used to generate this chunk in the world.
+			128-byte ASCII string describing the version used to generate this chunk in the world. -- Maybe not! Maybe this should be part of the voxelevent log.
 	Map file
 		Name of Schema
 		Version of Schema

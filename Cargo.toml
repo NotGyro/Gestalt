@@ -16,6 +16,7 @@ panic = 'unwind'   # panic strategy (`-C panic=...`), can also be 'abort'
 
 
 [dependencies]
+num = "*"
 glium = "*"
 piston3d-gfx_voxel = "*"
 cgmath =  "0.10.0"

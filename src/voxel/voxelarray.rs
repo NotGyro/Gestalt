@@ -20,21 +20,22 @@ use std::error::Error;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufWriter;
+use std::borrow::Cow;
 
 // Type arguments are type of element, type of position / index.
-pub struct VoxelArray<T: Copy> {
+pub struct VoxelArray<T: Clone> {
     size_x: u32, size_y: u32, size_z: u32,
     data: Vec<T>,
 }
 
-impl <T:Copy> VoxelArray<T> {
+impl <T:Clone> VoxelArray<T> {
 
 	pub fn load_new(szx: u32, szy: u32, szz: u32, dat: Vec<T>) -> Box<VoxelArray<T>> {
 		return Box::new(VoxelArray{size_x: szx, size_y: szy, size_z: szz, data: dat});
 	}
 }
 
-impl <T: Copy> VoxelStorage<T> for VoxelArray<T> {
+impl <T: Clone> VoxelStorage<T> for VoxelArray<T> {
     fn get(&self, x: u32, y: u32, z: u32) -> Option<T> {
     	//Bounds-check.
     	if (x >= self.size_x) ||
@@ -52,7 +53,7 @@ impl <T: Copy> VoxelStorage<T> for VoxelArray<T> {
     		return None;
     	}
     	else {
-    		return Some(*result.unwrap());
+    		return Some(result.unwrap().clone());
     	}
     }
 
@@ -118,12 +119,12 @@ impl <T: Copy> VoxelStorage<T> for VoxelArray<T> {
 #[test]
 fn test_array_raccess() {
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u32> = Vec::with_capacity(OURSIZE);
     for i in 0 .. OURSIZE {
-    	test_chunk.push(i as u16);
+    	test_chunk.push(i as u32);
     }
 
-    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : Box<VoxelArray<u32>> = VoxelArray::load_new(16, 16, 16, test_chunk);
 
     assert!(test_va.get(14,14,14).unwrap() == 3822);
     test_va.set(14,14,14,9);
@@ -140,9 +141,9 @@ fn test_array_iterative() {
     }
 
     let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-    let xsz : u32 = test_va.get_x_sz().unwrap();
-    let ysz : u32 = test_va.get_y_sz().unwrap();
-    let zsz : u32 = test_va.get_z_sz().unwrap();
+    let xsz : u32 = test_va.get_x_upper().unwrap();
+    let ysz : u32 = test_va.get_y_upper().unwrap();
+    let zsz : u32 = test_va.get_z_upper().unwrap();
 	for x in 0 .. xsz as u32 {
 		for y in 0 .. ysz as u32 {
 			for z in 0 .. zsz as u32 {
@@ -154,22 +155,27 @@ fn test_array_iterative() {
 	assert!(test_va.get(10,0,0).unwrap() == 0);
 	assert!(test_va.get(11,0,0).unwrap() == 1);
 }
-
+/*
 #[test]
 fn test_array_fileio() {
+    let path = Path::new("hello.bin");
+    _save_test(path);
+    _load_test(path);
+}
+#[allow(dead_code)]
+fn _save_test(path : &Path) {
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u32> = Vec::with_capacity(OURSIZE);
     for i in 0 .. OURSIZE {
-    	test_chunk.push(i as u16);
+    	test_chunk.push(i as u32);
     }
 
-    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : Box<VoxelArray<u32>> = VoxelArray::load_new(16, 16, 16, test_chunk);
 
     assert!(test_va.get(14,14,14).unwrap() == 3822);
     test_va.set(14,14,14,9);
     assert!(test_va.get(14,14,14).unwrap() == 9);
     
-    let path = Path::new("hello.bin");
 
     // Open the path in read-only mode, returns `io::Result<File>`
     //let file : &mut File = try!(File::open(path));
@@ -191,16 +197,19 @@ fn test_array_fileio() {
 	//let mut writer = BufWriter::new(&file);
 	    
    	test_va.save(&mut file);
-    _load_test(path);
 }
 
+
+
 #[allow(dead_code)]
-fn _load_test(path : &Path) -> bool {
+fn _load_test(path : &Path) {
 	//let mut options = OpenOptions::new();
 	// We want to write to our file as well as append new data to it.
 	//options.write(true).append(true);
     let display = path.display();
-	let mut file = match File::open(&path) {
+	let mut file = match OpenOptions::new()
+            .read(true)
+            .open(&path) {
         // The `description` method of `io::Error` returns a string that
         // describes the error
         Err(why) => panic!("couldn't open {}: {}", display,
@@ -208,17 +217,16 @@ fn _load_test(path : &Path) -> bool {
         Ok(file) => file,
     };
     const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u16> = Vec::with_capacity(OURSIZE);
+    let mut test_chunk : Vec<u32> = Vec::with_capacity(OURSIZE);
     for _i in 0 .. OURSIZE {
     	test_chunk.push(0);
     }
 	
-    let mut va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut va : Box<VoxelArray<u32>> = VoxelArray::load_new(16, 16, 16, test_chunk);
     
     va.load(&mut file);
     
     assert!(va.get(14,14,14).unwrap() == 9);
-
-    return true;
 }
 
+*/
