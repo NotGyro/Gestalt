@@ -141,7 +141,7 @@ impl <T, U, P> VoxelStorage<T, P> for VoxelPalette<T, U, P> where T : Clone + Eq
     
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
-    fn save(&mut self, writer: &mut Write) {
+    fn save(&mut, writer: &mut Write) {
         //TODO: Include the palette in here.
 		self.base.save(writer);
     }

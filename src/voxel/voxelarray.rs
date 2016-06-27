@@ -110,8 +110,8 @@ impl <T: Clone> VoxelStorage<T> for VoxelArray<T> {
     
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
-    fn save(&mut self, writer: &mut Write) {
-		let array: &mut [u8] = unsafe { mem::transmute(&*self.data) };
+    fn save(&self, writer: &mut Write) {
+		let array: &[u8] = unsafe { mem::transmute(&*self.data) };
     	writer.write(array).unwrap();
     }
 }

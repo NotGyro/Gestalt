@@ -1,6 +1,11 @@
 Notes
 ====
 
+materialart.rs contains a decent pattern for doing run-time downcasting -- look back to that in the future.
+Should be possible to make it easier through macros.
+
+World format
+-----
 All of this is for later, the representation inside the program is more important right now. 
 
 World layer exists as a file format / loader concept, but, mostly, not as an in-engine concept - not until we want modders to make their own world-parallel layers from a scripting language, that is.

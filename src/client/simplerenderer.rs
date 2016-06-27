@@ -6,6 +6,14 @@ extern crate glium;
 use voxel::voxelstorage::VoxelStorage;
 use std::vec::Vec;
 use util::cubeaxis::CubeAxis;
+use std::collections::HashMap;
+use voxel::material::MaterialID;
+use voxel::material::Material;
+use glium::texture::RawImage2d;
+use glium::texture::Texture2dArray;
+use glium::backend::glutin_backend::GlutinFacade;
+use client::materialart::MaterialArt;
+use client::materialart::MatArtSimple;
 
 #[derive(Copy, Clone)]
 pub struct PackedVertex {
@@ -198,10 +206,62 @@ const FULL_CUBE : [[Vertex; 6]; 6] = [
     NEGATIVE_Z_FACE
 ];
 
+//Please do not make either of these public.
+type Pixel = (f32, f32, f32, f32);
+type ImageBuffer = Vec<Vec<Pixel>>;
+
+pub struct MatArtRegistry { 
+    //You can only make a MatArtSimple into a cube anyway.
+    mat_mapping : HashMap<MaterialID, MatArtSimple>,
+    //The key here is "texture name," so here we've got a texture name to Texture Array layer mapping.
+    tex_mapping : HashMap<String, u32>,
+    //Cached image data, indexable by tex_mapping's values
+    tex_data : Vec<ImageBuffer>,
+    textures : Option<Box<Texture2dArray<GlutinFacade>>>,
+    tex_width : u32, 
+    tex_height : u32, 
+    max_tex : u32,
+    display : GlutinFacade,
+}
+
+impl MatArtRegistry { 
+    pub fn new(display : GlutinFacade, tex_width : u32, tex_height : u32, max_tex : u32) -> &Self { 
+        let result : Box<MatArtRegistry> = Box::new();
+        result.mat_mapping = HashMap::new();
+        result.display = display;
+        result.max_tex = max_tex;
+        result.tex_width = tex_width;
+        result.tex_height = tex_height;
+        result.textures = None();
+        
+        //textures = Texture2dArray::empty(display, tex_width, tex_height, max_tex); 
+        return result;
+    }
+    pub fn reg_material_art(&self, mat : MaterialID, art : MaterialArt) {
+        if(art.get_render_type() == 1)
+        if(self.mat_mapping::contains_key(mat)) { 
+            self.mat_mapping[mat] = art;
+        }
+        else {
+            self.mat_mapping.insert(mat, art);
+        }
+    }
+    
+    fn ld_image(&self, path : String) -> &ImageBuffer {
+        let mut texfile = File::open(path).unwrap();
+        let image = image::load(&texfile,
+                            image::PNG).unwrap().to_rgba();
+        let image_dimensions = image.dimensions();
+        assert_eq!(image_dimensions, (self.tex_width, self.tex_height));
+        //Example code I'm working from used from_raw_rgba_reversed, not sure why.
+        let image = glium::texture::RawImage2d::from_raw_rgba(image.into_raw(), image_dimensions);
+        return image.data.deref();
+    }
+}
+
 
 //The mesh function as we have it now.
-
-pub fn mesh_voxels(vs : &VoxelStorage<bool, u32>, context : &glium::backend::glutin_backend::GlutinFacade) -> glium::VertexBuffer<PackedVertex> {
+pub fn mesh_voxels(vs : &VoxelStorage<MaterialID, u32>, context : &glium::backend::glutin_backend::GlutinFacade, tex_manager : MatArtRegistry) -> glium::VertexBuffer<PackedVertex> {
     let mut localbuffer : Vec<PackedVertex> = Vec::new();
     //Unwrap is okay here since you cannot mesh something infinite in size.
     for x in vs.get_x_lower().unwrap() .. vs.get_x_upper().unwrap() as u32 {
