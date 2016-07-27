@@ -20,7 +20,11 @@ use time::*;
 use std::vec::Vec;
 use voxel::voxelstorage::VoxelStorage;
 use voxel::voxelarray::VoxelArray;
+use voxel::vspalette::VoxelPalette;
+use voxel::material::MaterialID;
 use client::dwarfmode::*;
+use client::simplerenderer::*;
+use client::materialart::MatArtSimple;
 use std::path::Path;
 use std::error::Error;
 use std::fs::File;
@@ -32,6 +36,7 @@ use std::io;
 use std::cmp;
 use std::f32::consts::*;
 use std::ops::Neg;
+use std::collections::HashMap;
 
 use cgmath::Matrix4;
 use cgmath::Vector3;
@@ -41,23 +46,35 @@ use glium::{DisplayBuild, Surface};
 use glium::glutin;
 use glium::glutin::Event;
 use glium::glutin::VirtualKeyCode;
+use glium::texture::Texture2dArray;
+
 fn main() {
     println!(line!());
-    //---- Runtime testing stuff ----
+    /*let mut test_va : Box<VoxelArray<bool>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
+    
+    test_va.set(8, 8, 4, true);*/
+    let air_id : MaterialID = String::from("Air");
+    let stone_id : MaterialID = String::from("Stone");
+    let dirt_id : MaterialID = String::from("Dirt");
+    let grass_id : MaterialID = String::from("Grass");
+    
     const SIDELENGTH : u32 = 16;
     const OURSIZE : usize  = (SIDELENGTH * SIDELENGTH * SIDELENGTH) as usize;
-    let mut test_chunk : Vec<bool> = vec![false; OURSIZE];
+    let mut test_chunk : Vec<u8> = vec![0; OURSIZE];
 
-    println!(line!());
-    let mut test_va : Box<VoxelArray<bool>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
+    let mut backing_va : Box<VoxelArray<u8>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
+    let mut test_va : VoxelPalette<String, u8, u32> = VoxelPalette {base : backing_va, index : Vec::new(), rev_index : HashMap::new() };
+    test_va.init_default_value(air_id.clone(), 0);
     for x in 0 .. SIDELENGTH {
         for y in 0 .. SIDELENGTH {
             for z in 0 .. 3 {
-                test_va.set(x, y, z, true);
+                test_va.set(x, y, z, stone_id.clone()); //TODO: less stupid material IDs that pass-by-copy by default
             }
+            test_va.set(x, y, 3, dirt_id.clone());
+            test_va.set(x, y, 4, grass_id.clone());
         }
     }
-    test_va.set(8, 8, 4, true);
+    test_va.set(8, 8, 6, stone_id.clone());
     
     //---- Set up window ----
     let screen_width : u32 = 800;
@@ -70,7 +87,7 @@ fn main() {
     let mut keeprunning = true;
     let window = display.get_window().unwrap();
     window.set_cursor_state(glutin::CursorState::Grab);
-    //---- Set up test graphics ----
+    //---- Set up screen and some basic graphics stuff ----
     let mut vshaderfile = File::open("vertexshader.glsl").unwrap();
     let mut fshaderfile = File::open("fragmentshader.glsl").unwrap();
     let mut vertex_shader_src = String::new();
@@ -85,9 +102,8 @@ fn main() {
 
     let mut t: f32 = -0.5;
     
-    println!(line!());
-    let map_verts = client::simplerenderer::mesh_voxels(test_va.as_ref(), &display);
-    println!(line!());
+    //println!(line!());
+    //println!(line!());
     
     let params = glium::DrawParameters {
         depth: glium::Depth {
@@ -97,6 +113,7 @@ fn main() {
         },
         .. Default::default()
     };
+    
     //---- Set up our camera ----
     
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
@@ -129,14 +146,24 @@ fn main() {
     let screen_center_y : i32 = screen_height as i32 /2;
     
     let mut mouse_first_moved : bool = false;
-    //---- Set up our texture ----
+    //---- Set up our texture(s) and chunk verticies ----
+    let stone_art = MatArtSimple { texture_name : String::from("teststone.png") };
+    let dirt_art = MatArtSimple { texture_name : String::from("testdirt.png") };
+    let grass_art = MatArtSimple { texture_name : String::from("testgrass.png") };
     
-    let mut texfile = File::open("teststone.png").unwrap();
+    /*let mut texfile = File::open("teststone.png").unwrap();
     let image = image::load(&texfile,
                         image::PNG).unwrap().to_rgba();
     let image_dimensions = image.dimensions();
     let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), image_dimensions);
-    let texture = glium::texture::Texture2d::new(&display, image).unwrap();
+    let texture = glium::texture::Texture2d::new(&display, image).unwrap();*/
+    let mut mat_art_manager = MatArtMapping::new();
+    let mut texture_manager = TextureArrayDyn::new(64, 64, 4096);
+    mat_art_manager.insert(stone_id.clone(), stone_art.clone());
+    mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
+    mat_art_manager.insert(grass_id.clone(), grass_art.clone());
+    let map_verts = client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager);
+    
     //---- A mainloop ----
     while keeprunning {
 
@@ -227,17 +254,26 @@ fn main() {
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
         let mvp_matrix = perspective_matrix * view_matrix * model_matrix;
-        let uniforms = uniform! {
-            mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
-            tex: &texture,
-        };
+
         let mut target = display.draw();
         target.clear_color_and_depth((0.0, 0.0, 1.0, 1.0), 1.0);
-        /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
-            &Default::default()).unwrap();*/
-        target.draw(&map_verts, &indices, &program, &uniforms,
-            &params).unwrap();
-        // listing the events produced by the window and waiting to be received
+
+        if(texture_manager.textures.is_some()) {
+            let textures = texture_manager.textures.unwrap(); //Move
+            //Create a context so uniforms dies and textures is no longer borrowed.
+            {
+                let uniforms = uniform! {
+                    mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
+                    tex: &textures,
+                };
+                /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
+                    &Default::default()).unwrap();*/
+                target.draw(&map_verts, &indices, &program, &uniforms,
+                    &params).unwrap();
+            }
+
+            texture_manager.textures = Some(textures); //Move back
+        }
         target.finish().unwrap();
         lastupdate = precise_time_s();
     }

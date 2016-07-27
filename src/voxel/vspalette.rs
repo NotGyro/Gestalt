@@ -5,7 +5,7 @@ use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
 use std::string::String;
 use std::vec::Vec;
-use util::vec3::Vec3;
+use util::voxelutil::VoxelPos;
 use std::io;
 use std::io::prelude::*;
 use std::ops::{Index, IndexMut};
@@ -61,17 +61,17 @@ impl USizeAble for u64 {
 }
 
 pub struct VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
-            P : Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div { 
                 
-    base : Box<VoxelStorage<U, P>>,
-    index : Vec<T>,
-    rev_index : HashMap<T, U>,
+    pub base : Box<VoxelStorage<U, P>>,
+    pub index : Vec<T>,
+    pub rev_index : HashMap<T, U>,
 }
 impl <T, U, P> VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
-            P : Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div { 
-    fn init_default_value(&mut self, value : T, idx : U) {
+    pub fn init_default_value(&mut self, value : T, idx : U) {
         if self.index.len() <= idx.as_usize() { //We haven't initialized yet, which is great.
             self.index.push(value.clone());
             self.rev_index.insert(value.clone(), idx);
@@ -85,7 +85,7 @@ impl <T, U, P> VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
 }
 
 impl <T, U, P> VoxelStorage<T, P> for VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
-            P : Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div {
                 
     fn get(&self, x: P, y: P, z: P) -> Option<T> {
@@ -141,7 +141,7 @@ impl <T, U, P> VoxelStorage<T, P> for VoxelPalette<T, U, P> where T : Clone + Eq
     
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
-    fn save(&mut, writer: &mut Write) {
+    fn save(&self, writer: &mut Write) {
         //TODO: Include the palette in here.
 		self.base.save(writer);
     }

@@ -1,5 +1,11 @@
 Notes
 ====
+I thought about quitting Rust briefly. Long story short - data-oriented design would
+* Make things faster because CPU cache would hate us less
+* Make the whole thing less likely to piss off the borrow checker (spiderweb-like class hierarchies are the problem).
+So, let's take a different pattern here. 
+
+----
 
 materialart.rs contains a decent pattern for doing run-time downcasting -- look back to that in the future.
 Should be possible to make it easier through macros.

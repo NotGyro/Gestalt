@@ -1,2 +1,1 @@
-pub mod vec3;
-pub mod cubeaxis;
+pub mod voxelutil;

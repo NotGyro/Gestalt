@@ -14,5 +14,5 @@ Note I mentioned solids because fluids will be a different beast entirely - the 
 value or some range represented with an integer, and the world layer it is contained in will imply the type of the fluid.
 */
 pub trait Material {
-    fn GetMaterialID() -> MaterialID;
+    fn get_id() -> MaterialID;
 }
