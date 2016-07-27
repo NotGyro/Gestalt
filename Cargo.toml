@@ -19,7 +19,7 @@ panic = 'unwind'   # panic strategy (`-C panic=...`), can also be 'abort'
 num = "*"
 glium = "*"
 piston3d-gfx_voxel = "*"
-cgmath =  "0.10.0"
+cgmath =  { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
 
 image = "0.10.0"
 shader_version = "0.2.1"

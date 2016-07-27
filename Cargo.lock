@@ -2,7 +2,7 @@
 name = "gestalt"
 version = "0.0.1"
 dependencies = [
- "cgmath 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cgmath 0.10.0 (git+https://github.com/brendanzab/cgmath.git?rev=3e6974b)",
  "glium 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "image 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.1.32 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -81,7 +81,7 @@ dependencies = [
 [[package]]
 name = "cgmath"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/brendanzab/cgmath.git?rev=3e6974b#3e6974baa8984ed84428dfb4c3dac1e792338a36"
 dependencies = [
  "num-traits 0.1.32 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.14 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -41,6 +41,7 @@ use std::collections::HashMap;
 use cgmath::Matrix4;
 use cgmath::Vector3;
 use cgmath::Point3;
+use cgmath::InnerSpace;
 
 use glium::{DisplayBuild, Surface};
 use glium::glutin;
@@ -65,16 +66,21 @@ fn main() {
     let mut backing_va : Box<VoxelArray<u8>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
     let mut test_va : VoxelPalette<String, u8, u32> = VoxelPalette {base : backing_va, index : Vec::new(), rev_index : HashMap::new() };
     test_va.init_default_value(air_id.clone(), 0);
+
+    let surface = 10;
+    let dirt_height = (surface-2);
     for x in 0 .. SIDELENGTH {
         for y in 0 .. SIDELENGTH {
-            for z in 0 .. 3 {
+            for z in 0 .. dirt_height {
                 test_va.set(x, y, z, stone_id.clone()); //TODO: less stupid material IDs that pass-by-copy by default
             }
-            test_va.set(x, y, 3, dirt_id.clone());
-            test_va.set(x, y, 4, grass_id.clone());
+            for z in dirt_height .. surface {
+                test_va.set(x, y, z, dirt_id.clone()); //TODO: less stupid material IDs that pass-by-copy by default
+            }
+            test_va.set(x, y, surface, grass_id.clone());
         }
     }
-    test_va.set(8, 8, 6, stone_id.clone());
+    test_va.set(8, 8, (surface+2), stone_id.clone());
     
     //---- Set up window ----
     let screen_width : u32 = 800;
@@ -162,8 +168,9 @@ fn main() {
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
     mat_art_manager.insert(grass_id.clone(), grass_art.clone());
-    let map_verts = client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager);
+    let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager));
     
+    let mut remesh : bool = false;
     //---- A mainloop ----
     while keeprunning {
 
@@ -186,11 +193,13 @@ fn main() {
 			
 		);
         let up = forward.cross( right );
+
+        let click_point = camera_pos + forward.normalize(); //Normalize
         
         let elapsed = (precise_time_s() - lastupdate) as f32;
         for ev in display.poll_events() {
             match ev {
-                Event::Closed => {keeprunning = false},   // the window has been closed by the user
+                Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
                 Event::MouseMoved(x, y) => {
                     if mouse_first_moved {
                         horz_angle += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
@@ -235,6 +244,26 @@ fn main() {
                         },
                         _ => ()
                     }
+                },
+                Event::MouseInput(state, btn) => {
+                    if(state == glutin::ElementState::Released) {
+                    println!("X: {}", click_point.x);
+                    println!("Y: {}", click_point.y);
+                    println!("Z: {}", click_point.z);
+                    if((click_point.x >= 0.0) && (click_point.y >= 0.0) && (click_point.z >= 0.0)) { //Change this when it's no longer one chunk.
+                        match btn {
+                            glutin::MouseButton::Left => {
+                                test_va.set(click_point.x as u32, click_point.y as u32, click_point.z as u32, air_id.clone());
+                                remesh = true;
+                            },
+                            glutin::MouseButton::Right => {
+                                test_va.set(click_point.x as u32, click_point.y as u32, click_point.z as u32, stone_id.clone());
+                                remesh = true;
+                            }
+                            _ => ()
+                        }
+                    }
+                    }
                 }
                 _ => ()
             }
@@ -255,8 +284,13 @@ fn main() {
         let perspective_matrix = Matrix4::from(perspective);
         let mvp_matrix = perspective_matrix * view_matrix * model_matrix;
 
+        if(remesh) {
+            map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager));
+            remesh = false;
+        }
+
         let mut target = display.draw();
-        target.clear_color_and_depth((0.0, 0.0, 1.0, 1.0), 1.0);
+        target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
 
         if(texture_manager.textures.is_some()) {
             let textures = texture_manager.textures.unwrap(); //Move
@@ -268,7 +302,7 @@ fn main() {
                 };
                 /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
                     &Default::default()).unwrap();*/
-                target.draw(&map_verts, &indices, &program, &uniforms,
+                target.draw(&(*map_verts), &indices, &program, &uniforms,
                     &params).unwrap();
             }
 
