@@ -1,5 +1,14 @@
 Notes
 ====
+Todo: 
+[ ] File I/O (don't overdo it, instead get something minimal without all of the self-describing stuff but make sure that it can be COMPOSED later.)
+[ ] Change all of the get position upper / lower functions to return a value rather than an option, 
+and specify that requesting these values from a pseudo-infinite world gets you the bounding box of ... something (decide)
+[ ] Decide whether the "World" object implements the VoxelStorage trait or not.
+[ ] Multiple chunks (bigworld), loading / unloading around the player.
+[ ] Start on Lua scripting.
+[ ] Iterators over VoxelStorages
+
 I thought about quitting Rust briefly. Long story short - data-oriented design would
 * Make things faster because CPU cache would hate us less
 * Make the whole thing less likely to piss off the borrow checker (spiderweb-like class hierarchies are the problem).
