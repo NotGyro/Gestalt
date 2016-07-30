@@ -61,7 +61,7 @@ impl PackedVertex {
         val = val & bitmask;
         self.vertexdata = self.vertexdata | val; //Set our value
     }
-    pub fn set_texID(&mut self, value : u32) {
+    pub fn set_tex_id(&mut self, value : u32) {
         let bitmask : u32 = 0b0_0_111111111111_000000_000000_000000;
         self.vertexdata = self.vertexdata & (! bitmask); //clear out value
         let mut val = value;
@@ -102,7 +102,7 @@ impl PackedVertex {
         val = val >> 12;
         return val;
     }
-    pub fn get_texID(&self) -> u32 {
+    pub fn get_tex_id(&self) -> u32 {
         let bitmask : u32 = 0b0_0_111111111111_000000_000000_000000;
         let mut val = self.vertexdata & bitmask;
         val = val >> 18;
@@ -342,28 +342,28 @@ impl TextureArrayDyn {
 }
 #[derive(Copy, Clone, Debug)]
 struct VoxelRenderInfo {
-    pub x : u32, 
-    pub y : u32,
-    pub z : u32,
+    pub x : u16, 
+    pub y : u16,
+    pub z : u16,
     pub tex_idx : u32,
 }
 pub type MatArtMapping = HashMap<MaterialID, MatArtSimple>;
 
-pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, u32>, display : &GlutinFacade, textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
+pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, u16>, display : &GlutinFacade, textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
                             -> glium::VertexBuffer<PackedVertex> {
     println!(line!());
     //This function is still very not data-oriented and will probably cause the borrow checker to become very upset.
     println!(line!());
     let mut drawable : Vec<VoxelRenderInfo> = Vec::new();
     let mut rebuild_tex : bool = false;
-    for x in vs.get_x_lower().unwrap() .. vs.get_x_upper().unwrap() as u32 {
-        for y in vs.get_y_lower().unwrap() .. vs.get_y_upper().unwrap() as u32 {
-            for z in vs.get_z_lower().unwrap() .. vs.get_z_upper().unwrap() as u32 {
+    for x in vs.get_x_lower().unwrap() .. vs.get_x_upper().unwrap() as u16 {
+        for y in vs.get_y_lower().unwrap() .. vs.get_y_upper().unwrap() as u16 {
+            for z in vs.get_z_lower().unwrap() .. vs.get_z_upper().unwrap() as u16 {
                 let result = vs.get(x, y, z);
                 if result.is_some() {
-                    let matID = result.unwrap();
-                    if(art_map.contains_key(&matID.clone())) {
-                        let art = art_map.get(&matID).unwrap();
+                    let mat_id = result.unwrap();
+                    if(art_map.contains_key(&mat_id.clone())) {
+                        let art = art_map.get(&mat_id).unwrap();
                         if(!textures.has_tex(art.texture_name.clone())) {
                             textures.add_tex(art.texture_name.clone(), display); //Load our texture if we haven't already.
                             rebuild_tex = true;
@@ -394,9 +394,9 @@ fn mesh_step(drawable : Vec<VoxelRenderInfo>, display : &GlutinFacade) -> glium:
                 let y = voxel.y;
                 let z = voxel.z;
                 let mut temp_vert = FULL_CUBE[face][vert_iter];
-                temp_vert.position[0] += x;
-                temp_vert.position[1] += y;
-                temp_vert.position[2] += z;
+                temp_vert.position[0] += x as u32;
+                temp_vert.position[1] += y as u32;
+                temp_vert.position[2] += z as u32;
                 let mut u : u32 = 0;
                 let mut v : u32 = 0;
                 //println!("{}", pv.vertexdata);
@@ -421,7 +421,7 @@ fn mesh_step(drawable : Vec<VoxelRenderInfo>, display : &GlutinFacade) -> glium:
                     v = 1;
                 }
                 let mut pv = PackedVertex::from_vertex_uv(temp_vert, u, v);
-                pv.set_texID(voxel.tex_idx);
+                pv.set_tex_id(voxel.tex_idx);
                 localbuffer.push(pv);
             }
         }
@@ -475,7 +475,7 @@ pub fn mesh_voxels<'a>(vs : &VoxelStorage<u32, u32>, display : &glium::backend::
                                     v = 1;
                                 }
                                 let mut pv = PackedVertex::from_vertex_uv(temp_vert, u, v);
-                                pv.set_texID(texID as u32);
+                                pv.set_tex_id(texID as u32);
                                 localbuffer.push(pv);
                             }
                         }

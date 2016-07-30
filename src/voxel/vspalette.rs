@@ -1,6 +1,10 @@
 extern crate std;
-use voxel::voxelstorage::VoxelStorage;
-use voxel::voxelarray::VoxelArray;
+
+extern crate serde;
+extern crate serde_yaml;
+
+use voxel::voxelstorage::*;
+use voxel::voxelarray::*;
 use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
 use std::string::String;
@@ -11,6 +15,13 @@ use std::io::prelude::*;
 use std::ops::{Index, IndexMut};
 use std::collections::HashMap;
 use std::hash::Hash;
+
+use self::serde::ser::Serialize;
+use self::serde_yaml::ser::Serializer;
+use self::serde_yaml::ser::to_writer;
+use self::serde::de::Deserialize;
+use self::serde_yaml::de::Deserializer;
+use self::serde_yaml::de::from_reader;
 
 /* 
 Rust's trait bound system HAAAAAAAAATES this file.
@@ -60,17 +71,24 @@ impl USizeAble for u64 {
     }    
 }
 
-pub struct VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
+#[derive(Clone, Debug)]
+pub struct VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
             P : Copy + Eq + Ord + Add + Sub + Mul + Div,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div { 
+            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            B : VoxelStorage<U, P> { 
                 
-    pub base : Box<VoxelStorage<U, P>>,
+    pub base : Box<B>,
     pub index : Vec<T>,
     pub rev_index : HashMap<T, U>,
+	position_type: std::marker::PhantomData<P>,
 }
-impl <T, U, P> VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
+impl <T, U, B, P> VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
             P : Copy + Eq + Ord + Add + Sub + Mul + Div,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div { 
+            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div, 
+            B : VoxelStorage<U, P> { 
+    pub fn new( b : Box<B>) -> VoxelPalette<T, U, B, P> {
+        VoxelPalette { base : b, index : Vec::new(), rev_index : HashMap::new(), position_type: std::marker::PhantomData,}
+    }
     pub fn init_default_value(&mut self, value : T, idx : U) {
         if self.index.len() <= idx.as_usize() { //We haven't initialized yet, which is great.
             self.index.push(value.clone());
@@ -84,9 +102,10 @@ impl <T, U, P> VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
     }
 }
 
-impl <T, U, P> VoxelStorage<T, P> for VoxelPalette<T, U, P> where T : Clone + Eq + Hash,
+impl <T, U, B, P> VoxelStorage<T, P> for VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
             P : Copy + Eq + Ord + Add + Sub + Mul + Div,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div {
+            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            B : VoxelStorage<U, P> {
                 
     fn get(&self, x: P, y: P, z: P) -> Option<T> {
     	let voxmaybe = self.base.get(x,y,z);
@@ -131,7 +150,7 @@ impl <T, U, P> VoxelStorage<T, P> for VoxelPalette<T, U, P> where T : Clone + Eq
     fn get_z_lower(&self)  -> Option<P>{
     	self.base.get_z_lower()
     }
-    
+    /*
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
     fn load(&mut self, reader: &mut Read) { 
@@ -144,6 +163,28 @@ impl <T, U, P> VoxelStorage<T, P> for VoxelPalette<T, U, P> where T : Clone + Eq
     fn save(&self, writer: &mut Write) {
         //TODO: Include the palette in here.
 		self.base.save(writer);
+    }*/
+}
+
+impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + Deserialize + Clone + Eq + Hash,
+            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
+            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            B : VoxelStorageIOAble<U, P> {
+    #[allow(mutable_transmutes)]
+    #[allow(unused_must_use)]
+    fn load<R: Read + Sized>(&mut self, reader: &mut R) { 
+        //TODO: Include the palette in here.
+		self.base.load(reader);
+        self.index = from_reader(reader).unwrap(); //TODO: Error handling
+    }
+    
+    #[allow(mutable_transmutes)]
+    #[allow(unused_must_use)]
+    fn save<W: Write + Sized>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
+        //TODO: Include the palette in here.
+		let res = self.base.save(writer);
+        to_writer(writer, &self.index);
+        return res;
     }
 }
 /*
@@ -195,7 +236,7 @@ fn test_palette() {
     let mut test_chunk : Vec<u8> = vec![0; OURSIZE];
 
     let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-    let mut test_p : VoxelPalette<String, u8, u32> = VoxelPalette {base : test_va, index : Vec::new(), rev_index : HashMap::new() };
+    let mut test_p : VoxelPalette<String, u8, VoxelArray<u8>, u32> = VoxelPalette {base : test_va, index : Vec::new(), rev_index : HashMap::new() };
     let testmat1 = String::from("test1");
     let testmat2 = String::from("test2");
     test_p.init_default_value(String::from("ungenerated"), 0);

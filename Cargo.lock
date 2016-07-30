@@ -5,8 +5,11 @@ dependencies = [
  "cgmath 0.10.0 (git+https://github.com/brendanzab/cgmath.git?rev=3e6974b)",
  "glium 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "image 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "linear-map 1.1.0 (git+https://github.com/contain-rs/linear-map)",
  "num 0.1.32 (registry+https://github.com/rust-lang/crates.io-index)",
  "piston3d-gfx_voxel 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_yaml 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "shader_version 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -385,6 +388,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "linear-map"
+version = "1.1.0"
+source = "git+https://github.com/contain-rs/linear-map#eb2b8df954cfe461934d6b219c60e335db85d0bb"
+
+[[package]]
 name = "log"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -593,6 +601,20 @@ version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "serde"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "serde_yaml"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "serde 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "yaml-rust 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "shader_version"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -729,4 +751,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bitflags 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "yaml-rust"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 

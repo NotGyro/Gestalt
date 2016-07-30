@@ -17,10 +17,14 @@ panic = 'unwind'   # panic strategy (`-C panic=...`), can also be 'abort'
 
 [dependencies]
 num = "*"
+time = "*"
+linear-map = { git = "https://github.com/contain-rs/linear-map" }
+cgmath = { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
+
+serde = "0.8.0"
+serde_yaml = "0.4.0"
+
 glium = "*"
 piston3d-gfx_voxel = "*"
-cgmath =  { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
-
 image = "0.10.0"
 shader_version = "0.2.1"
-time = "*"

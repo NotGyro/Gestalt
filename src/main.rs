@@ -18,11 +18,10 @@ extern crate image;
 use time::*;
 
 use std::vec::Vec;
-use voxel::voxelstorage::VoxelStorage;
-use voxel::voxelarray::VoxelArray;
-use voxel::vspalette::VoxelPalette;
-use voxel::material::MaterialID;
-use client::dwarfmode::*;
+use voxel::voxelstorage::*;
+use voxel::voxelarray::*;
+use voxel::vspalette::*;
+use voxel::material::*;
 use client::simplerenderer::*;
 use client::materialart::MatArtSimple;
 use std::path::Path;
@@ -59,18 +58,20 @@ fn main() {
     let dirt_id : MaterialID = String::from("Dirt");
     let grass_id : MaterialID = String::from("Grass");
     
-    const SIDELENGTH : u32 = 16;
-    const OURSIZE : usize  = (SIDELENGTH * SIDELENGTH * SIDELENGTH) as usize;
+    const XSIDELENGTH : usize = 16;
+    const YSIDELENGTH : usize = 16;
+    const ZSIDELENGTH : usize = 16;
+    const OURSIZE : usize  = (XSIDELENGTH * YSIDELENGTH * ZSIDELENGTH) as usize;
     let mut test_chunk : Vec<u8> = vec![0; OURSIZE];
 
-    let mut backing_va : Box<VoxelArray<u8>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
-    let mut test_va : VoxelPalette<String, u8, u32> = VoxelPalette {base : backing_va, index : Vec::new(), rev_index : HashMap::new() };
+    let mut backing_va : Box<VoxelArray<u8>> = VoxelArray::load_new(XSIDELENGTH as u16, YSIDELENGTH as u16, ZSIDELENGTH as u16, test_chunk);
+    let mut test_va : VoxelPalette<String, u8, VoxelArray<u8>, u16> = VoxelPalette::new(backing_va);
     test_va.init_default_value(air_id.clone(), 0);
 
-    let surface = 10;
+    let surface = ((ZSIDELENGTH / 8) * 3) as u16;
     let dirt_height = (surface-2);
-    for x in 0 .. SIDELENGTH {
-        for y in 0 .. SIDELENGTH {
+    for x in 0 .. XSIDELENGTH as u16 {
+        for y in 0 .. YSIDELENGTH as u16 {
             for z in 0 .. dirt_height {
                 test_va.set(x, y, z, stone_id.clone()); //TODO: less stupid material IDs that pass-by-copy by default
             }
@@ -152,6 +153,23 @@ fn main() {
     let screen_center_y : i32 = screen_height as i32 /2;
     
     let mut mouse_first_moved : bool = false;
+    /* --------------------------- Load a chunk, maybe */
+    let chunk_path = Path::new("testchunk.bin");
+    
+	//let mut options = OpenOptions::new();
+    let display_path = chunk_path.display();
+	match OpenOptions::new()
+            .read(true)
+            .open(&chunk_path) {
+        // The `description` method of `io::Error` returns a string that
+        // describes the error
+        Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
+        Ok(mut file) => {
+            println!("Attempting to load {}", display_path);
+            test_va.load(&mut file);
+        },
+    };
+    
     //---- Set up our texture(s) and chunk verticies ----
     let stone_art = MatArtSimple { texture_name : String::from("teststone.png") };
     let dirt_art = MatArtSimple { texture_name : String::from("testdirt.png") };
@@ -171,6 +189,8 @@ fn main() {
     let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager));
     
     let mut remesh : bool = false;
+
+
     //---- A mainloop ----
     while keeprunning {
 
@@ -253,11 +273,11 @@ fn main() {
                     if((click_point.x >= 0.0) && (click_point.y >= 0.0) && (click_point.z >= 0.0)) { //Change this when it's no longer one chunk.
                         match btn {
                             glutin::MouseButton::Left => {
-                                test_va.set(click_point.x as u32, click_point.y as u32, click_point.z as u32, air_id.clone());
+                                test_va.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, air_id.clone());
                                 remesh = true;
                             },
                             glutin::MouseButton::Right => {
-                                test_va.set(click_point.x as u32, click_point.y as u32, click_point.z as u32, stone_id.clone());
+                                test_va.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, stone_id.clone());
                                 remesh = true;
                             }
                             _ => ()
@@ -275,10 +295,10 @@ fn main() {
             camera_pos += right * (elapsed * move_speed);
         }
         if s_down {
-            camera_pos += forward.neg() * (elapsed * move_speed);
+            camera_pos += (forward * (elapsed * move_speed)).neg();
         }
         if d_down {
-            camera_pos += right.neg() * (elapsed * move_speed);
+            camera_pos += (right * (elapsed * move_speed)).neg();
         }
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
@@ -311,6 +331,19 @@ fn main() {
         target.finish().unwrap();
         lastupdate = precise_time_s();
     }
+    //--------- Save our file on closing --------------
+    match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&chunk_path) {
+        // The `description` method of `io::Error` returns a string that
+        // describes the error
+        Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
+        Ok(mut file) => {
+            test_va.save(&mut file);
+        },
+    };
 }
 
 fn test_array_fileio() {
@@ -361,7 +394,7 @@ fn _load_test(path : &Path) -> bool {
         // describes the error
         Err(why) => panic!("couldn't open {}: {}", display,
                                                    Error::description(&why)),
-        Ok(file) => file,
+        Ok(mut file) => file,
     };
     const OURSIZE : usize  = 16 * 16 * 16;
     let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
