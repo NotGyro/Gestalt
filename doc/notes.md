@@ -2,13 +2,13 @@ Notes
 ====
 Todo: 
 ----
--[x] File I/O (don't overdo it, instead get something minimal without all of the self-describing stuff but make sure that it can be COMPOSED later.)
--[ ] Change all of the get position upper / lower functions to return a value rather than an option, 
+- [x] File I/O (don't overdo it, instead get something minimal without all of the self-describing stuff but make sure that it can be COMPOSED later.)
+- [ ] Change all of the get position upper / lower functions to return a value rather than an option, 
 and specify that requesting these values from a pseudo-infinite world gets you the bounding box of ... something (decide)
--[x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: No._
--[ ] Multiple chunks (bigworld), loading / unloading around the player.
--[ ] Start on Lua scripting.
--[ ] Iterators over VoxelStorages
+- [x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: No._
+- [ ] Multiple chunks (bigworld), loading / unloading around the player.
+- [ ] Start on Lua scripting.
+- [ ] Iterators over VoxelStorages
 
 ----
 
