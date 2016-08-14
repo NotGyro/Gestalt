@@ -4,20 +4,25 @@ use std::cmp::{Ord, Eq};
 use std::string::String;
 use std::vec::Vec;
 use util::voxelutil::VoxelPos;
+use util::voxelutil::VoxelRange;
 use std::io;
 use std::io::prelude::*;
 
-/* A basic trait for any 3d grid data structure.
-Type arguments is type of element.
+/// A basic trait for any 3d grid data structure.
+/// Type arguments are type of element, type of position.
+///
+/// (Type of positon must be an integer, but I'm still using
+/// genericism here because it should be possible to use 
+/// any bit length of integer, or even a bigint implementation
+///
+/// For this trait, a single level of detail is assumed.
+///
+/// For voxel data structures with a level of detail, we will
+/// assume that the level of detail is a signed integer, and
+/// calling these methods / treating them as "flat" voxel
+/// structures implies acting on a level of detail of 0.
 
-For this trait, a single level of detail is assumed.
-
-For voxel data structures with a level of detail, we will
-assume that the level of detail is a signed integer, and
-calling these methods / treating them as "flat" voxel
-structures implies acting on a level of detail of 0.
-*/
-pub trait VoxelStorage<T: Clone, P = u16> where P : Copy + Eq + Ord + Add + Sub + Mul + Div {
+pub trait VoxelStorage<T: Clone, P = u16> where P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P> {
     fn get(&self, x: P, y: P, z: P) -> Option<T>;
     fn getv(&self, coord: VoxelPos<P>) -> Option<T> {
         self.get(coord.x, coord.y, coord.z)
@@ -27,36 +32,26 @@ pub trait VoxelStorage<T: Clone, P = u16> where P : Copy + Eq + Ord + Add + Sub 
     fn setv(&mut self, coord: VoxelPos<P>, value: T) {
         self.set(coord.x, coord.y, coord.z, value);
     }
-
-    //Intializes a voxel storage, with each cell set to default value.
-    //fn init_new(&mut self, size_x: P, size_y: P, size_z: P, default: T);
-    //Uninitialized version of the above. Still allocates, probably.
-    //fn init_new_uninitialized(&mut self, size_x: P, size_y: P, size_z: P);
-
-    //Gets how many bytes this structure takes up in memory.
-    //fn get_footprint(&self) -> usize;
-
-    //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_x_upper(&self) -> Option<P>;
-    //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_y_upper(&self)  -> Option<P>;
-    //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_z_upper(&self)  -> Option<P>;
-    
-    //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_x_lower(&self) -> Option<P>;
-    //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_y_lower(&self)  -> Option<P>;
-    //A value of None means our VoxelStorage is pseudo-infinite in this direction
-    fn get_z_lower(&self)  -> Option<P>;
 }
 
-pub trait VoxelStorageIOAble<T : Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Eq + Ord + Add + Sub + Mul + Div {
+pub trait VoxelStorageIOAble<T : Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P> {
     fn load<R: Read + Sized>(&mut self, reader: &mut R);
     fn save<W: Write + Sized>(&self, writer: &mut W) -> Result<usize, std::io::Error>;
 }
 
-pub struct RunLengthVoxel<T: Copy> {
+
+/// Any VoxelStorage which has defined, finite bounds.
+/// Must provide a valid voxel for any position within
+/// the range provided by get_bounds().
+/// Usually, this implies that the voxel storage is not paged.
+
+pub trait VoxelStorageBounded<T: Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P> {
+    fn get_bounds(&self) -> VoxelRange<P>;
+}
+
+/* // TODO: 
+struct RunLengthVoxel<T: Copy> {
     pub data: Vec<T>,
     pub length: usize,
 }
+*/

@@ -5,6 +5,9 @@
 #![allow(unused_mut)]
 #![allow(unused_variables)]
 #![allow(unused_must_use)]
+
+
+#![feature(zero_one)]
 //#![feature(collections)]
 pub mod util;
 pub mod voxel;
@@ -22,8 +25,13 @@ use voxel::voxelstorage::*;
 use voxel::voxelarray::*;
 use voxel::vspalette::*;
 use voxel::material::*;
+use voxel::voxelspace::*;
+
+use util::voxelutil::*;
+
 use client::simplerenderer::*;
 use client::materialart::MatArtSimple;
+
 use std::path::Path;
 use std::error::Error;
 use std::fs::File;
@@ -39,6 +47,7 @@ use std::collections::HashMap;
 
 use cgmath::Matrix4;
 use cgmath::Vector3;
+use cgmath::Vector4;
 use cgmath::Point3;
 use cgmath::InnerSpace;
 
@@ -47,50 +56,97 @@ use glium::glutin;
 use glium::glutin::Event;
 use glium::glutin::VirtualKeyCode;
 use glium::texture::Texture2dArray;
+use glium::backend::glutin_backend::GlutinFacade;
+
+// This function only gets compiled if the target OS is linux
+#[cfg(target_os = "linux")]
+fn are_you_on_linux() {
+        println!("You are running linux!")
+}
+
+// And this function only gets compiled if the target OS is *not* linux
+#[cfg(not(target_os = "linux"))]
+fn are_you_on_linux() {
+        println!("You are *not* running linux!")
+}
+
+fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
+    are_you_on_linux();
+    let display_maybe = glutin::WindowBuilder::new()
+        .with_dimensions(screen_width, screen_height)
+        .with_depth_buffer(24)
+        .build_glium();
+    let display = match display_maybe {
+        Ok(v) => v,
+        Err(e) => {
+            println!("Error while creating display in main.rs:");
+            println!("{}", e); //e is a glium::GliumCreationError<glutin::CreationError>
+            match e {
+                glium::GliumCreationError::IncompatibleOpenGl(s) => println!("{}", s),
+                glium::GliumCreationError::BackendCreationError(ee) => {
+                    //ee should be a glutin::CreationError.
+                    match ee {
+                        glutin::CreationError::OsError(s) => println!("{}", s),
+                        glutin::CreationError::NotSupported => println!("BackendCreationError is  NotSupported."),
+                        glutin::CreationError::NoBackendAvailable(eee) => println!("{}", eee),
+                        glutin::CreationError::RobustnessNotSupported => println!("Robustness not supported."),
+                        glutin::CreationError::OpenGlVersionNotSupported => println!("OpenGL version not supported."),
+                        glutin::CreationError::NoAvailablePixelFormat => println!("No available pixel format."),
+                    };
+                },
+            };
+            panic!();
+        },
+    };
+    return display;
+}
 
 fn main() {
-    println!(line!());
+    /*println!("Watch the pretty numbers go by.");
+    {
+        let side = 4;
+        let sz = side * side * side;
+
+        let low : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z: 0};
+        let high : VoxelPos<i32> = VoxelPos{x: side as i32, y: side as i32, z: side as i32};
+        let ran : VoxelRange<i32> = VoxelRange{lower: low, upper: high};
+
+        for i in ran {
+            println!("x : {}, y : {}, z : {}", i.x,i.y,i.z);
+        }
+    }*/
     /*let mut test_va : Box<VoxelArray<bool>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
     
     test_va.set(8, 8, 4, true);*/
-    let air_id : MaterialID = String::from("Air");
-    let stone_id : MaterialID = String::from("Stone");
-    let dirt_id : MaterialID = String::from("Dirt");
-    let grass_id : MaterialID = String::from("Grass");
+    let mat_idx : MaterialIndex = MaterialIndex::new();
+
+    let air_id : MaterialID = mat_idx.for_name(String::from("test.air"));
+    let stone_id : MaterialID = mat_idx.for_name(String::from("test.stone"));
+    let dirt_id : MaterialID = mat_idx.for_name(String::from("test.dirt"));
+    let grass_id : MaterialID = mat_idx.for_name(String::from("test.grass"));
     
-    const XSIDELENGTH : usize = 16;
-    const YSIDELENGTH : usize = 16;
-    const ZSIDELENGTH : usize = 16;
-    const OURSIZE : usize  = (XSIDELENGTH * YSIDELENGTH * ZSIDELENGTH) as usize;
-    let mut test_chunk : Vec<u8> = vec![0; OURSIZE];
+    let mut space = VoxelSpace::new(mat_idx);
+    
+    let lower_x : i32 = -2;
+    let upper_x : i32 = 2;
+    let lower_y : i32 = -2;
+    let upper_y : i32 = 2;
+    let lower_z : i32 = -2;
+    let upper_z : i32 = 2;
 
-    let mut backing_va : Box<VoxelArray<u8>> = VoxelArray::load_new(XSIDELENGTH as u16, YSIDELENGTH as u16, ZSIDELENGTH as u16, test_chunk);
-    let mut test_va : VoxelPalette<String, u8, VoxelArray<u8>, u16> = VoxelPalette::new(backing_va);
-    test_va.init_default_value(air_id.clone(), 0);
-
-    let surface = ((ZSIDELENGTH / 8) * 3) as u16;
-    let dirt_height = (surface-2);
-    for x in 0 .. XSIDELENGTH as u16 {
-        for y in 0 .. YSIDELENGTH as u16 {
-            for z in 0 .. dirt_height {
-                test_va.set(x, y, z, stone_id.clone()); //TODO: less stupid material IDs that pass-by-copy by default
+    for x in lower_x .. upper_x {
+        for y in lower_y .. upper_y {
+            for z in lower_z .. upper_z {
+                space.load_or_create_c(x,y,z);
+                println!("Generating chunk at {}, {}, {}", x, y, z);
             }
-            for z in dirt_height .. surface {
-                test_va.set(x, y, z, dirt_id.clone()); //TODO: less stupid material IDs that pass-by-copy by default
-            }
-            test_va.set(x, y, surface, grass_id.clone());
         }
     }
-    test_va.set(8, 8, (surface+2), stone_id.clone());
     
     //---- Set up window ----
     let screen_width : u32 = 800;
     let screen_height : u32 = 600;
-    let display = glutin::WindowBuilder::new()
-        .with_dimensions(screen_width, screen_height)
-        .with_depth_buffer(24)
-        .build_glium()
-        .unwrap();
+    let display = make_display(screen_width, screen_height);
     let mut keeprunning = true;
     let window = display.get_window().unwrap();
     window.set_cursor_state(glutin::CursorState::Grab);
@@ -139,25 +195,11 @@ fn main() {
     
     
     let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0}; 
-
-    //---- Some movement stuff ----
-    
-    let mut w_down : bool = false;
-    let mut a_down : bool = false;
-    let mut s_down : bool = false;
-    let mut d_down : bool = false;
-    
-    let mut lastupdate = precise_time_s();
-    
-    let screen_center_x : i32 = screen_width as i32 /2;
-    let screen_center_y : i32 = screen_height as i32 /2;
-    
-    let mut mouse_first_moved : bool = false;
     /* --------------------------- Load a chunk, maybe */
-    let chunk_path = Path::new("testchunk.bin");
+    //let chunk_path = Path::new("testchunk.bin");
     
 	//let mut options = OpenOptions::new();
-    let display_path = chunk_path.display();
+    /*let display_path = chunk_path.display();
 	match OpenOptions::new()
             .read(true)
             .open(&chunk_path) {
@@ -166,9 +208,9 @@ fn main() {
         Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
         Ok(mut file) => {
             println!("Attempting to load {}", display_path);
-            test_va.load(&mut file);
+            chunk.load(&mut file);
         },
-    };
+    };*/
     
     //---- Set up our texture(s) and chunk verticies ----
     let stone_art = MatArtSimple { texture_name : String::from("teststone.png") };
@@ -183,16 +225,38 @@ fn main() {
     let texture = glium::texture::Texture2d::new(&display, image).unwrap();*/
     let mut mat_art_manager = MatArtMapping::new();
     let mut texture_manager = TextureArrayDyn::new(64, 64, 4096);
+    mat_art_manager.insert(grass_id.clone(), grass_art.clone());
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
-    mat_art_manager.insert(grass_id.clone(), grass_art.clone());
-    let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager));
+
+    //let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
+    let mut meshes : Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = Vec::new();
+    //pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
+    //                    textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
+    for chunk in space.get_regions() { 
+        //Push a tuple of the boundaries of the chunk and its mesh data.
+        meshes.push(
+            (chunk, 
+             Box::new( client::simplerenderer::make_voxel_mesh(&space, &display, chunk, &mut texture_manager, &mat_art_manager) ) 
+            )
+        );
+    }
+    //---- Some movement stuff ----
     
-    let mut remesh : bool = false;
-
-
+    let mut w_down : bool = false;
+    let mut a_down : bool = false;
+    let mut s_down : bool = false;
+    let mut d_down : bool = false;
+    
+    let mut lastupdate = precise_time_s();
+    
+    let screen_center_x : i32 = screen_width as i32 /2;
+    let screen_center_y : i32 = screen_height as i32 /2;
+    
+    let mut mouse_first_moved : bool = false;
     //---- A mainloop ----
     while keeprunning {
+        let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
 
 		if(vert_angle > 1.57) {
 			vert_angle = 1.57;
@@ -233,38 +297,40 @@ fn main() {
                     window.set_cursor_position(screen_center_x, screen_center_y);
                 },
                 Event::KeyboardInput(state, sc, keyopt) => {
-                    let key = keyopt.unwrap();
-                    match key {
-                        VirtualKeyCode::W => { 
-                            match state {
-                                glutin::ElementState::Pressed => w_down = true,
-                                glutin::ElementState::Released => w_down = false,
-                            }
+                    match keyopt {
+                        Some(key) => match key {
+                            VirtualKeyCode::W => { 
+                                match state {
+                                    glutin::ElementState::Pressed => w_down = true,
+                                    glutin::ElementState::Released => w_down = false,
+                                }
+                            },
+                            VirtualKeyCode::A => { 
+                                match state {
+                                    glutin::ElementState::Pressed => a_down = true,
+                                    glutin::ElementState::Released => a_down = false,
+                                }
+                            },
+                            VirtualKeyCode::S => { 
+                                match state {
+                                    glutin::ElementState::Pressed => s_down = true,
+                                    glutin::ElementState::Released => s_down = false,
+                                }
+                            },
+                            VirtualKeyCode::D => { 
+                                match state {
+                                    glutin::ElementState::Pressed => d_down = true,
+                                    glutin::ElementState::Released => d_down = false,
+                                }
+                            },
+                            VirtualKeyCode::Escape => { 
+                                keeprunning = false;
+                            },
+                            _ => ()
                         },
-                        VirtualKeyCode::A => { 
-                            match state {
-                                glutin::ElementState::Pressed => a_down = true,
-                                glutin::ElementState::Released => a_down = false,
-                            }
-                        },
-                        VirtualKeyCode::S => { 
-                            match state {
-                                glutin::ElementState::Pressed => s_down = true,
-                                glutin::ElementState::Released => s_down = false,
-                            }
-                        },
-                        VirtualKeyCode::D => { 
-                            match state {
-                                glutin::ElementState::Pressed => d_down = true,
-                                glutin::ElementState::Released => d_down = false,
-                            }
-                        },
-                        VirtualKeyCode::Escape => { 
-                            keeprunning = false;
-                        },
-                        _ => ()
+                        None => ()
                     }
-                },
+                },/*
                 Event::MouseInput(state, btn) => {
                     if(state == glutin::ElementState::Released) {
                     println!("X: {}", click_point.x);
@@ -273,18 +339,18 @@ fn main() {
                     if((click_point.x >= 0.0) && (click_point.y >= 0.0) && (click_point.z >= 0.0)) { //Change this when it's no longer one chunk.
                         match btn {
                             glutin::MouseButton::Left => {
-                                test_va.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, air_id.clone());
+                                chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, air_id.clone());
                                 remesh = true;
                             },
                             glutin::MouseButton::Right => {
-                                test_va.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, stone_id.clone());
+                                chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, stone_id.clone());
                                 remesh = true;
                             }
                             _ => ()
                         }
                     }
                     }
-                }
+                }*/
                 _ => ()
             }
         }
@@ -302,28 +368,41 @@ fn main() {
         }
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
-        let mvp_matrix = perspective_matrix * view_matrix * model_matrix;
 
-        if(remesh) {
-            map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&test_va, &display, &mut texture_manager, &mat_art_manager));
+        /*if(remesh) {
+            map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
             remesh = false;
-        }
+        }*/
 
         let mut target = display.draw();
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
 
         if(texture_manager.textures.is_some()) {
             let textures = texture_manager.textures.unwrap(); //Move
-            //Create a context so uniforms dies and textures is no longer borrowed.
+            let iter = mesh.into_iter();
+            for &mut (bounds, ref mesh) in iter
             {
-                let uniforms = uniform! {
-                    mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
-                    tex: &textures,
-                };
-                /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
-                    &Default::default()).unwrap();*/
-                target.draw(&(*map_verts), &indices, &program, &uniforms,
-                    &params).unwrap();
+                //Create a context so uniforms dies and textures is no longer borrowed.
+                {
+                    /*In C++ I did this next bit with:
+                        glm::mat4 Model = glm::translate(glm::mat4(1.0f), 
+                        glm::vec3(DrawIter->first->getXPosition()*CHUNK_SIZE, DrawIter->first->getYPosition()*CHUNK_SIZE, DrawIter->first->getZPosition()*CHUNK_SIZE));
+                    */
+                    let szx = bounds.upper.x - bounds.lower.x;
+                    let szy = bounds.upper.y - bounds.lower.y;
+                    let szz = bounds.upper.z - bounds.lower.z;
+                    let pos = bounds.lower;
+                    let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : (pos.x * szx as i32) as f32, y : (pos.y * szy as i32) as f32, z : (pos.z * szz as i32) as f32 });
+                    let mvp_matrix = perspective_matrix * view_matrix * chunk_model_matrix;
+                    let uniforms = uniform! {
+                        mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
+                        tex: &textures,
+                    };
+                    /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
+                        &Default::default()).unwrap();*/
+                    target.draw(&(**mesh), &indices, &program, &uniforms,
+                        &params).unwrap();
+                }
             }
 
             texture_manager.textures = Some(textures); //Move back
@@ -332,7 +411,7 @@ fn main() {
         lastupdate = precise_time_s();
     }
     //--------- Save our file on closing --------------
-    match OpenOptions::new()
+    /*match OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
@@ -341,72 +420,7 @@ fn main() {
         // describes the error
         Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
         Ok(mut file) => {
-            test_va.save(&mut file);
+            chunk.save(&mut file);
         },
-    };
-}
-
-fn test_array_fileio() {
-    const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
-    for i in 0 .. OURSIZE {
-    	test_chunk.push(i as u8);
-    }
-
-    let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-
-    assert!(test_va.get(14,14,14).unwrap() == 238);
-    test_va.set(14,14,14,9);
-    assert!(test_va.get(14,14,14).unwrap() == 9);
-    
-    let path = Path::new("hello.bin");
-
-    // Open the path in read-only mode, returns `io::Result<File>`
-    //let file : &mut File = try!(File::open(path));
-    
-    let display = path.display();
-	let mut file = match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path) {
-        // The `description` method of `io::Error` returns a string that
-        // describes the error
-        Err(why) => panic!("couldn't open {}: {}", display,
-                                                   Error::description(&why)),
-        Ok(file) => file,
-    };
-	// We create a buffered writer from the file we get
-	//let mut writer = BufWriter::new(&file);
-	    
-   	test_va.save(&mut file);
-    _load_test(path);
-}
-
-fn _load_test(path : &Path) -> bool {
-	//let mut options = OpenOptions::new();
-	// We want to write to our file as well as append new data to it.
-	//options.write(true).append(true);
-    let display = path.display();
-	let mut file = match File::open(&path) {
-        // The `description` method of `io::Error` returns a string that
-        // describes the error
-        Err(why) => panic!("couldn't open {}: {}", display,
-                                                   Error::description(&why)),
-        Ok(mut file) => file,
-    };
-    const OURSIZE : usize  = 16 * 16 * 16;
-    let mut test_chunk : Vec<u8> = Vec::with_capacity(OURSIZE);
-    for _i in 0 .. OURSIZE {
-    	test_chunk.push(0);
-    }
-	
-    let mut va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-    
-    va.load(&mut file);
-    
-    assert!(va.get(14,14,14).unwrap() == 9);
-
-    return true;
+    };*/
 }

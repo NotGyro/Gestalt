@@ -9,7 +9,11 @@ use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
 use std::string::String;
 use std::vec::Vec;
+
 use util::voxelutil::VoxelPos;
+use util::voxelutil::VoxelRange;
+use util::num::USizeAble;
+
 use std::io;
 use std::io::prelude::*;
 use std::ops::{Index, IndexMut};
@@ -23,57 +27,12 @@ use self::serde::de::Deserialize;
 use self::serde_yaml::de::Deserializer;
 use self::serde_yaml::de::from_reader;
 
-/* 
-Rust's trait bound system HAAAAAAAAATES this file.
-
-Consider reimplementing in another way.
-
-...Or, I could implement my own trait for usize-able types.
-
-Takes an underlying VoxelStorage and makes a palette of its values to another type.
-First type argument is resulting type, second type argument is underlying type, third is position
-*/
-pub trait USizeAble {
-    fn as_usize(&self) -> usize;
-    fn from_usize(val : usize) -> Self;
-}
-
-impl USizeAble for u8 {
-    fn as_usize(&self) -> usize {
-        (*self) as usize
-    }
-    fn from_usize(val : usize) -> Self {
-        val as u8
-    }    
-}
-impl USizeAble for u16 {
-    fn as_usize(&self) -> usize {
-        (*self) as usize
-    }
-    fn from_usize(val : usize) -> Self {
-        val as u16
-    }    
-}
-impl USizeAble for u32 {
-    fn as_usize(&self) -> usize {
-        (*self) as usize
-    }
-    fn from_usize(val : usize) -> Self {
-        val as u32
-    }    
-}
-impl USizeAble for u64 {
-    fn as_usize(&self) -> usize {
-        (*self) as usize
-    }
-    fn from_usize(val : usize) -> Self {
-        val as u64
-    }    
-}
-
+ 
+///Takes an underlying VoxelStorage and makes a palette of its values to another type.
+///First type argument is resulting voxel, second type argument is underlying voxel, third is underyling VoxelStorage, fourth is position
 #[derive(Clone, Debug)]
 pub struct VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
             B : VoxelStorage<U, P> { 
                 
@@ -83,7 +42,7 @@ pub struct VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
 	position_type: std::marker::PhantomData<P>,
 }
 impl <T, U, B, P> VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div, 
             B : VoxelStorage<U, P> { 
     pub fn new( b : Box<B>) -> VoxelPalette<T, U, B, P> {
@@ -103,7 +62,7 @@ impl <T, U, B, P> VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
 }
 
 impl <T, U, B, P> VoxelStorage<T, P> for VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
             B : VoxelStorage<U, P> {
                 
@@ -130,50 +89,24 @@ impl <T, U, B, P> VoxelStorage<T, P> for VoxelPalette<T, U, B, P> where T : Clon
             self.base.set(x,y,z, newidx);
         }
     }
+}
 
-    fn get_x_upper(&self) -> Option<P> {
-    	self.base.get_x_upper()
+impl <T, U, B, P> VoxelStorageBounded<T, P> for VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
+            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
+            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            B : VoxelStorage<U, P> + VoxelStorageBounded<U,P> {
+    fn get_bounds(&self) -> VoxelRange<P> { 
+        return self.base.get_bounds();
     }
-    fn get_y_upper(&self)  -> Option<P> {
-    	self.base.get_y_upper()
-    }
-    fn get_z_upper(&self)  -> Option<P> {
-    	self.base.get_z_upper()
-    }
-    
-    fn get_x_lower(&self) -> Option<P> {
-    	self.base.get_x_lower()
-    }
-    fn get_y_lower(&self)  -> Option<P>{
-    	self.base.get_y_lower()
-    }
-    fn get_z_lower(&self)  -> Option<P>{
-    	self.base.get_z_lower()
-    }
-    /*
-    #[allow(mutable_transmutes)]
-    #[allow(unused_must_use)]
-    fn load(&mut self, reader: &mut Read) { 
-        //TODO: Include the palette in here.
-		self.base.load(reader);
-    }
-    
-    #[allow(mutable_transmutes)]
-    #[allow(unused_must_use)]
-    fn save(&self, writer: &mut Write) {
-        //TODO: Include the palette in here.
-		self.base.save(writer);
-    }*/
 }
 
 impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + Deserialize + Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
             U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
             B : VoxelStorageIOAble<U, P> {
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
     fn load<R: Read + Sized>(&mut self, reader: &mut R) { 
-        //TODO: Include the palette in here.
 		self.base.load(reader);
         self.index = from_reader(reader).unwrap(); //TODO: Error handling
     }
@@ -181,54 +114,11 @@ impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T 
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
     fn save<W: Write + Sized>(&self, writer: &mut W) -> Result<usize, std::io::Error> {
-        //TODO: Include the palette in here.
 		let res = self.base.save(writer);
         to_writer(writer, &self.index);
         return res;
     }
 }
-/*
-impl <u32, T> Index<u32> for Vec<T> {
-    type Output = T;
-
-    fn index<'a>(&'a self, _index : u32) -> &'a T {
-        self[_index as usize]
-    }
-}
-impl <u32, T> IndexMut<u32> for Vec<T> {
-    fn index_mut<'a>(&'a mut self, _index : u32) -> &'a T {
-        self[_index as usize]
-    }
-}
-
-
-impl <u16, T> Index<u16> for Vec<T> {
-    type Output = T;
-
-    fn index<'a>(&'a self, _index : u16) -> &'a T {
-        self[_index as usize]
-    }
-}
-impl <u16, T> IndexMut<u16> for Vec<T> {
-    fn index_mut<'a>(&'a mut self, _index : u16) -> &'a T {
-        self[_index as usize]
-    }
-}
-
-
-impl <u8, T> Index<u8> for Vec<T> {
-    type Output = T;
-
-    fn index<'a>(&'a self, _index : u8) -> &'a T {
-        self[_index as usize]
-    }
-}
-impl <u8, T> IndexMut<u8> for Vec<T> {
-    fn index_mut<'a>(&'a mut self, _index : u8) -> &'a T {
-        self[_index as usize]
-    }
-}
-*/
 
 #[test]
 fn test_palette() {
@@ -236,7 +126,7 @@ fn test_palette() {
     let mut test_chunk : Vec<u8> = vec![0; OURSIZE];
 
     let mut test_va : Box<VoxelArray<u8>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-    let mut test_p : VoxelPalette<String, u8, VoxelArray<u8>, u32> = VoxelPalette {base : test_va, index : Vec::new(), rev_index : HashMap::new() };
+    let mut test_p : VoxelPalette<String, u8, VoxelArray<u8>, u16> = VoxelPalette::new(test_va);
     let testmat1 = String::from("test1");
     let testmat2 = String::from("test2");
     test_p.init_default_value(String::from("ungenerated"), 0);
