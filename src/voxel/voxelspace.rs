@@ -137,6 +137,9 @@ impl VoxelSpace {
         if (self.chunk_list.contains_key(&VoxelPos{ x : x, y : y, z : z})) {
             return;
         }
+        if(z > 0) {
+            return;
+        }
         let air_mat = self.mat_idx.for_name(String::from("test.air"));
         let stone_mat = self.mat_idx.for_name(String::from("test.stone"));
         let dirt_mat = self.mat_idx.for_name(String::from("test.dirt"));
@@ -154,34 +157,6 @@ impl VoxelSpace {
             testworldgen_underground(&mut chunk, air_mat.clone(), stone_mat.clone());
         }
         self.chunk_list.insert(VoxelPos{ x : x, y : y, z : z}, *chunk);
-        
-        /*
-        { //Update our bounds:
-            let x_low = (x * (CHUNK_X_LENGTH as i32));
-            let y_low = (y * (CHUNK_Y_LENGTH as i32));
-            let z_low = (z * (CHUNK_Z_LENGTH as i32));
-            let x_high = x_low + CHUNK_X_LENGTH as i32;
-            let y_high = y_low + CHUNK_Y_LENGTH as i32;
-            let z_high = z_low + CHUNK_Z_LENGTH as i32;
-            if(x_high > self.upper_corner.x) {
-                self.upper_corner.x = x_high;
-            }
-            else if(x_low < self.lower_corner.x) {
-                self.lower_corner.x = x_low;
-            }
-            if(y_high > self.upper_corner.y) {
-                self.upper_corner.y = y_high;
-            }
-            else if(y_low < self.lower_corner.y) {
-                self.lower_corner.y = y_low;
-            }
-            if(z_high > self.upper_corner.z) {
-                self.upper_corner.z = z_high;
-            }
-            else if(z_low < self.lower_corner.z) {
-                self.lower_corner.z = z_low;
-            }
-        }*/
     }
     /// Loads the chunk if there is saved data for it, or creates it via worldgen if not. 
     /// Note: These are voxel positions, not chunk positions.
@@ -205,7 +180,7 @@ impl VoxelSpace {
         for (pos, chunk) in &self.chunk_list { 
             let current = VoxelRange { 
                 lower : VoxelPos { x : pos.x, y : pos.y, z : pos.z, }, 
-                upper : VoxelPos { x : pos.y + CHUNK_X_LENGTH as i32, y : pos.y + CHUNK_Y_LENGTH as i32, z : pos.z + CHUNK_Z_LENGTH as i32 },
+                upper : VoxelPos { x : pos.x + CHUNK_X_LENGTH as i32, y : pos.y + CHUNK_Y_LENGTH as i32, z : pos.z + CHUNK_Z_LENGTH as i32 },
             };
             ret.push(current);
         }

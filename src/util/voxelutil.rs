@@ -52,7 +52,7 @@ impl <T> Iterator for VoxelRangeIter<T> where T : One + Copy + Eq + Ord + Add<T,
             z = self.range.lower.z;
             y = y + T::one();
             if(y >= self.range.upper.y) {
-                y = self.range.lower.z;
+                y = self.range.lower.y;
                 x = x + T::one();
                 if(x >= self.range.upper.x) { 
                     over = true;

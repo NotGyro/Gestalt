@@ -294,7 +294,7 @@ fn main() {
                     }
                     mouse_prev_x = x;
                     mouse_prev_y = y;
-                    window.set_cursor_position(screen_center_x, screen_center_y);
+                    //window.set_cursor_position(screen_center_x, screen_center_y);
                 },
                 Event::KeyboardInput(state, sc, keyopt) => {
                     match keyopt {

@@ -251,19 +251,19 @@ impl TextureArrayDyn {
     }
     
     fn ld_image(display : &GlutinFacade, path : String, size_x : u32, size_y : u32) -> Vec<u8> {
-        let mut texfile = File::open(path).unwrap();
+        let mut texfile = File::open(path.clone()).unwrap();
         let image = image::load(&texfile,
                             image::PNG).unwrap().to_rgba();
         let image_dimensions = image.dimensions();
         assert_eq!(image_dimensions, (size_x, size_y));
         //According to compiler errors, a Piston image module image struct's into_raw() returns a Vec<u8>.
+        println!("Loaded texture file: {}", path.clone());
         return image.into_raw();
         //let buffer = image.into_raw();
         //return glium::texture::RawImage2d::from_raw_rgba(buffer, (size_x, size_y));
     }
     
     fn rebuild<'a>(&mut self, display : &GlutinFacade) {
-        println!(line!());
         let mut converted_buffer : Vec< RawImage2d<'a, u8>> = Vec::new();
         //Satisfy glium's type demands
         for image in self.tex_data.iter() {
@@ -276,7 +276,6 @@ impl TextureArrayDyn {
                 self.textures = None;
                 println!("{}", e) },
         }
-        println!(line!());
     }
 }
 #[derive(Copy, Clone, Debug)]
@@ -294,7 +293,7 @@ pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFac
     //This function is still very not data-oriented and will probably cause the borrow checker to become very upset.
     let mut drawable : Vec<VoxelRenderInfo> = Vec::new();
     let mut rebuild_tex : bool = false;
-    //println!("Drawing voxel mesh at: {}, {}, {}", range.lower.x, range.lower.y, range.lower.z);
+    println!("Meshing chunk at: {}, {}, {}", range.lower.x, range.lower.y, range.lower.z);
     for pos in range {
         let result = vs.getv(pos);
         if result.is_some() {
@@ -322,7 +321,7 @@ pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFac
     if(rebuild_tex) { 
         textures.rebuild(display);
     }
-    //println!("Found {} drawable cubes.", drawable.len());
+    println!("Found {} drawable cubes.", drawable.len());
     return mesh_step(drawable, display);
 }
 
