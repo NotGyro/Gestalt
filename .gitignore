@@ -1,8 +1,10 @@
 #Eclipse stuff
 .project
 
-# Whatever this is.
+# Vim temporary files.
 *.swp
+*.swn
+*.swo
 
 # Compiled files
 *.o
