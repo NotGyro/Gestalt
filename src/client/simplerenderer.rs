@@ -293,7 +293,7 @@ pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFac
     //This function is still very not data-oriented and will probably cause the borrow checker to become very upset.
     let mut drawable : Vec<VoxelRenderInfo> = Vec::new();
     let mut rebuild_tex : bool = false;
-    println!("Meshing chunk at: {}, {}, {}", range.lower.x, range.lower.y, range.lower.z);
+    //println!("Meshing chunk at: {}, {}, {}", range.lower.x, range.lower.y, range.lower.z);
     for pos in range {
         let result = vs.getv(pos);
         if result.is_some() {
@@ -321,7 +321,7 @@ pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFac
     if(rebuild_tex) { 
         textures.rebuild(display);
     }
-    println!("Found {} drawable cubes.", drawable.len());
+    //println!("Found {} drawable cubes.", drawable.len());
     return mesh_step(drawable, display);
 }
 

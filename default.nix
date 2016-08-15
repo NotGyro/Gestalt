@@ -26,6 +26,13 @@ let
   xi = pkgs.xorg.libXi;
   mesanoglu = pkgs.mesa_noglu;
   mesa = pkgs.mesa;
+  xRandr = pkgs.xorg.libXrandr;
+  udev = pkgs.udev;
+  xInerama = pkgs.xorg.libXinerama;
+  xProto = pkgs.xorg.xproto;
+  xMu = pkgs.xorg.libXmu;
+  xFt = pkgs.xorg.libXft;
+  xExt = pkgs.xorg.libXext;
 in rec {
   devEnvRustGestalt = stdenv.mkDerivation rec {
     name = "gestalt";
@@ -43,13 +50,19 @@ in rec {
       xorg.xproto
       xorg.libXxf86vm
       xorg.libXi
+      xorg.libXrandr
+      xorg.libXmu
+      xorg.libXft
+      xorg.libXext
     ];
-    #configureFlags = "--x-includes=${libX11.dev}/include --x-libraries=${libX11.out}/lib";
-    #postBuild = ''
-    #  find . -name 'config' -type f | while read i; do
-    #  sed -i "s@libX11.so.6@${libX11.out}/lib/libX11.so.6@g" $i
-    #  done
-    #'';
-    LD_LIBRARY_PATH="/run/opengl-driver/lib:${x11}/lib:${xCursor}/lib:${xf86vmode}/lib:${xi}/lib:${mesa}/lib:${mesanoglu}/lib";
+    /*configureFlags = "--x-includes=${libX11.dev}/include --x-libraries=${libX11.out}/lib";
+    postBuild = ''
+      find . -name 'config' -type f | while read i; do
+      sed -i "s@libX11.so.6@${libX11.out}/lib/libX11.so.6@g" $i
+      done
+    '';/*/
+    LD_LIBRARY_PATH="/run/opengl-driver/lib:${pkgs.xorg.libX11.out}/lib:${xCursor.out}/lib:
+    ${xf86vmode.out}/lib:${xi.out}/lib:${mesa}/lib:${mesanoglu}/lib:${xRandr.out}/lib:
+    ${xInerama.out}/lib:${xProto.out}/lib:${xMu.out}/lib:${xFt.out}/lib:${xExt.out}/lib:${pkgs.xorg.libXxf86vm.out}/lib";
   };
 }

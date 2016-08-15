@@ -55,6 +55,7 @@ use glium::{DisplayBuild, Surface};
 use glium::glutin;
 use glium::glutin::Event;
 use glium::glutin::VirtualKeyCode;
+use glium::glutin::CursorState;
 use glium::texture::Texture2dArray;
 use glium::backend::glutin_backend::GlutinFacade;
 
@@ -86,9 +87,12 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
                 glium::GliumCreationError::BackendCreationError(ee) => {
                     //ee should be a glutin::CreationError.
                     match ee {
-                        glutin::CreationError::OsError(s) => println!("{}", s),
+                        glutin::CreationError::OsError(s) => println!("OS Error: {}", s),
                         glutin::CreationError::NotSupported => println!("BackendCreationError is  NotSupported."),
-                        glutin::CreationError::NoBackendAvailable(eee) => println!("{}", eee),
+                        glutin::CreationError::NoBackendAvailable(eee) => {
+                            println!("No Backend error: {}", eee);
+                            println!("{}", eee.cause().unwrap());
+                        },
                         glutin::CreationError::RobustnessNotSupported => println!("Robustness not supported."),
                         glutin::CreationError::OpenGlVersionNotSupported => println!("OpenGL version not supported."),
                         glutin::CreationError::NoAvailablePixelFormat => println!("No available pixel format."),
@@ -148,8 +152,8 @@ fn main() {
     let screen_height : u32 = 600;
     let display = make_display(screen_width, screen_height);
     let mut keeprunning = true;
-    let window = display.get_window().unwrap();
-    window.set_cursor_state(glutin::CursorState::Grab);
+    let mut window = display.get_window().unwrap();
+    //window.set_cursor_state(glutin::CursorState::Grab);
     //---- Set up screen and some basic graphics stuff ----
     let mut vshaderfile = File::open("vertexshader.glsl").unwrap();
     let mut fshaderfile = File::open("fragmentshader.glsl").unwrap();
@@ -182,7 +186,7 @@ fn main() {
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
 	
 	let mouse_sensitivity : f32 = 900.0;
-	let move_speed : f32 = 3000.0;
+	let move_speed : f32 = 20000.0;
 	let mut horz_angle : f32 = 0.0;
 	let mut vert_angle : f32 = 0.0;
 
@@ -248,13 +252,14 @@ fn main() {
     let mut s_down : bool = false;
     let mut d_down : bool = false;
     
-    let mut lastupdate = precise_time_s();
     
     let screen_center_x : i32 = screen_width as i32 /2;
     let screen_center_y : i32 = screen_height as i32 /2;
     
     let mut mouse_first_moved : bool = false;
+    let mut grabs_mouse : bool = true;
     //---- A mainloop ----
+    let mut lastupdate = precise_time_s();
     while keeprunning {
         let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
 
@@ -285,6 +290,8 @@ fn main() {
             match ev {
                 Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
                 Event::MouseMoved(x, y) => {
+                    //println!("Mouse moved");
+                    if(grabs_mouse) {
                     if mouse_first_moved {
                         horz_angle += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
                         vert_angle -= ((y - screen_center_y) as f32) * (mouse_sensitivity * elapsed);
@@ -294,7 +301,8 @@ fn main() {
                     }
                     mouse_prev_x = x;
                     mouse_prev_y = y;
-                    //window.set_cursor_position(screen_center_x, screen_center_y);
+                    window.set_cursor_position(screen_center_x, screen_center_y);
+                    }
                 },
                 Event::KeyboardInput(state, sc, keyopt) => {
                     match keyopt {
@@ -321,6 +329,12 @@ fn main() {
                                 match state {
                                     glutin::ElementState::Pressed => d_down = true,
                                     glutin::ElementState::Released => d_down = false,
+                                }
+                            },
+                            VirtualKeyCode::C => { 
+                                match state {
+                                    glutin::ElementState::Pressed => (),
+                                    glutin::ElementState::Released => grabs_mouse = !grabs_mouse,
                                 }
                             },
                             VirtualKeyCode::Escape => { 
@@ -351,7 +365,7 @@ fn main() {
                     }
                     }
                 }*/
-                _ => ()
+                _ => (), //println!("Mystery event: {:?}", ev), 
             }
         }
         if w_down {

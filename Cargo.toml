@@ -27,3 +27,5 @@ serde_yaml = "0.4.0"
 glium = "*"
 image = "0.10.0"
 shader_version = "0.2.1"
+
+conrod = "0.38.2"
