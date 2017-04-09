@@ -106,22 +106,7 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
 }
 
 fn main() {
-    /*println!("Watch the pretty numbers go by.");
-    {
-        let side = 4;
-        let sz = side * side * side;
-
-        let low : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z: 0};
-        let high : VoxelPos<i32> = VoxelPos{x: side as i32, y: side as i32, z: side as i32};
-        let ran : VoxelRange<i32> = VoxelRange{lower: low, upper: high};
-
-        for i in ran {
-            println!("x : {}, y : {}, z : {}", i.x,i.y,i.z);
-        }
-    }*/
-    /*let mut test_va : Box<VoxelArray<bool>> = VoxelArray::load_new(SIDELENGTH, SIDELENGTH, SIDELENGTH, test_chunk);
     
-    test_va.set(8, 8, 4, true);*/
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
     let air_id : MaterialID = mat_idx.for_name(String::from("test.air"));

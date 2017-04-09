@@ -24,6 +24,8 @@ cgmath = { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
 serde = "0.8.0"
 serde_yaml = "0.4.0"
 
+specs = "0.8.1"
+
 glium = "*"
 image = "0.10.0"
 shader_version = "0.2.1"
