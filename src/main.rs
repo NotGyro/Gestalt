@@ -129,7 +129,6 @@ fn main() {
         for y in lower_y .. upper_y {
             for z in lower_z .. upper_z {
                 space.load_or_create_c(x,y,z);
-                println!("Generating chunk at {}, {}, {}", x, y, z);
             }
         }
     }
@@ -331,27 +330,31 @@ fn main() {
                         },
                         None => ()
                     }
-                },/*
+                },
                 Event::MouseInput(state, btn) => {
                     if(state == glutin::ElementState::Released) {
-                    println!("X: {}", click_point.x);
-                    println!("Y: {}", click_point.y);
-                    println!("Z: {}", click_point.z);
-                    if((click_point.x >= 0.0) && (click_point.y >= 0.0) && (click_point.z >= 0.0)) { //Change this when it's no longer one chunk.
+                        println!("X: {}", click_point.x);
+                        println!("Y: {}", click_point.y);
+                        println!("Z: {}", click_point.z);
+                        //if((click_point.x >= 0.0) && (click_point.y >= 0.0) && (click_point.z >= 0.0)) { //Change this when it's no longer one chunk.
                         match btn {
                             glutin::MouseButton::Left => {
-                                chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, air_id.clone());
-                                remesh = true;
+                                //chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, air_id.clone());
+                                //remesh = true;
+                                let result_maybe = space.get(click_point.x as i32, click_point.y as i32, click_point.z as i32);
+                                match result_maybe { 
+                                    Some(val) => println!("The voxel is {}", val.name),
+                                    None => println!("The voxel is not loaded."),
+                                }
                             },
                             glutin::MouseButton::Right => {
-                                chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, stone_id.clone());
-                                remesh = true;
+                                //chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, stone_id.clone());
+                                //remesh = true;
                             }
                             _ => ()
                         }
                     }
-                    }
-                }*/
+                },
                 _ => (), //println!("Mystery event: {:?}", ev), 
             }
         }
@@ -393,7 +396,8 @@ fn main() {
                     let szy = bounds.upper.y - bounds.lower.y;
                     let szz = bounds.upper.z - bounds.lower.z;
                     let pos = bounds.lower;
-                    let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : (pos.x * szx as i32) as f32, y : (pos.y * szy as i32) as f32, z : (pos.z * szz as i32) as f32 });
+                    //let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : (pos.x * szx as i32) as f32, y : (pos.y * szy as i32) as f32, z : (pos.z * szz as i32) as f32 });
+                    let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : pos.x as f32, y : pos.y  as f32, z : pos.z  as f32 });
                     let mvp_matrix = perspective_matrix * view_matrix * chunk_model_matrix;
                     let uniforms = uniform! {
                         mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),

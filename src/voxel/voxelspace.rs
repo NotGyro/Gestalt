@@ -155,9 +155,11 @@ impl VoxelSpace {
         }*/
 
         if (z == 0) {
+            //println!("Generating surface chunk at {}, {}, {}", x, y, z);
             testworldgen_surface(&mut chunk, air_mat.clone(), stone_mat.clone(), dirt_mat.clone(), grass_mat.clone());
         }
         if (z < 0) {
+            //println!("Generating underground chunk at {}, {}, {}", x, y, z);
             testworldgen_underground(&mut chunk, air_mat.clone(), stone_mat.clone());
         }
         self.chunk_list.insert(VoxelPos{ x : x, y : y, z : z}, *chunk);
@@ -178,13 +180,17 @@ impl VoxelSpace {
         let c = select_chunk(x,y,z);
         return self.is_loaded_c(c.x, c.y, c.z);
     }
+
     /// Gets a list of areas full of valid voxels.
     pub fn get_regions(&self) -> Vec<VoxelRange<i32>> {
         let mut ret : Vec<VoxelRange<i32>>  = Vec::new();
         for (pos, chunk) in &self.chunk_list { 
+            let x = pos.x * CHUNK_X_LENGTH as i32;
+            let y = pos.y * CHUNK_Y_LENGTH as i32;
+            let z = pos.z * CHUNK_Z_LENGTH as i32;
             let current = VoxelRange { 
-                lower : VoxelPos { x : pos.x, y : pos.y, z : pos.z, }, 
-                upper : VoxelPos { x : pos.x + CHUNK_X_LENGTH as i32, y : pos.y + CHUNK_Y_LENGTH as i32, z : pos.z + CHUNK_Z_LENGTH as i32 },
+                lower : VoxelPos { x : x, y : y, z : z, }, 
+                upper : VoxelPos { x : x + CHUNK_X_LENGTH as i32, y : y + CHUNK_Y_LENGTH as i32, z : z + CHUNK_Z_LENGTH as i32 },
             };
             ret.push(current);
         }

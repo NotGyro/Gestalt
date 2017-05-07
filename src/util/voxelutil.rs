@@ -8,6 +8,7 @@ use num::traits::identities::One;
 use num::traits::identities::Zero;
 
 use std::marker::Copy;
+use std::fmt;
 
 /*Previously, we used these for voxel position types: 
 use std::ops::{Add, Sub, Mul, Div};
@@ -27,13 +28,27 @@ pub struct VoxelPos<T : Copy + Integer> {
 	pub x: T, pub y: T, pub z: T,
 }
 
+impl <T> fmt::Display for VoxelPos<T> where T : Copy + Integer + fmt::Display {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({}, {}, {})", self.x, self.y, self.z)
+    }
+}
+
+
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelRange<T : Copy + Integer> {
 	pub upper : VoxelPos<T>, pub lower : VoxelPos<T>,
 }
+
 impl <T> VoxelRange<T> where T : Copy + Integer { 
     pub fn get_iterator(&self) -> VoxelRangeIter<T> { 
         VoxelRangeIter { range : *self, pos : Some(self.lower) }
+    }
+}
+
+impl <T> fmt::Display for VoxelRange<T> where T : Copy + Integer + fmt::Display {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "({} to {})", self.lower, self.upper)
     }
 }
 

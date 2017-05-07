@@ -2,27 +2,22 @@ Notes
 ====
 Todo:
 
-SCRAP ALL OF THIS STUFF - WE ARE NOW NOT ONLY A VOXEL ENGINE.
-Priority #1 is to get a setup where me and Rukachan can both meaningfully work on the project at the same time.
-So, how can we accomplish this? First off, division of tasks.
-
-A few tasks immediately present themselves: 
-[ ] Resource management system - how do we design it, anyway? Possibly you'd have a template ResourceManager<T>, and you could then 
-    create a ResourceManager<Texture> / ResourceManager<Sound> and etc... -TASK CLAIMED BY Rukachan
-[ ] Basic skeleton of an entity system. I'll do this -Gyro.
-[ ] Bindable / rebindable keys, via TOML config file (this will probably involve macros).
-[ ] Some simplistic internal model renderer.
-[ ] Event bus stuff
-[ ] 
-
-----
 - [x] File I/O (don't overdo it, instead get something minimal without all of the self-describing stuff but make sure that it can be COMPOSED later.)
-- [ ] Change all of the get position upper / lower functions to return a value rather than an option, 
-and specify that requesting these values from a pseudo-infinite world gets you the bounding box of ... something (decide)
+- [x] Voxel bound changes. (Non-infinite voxel storages now have a trait to get the bounds).
 - [x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: No._
+- [x] Refactor Voxel Storages to use simpler trait bounds.
+- [ ] Get SimpleRenderer culling hidden faces.
 - [ ] Multiple chunks (bigworld), loading / unloading around the player.
-- [ ] Start on Lua scripting.
-- [ ] Iterators over VoxelStorages
+- [ ] Start on Lua scripting. (Or some other scripting language?)
+- [x] Iterators over VoxelStorages
+- [ ] Basic skeleton of an entity system. I'll do this.
+- [ ] Some simplistic internal model renderer.
+- [ ] NETWORKING.
+- [ ] Event bus stuff. Ties in with networking.
+- [ ] Resource management system - how do we design it, anyway? Possibly you'd have a template ResourceManager<T>, and you could then 
+    create a ResourceManager<Texture> / ResourceManager<Sound> and etc...
+- [ ] Bindable / rebindable keys, via TOML config file (this will probably involve macros).
+- [ ] Fix camera movement!
 
 ----
 
