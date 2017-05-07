@@ -1,26 +1,43 @@
 extern crate std;
+extern crate num;
 
+use std::iter::{Iterator, IntoIterator};
+
+use num::Integer;
+use num::traits::identities::One;
+use num::traits::identities::Zero;
+
+use std::marker::Copy;
+
+/*Previously, we used these for voxel position types: 
 use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
-use std::iter::{Iterator, IntoIterator};
 use std::num::{One};
+And then: T : Copy + Integer
+This was kind of a mess, so I'm refactoring it to use num::Integer.
+*/
+
+/// Type alias for trait for voxel position types, in case we ever need to change that.
+//trait VoxelCoordTrait : Copy + Integer + ... {}
+//impl <T> VoxelCoordTrait for T where T: Copy + Integer + ... {}
+//Should I refactor it to this? Unsure.
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct VoxelPos<T : Copy + Eq + Ord + Add<T, Output=T> + Sub + Mul + Div> {
+pub struct VoxelPos<T : Copy + Integer> {
 	pub x: T, pub y: T, pub z: T,
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct VoxelRange<T : Copy + Eq + Ord + Add<T, Output=T> + Sub + Mul + Div> {
+pub struct VoxelRange<T : Copy + Integer> {
 	pub upper : VoxelPos<T>, pub lower : VoxelPos<T>,
 }
-impl <T> VoxelRange<T> where T : One + Copy + Eq + Ord + Add<T, Output=T> + Sub + Mul + Div { 
+impl <T> VoxelRange<T> where T : Copy + Integer { 
     pub fn get_iterator(&self) -> VoxelRangeIter<T> { 
         VoxelRangeIter { range : *self, pos : Some(self.lower) }
     }
 }
 
-impl <T> IntoIterator for VoxelRange<T> where T : One + Copy + Eq + Ord + Add<T, Output=T> + Sub + Mul + Div { 
+impl <T> IntoIterator for VoxelRange<T> where T : Copy + Integer { 
     type Item = VoxelPos<T>;
     type IntoIter = VoxelRangeIter<T>;
     fn into_iter(self) -> VoxelRangeIter<T> {
@@ -28,12 +45,12 @@ impl <T> IntoIterator for VoxelRange<T> where T : One + Copy + Eq + Ord + Add<T,
     }
 }
 
-pub struct VoxelRangeIter<T : Copy + Eq + Ord + Add<T, Output=T> + Sub + Mul + Div> {
+pub struct VoxelRangeIter<T : Copy + Integer> {
     range : VoxelRange<T>,
     pos : Option<VoxelPos<T>>,
 }
 
-impl <T> Iterator for VoxelRangeIter<T> where T : One + Copy + Eq + Ord + Add<T, Output=T> + Sub + Mul + Div { 
+impl <T> Iterator for VoxelRangeIter<T> where T : Copy + Integer { 
     type Item = VoxelPos<T>;
     fn next(&mut self) -> Option<VoxelPos<T>> { 
         if(self.pos.is_none()) { 

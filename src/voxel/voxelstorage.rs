@@ -1,12 +1,22 @@
 extern crate std;
-use std::ops::{Add, Sub, Mul, Div};
-use std::cmp::{Ord, Eq};
+extern crate num;
+
 use std::string::String;
 use std::vec::Vec;
+use std::marker::Copy;
 use util::voxelutil::VoxelPos;
 use util::voxelutil::VoxelRange;
 use std::io;
 use std::io::prelude::*;
+
+//Previously, we used these for voxel position types:
+//use std::ops::{Add, Sub, Mul, Div};
+//use std::cmp::{Ord, Eq};
+
+use num::Integer;
+use num::traits::identities::One;
+use num::traits::identities::Zero;
+
 
 /// A basic trait for any 3d grid data structure.
 /// Type arguments are type of element, type of position.
@@ -22,7 +32,7 @@ use std::io::prelude::*;
 /// calling these methods / treating them as "flat" voxel
 /// structures implies acting on a level of detail of 0.
 
-pub trait VoxelStorage<T: Clone, P = u16> where P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P> {
+pub trait VoxelStorage<T: Clone, P = u16> where P : Copy + Integer {
     fn get(&self, x: P, y: P, z: P) -> Option<T>;
     fn getv(&self, coord: VoxelPos<P>) -> Option<T> {
         self.get(coord.x, coord.y, coord.z)
@@ -34,7 +44,7 @@ pub trait VoxelStorage<T: Clone, P = u16> where P : Copy + Eq + Ord + Add<P, Out
     }
 }
 
-pub trait VoxelStorageIOAble<T : Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P> {
+pub trait VoxelStorageIOAble<T : Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Integer {
     fn load<R: Read + Sized>(&mut self, reader: &mut R);
     fn save<W: Write + Sized>(&self, writer: &mut W) -> Result<usize, std::io::Error>;
 }
@@ -45,7 +55,7 @@ pub trait VoxelStorageIOAble<T : Clone, P = u16> : VoxelStorage<T, P> where P : 
 /// the range provided by get_bounds().
 /// Usually, this implies that the voxel storage is not paged.
 
-pub trait VoxelStorageBounded<T: Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P> {
+pub trait VoxelStorageBounded<T: Clone, P = u16> : VoxelStorage<T, P> where P : Copy + Integer {
     fn get_bounds(&self) -> VoxelRange<P>;
 }
 

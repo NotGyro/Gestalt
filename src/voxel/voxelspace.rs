@@ -1,5 +1,7 @@
 extern crate std;
 extern crate linear_map;
+extern crate num;
+
 use voxel::voxelstorage::VoxelStorage;
 use voxel::voxelarray::VoxelArray;
 use voxel::vspalette::VoxelPalette;
@@ -15,6 +17,8 @@ use std::path::Path;
 use std::error::Error;
 use std::fs::File;
 use std::fs::OpenOptions;
+
+use std::marker::Copy;
 
 use self::linear_map::LinearMap;
 use self::linear_map::Entry::{Occupied, Vacant};

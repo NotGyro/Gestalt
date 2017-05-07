@@ -3,16 +3,24 @@ extern crate std;
 extern crate serde;
 extern crate serde_yaml;
 
+extern crate num;
+
+use std::marker::Copy;
+
 use voxel::voxelstorage::*;
 use voxel::voxelarray::*;
-use std::ops::{Add, Sub, Mul, Div};
-use std::cmp::{Ord, Eq};
+
 use std::string::String;
 use std::vec::Vec;
 
 use util::voxelutil::VoxelPos;
 use util::voxelutil::VoxelRange;
-use util::num::USizeAble;
+
+use util::numbers::USizeAble;
+use num::Integer;
+use num::traits::identities::One;
+use num::traits::identities::Zero;
+use num::Unsigned; 
 
 use std::io;
 use std::io::prelude::*;
@@ -32,8 +40,8 @@ use self::serde_yaml::de::from_reader;
 ///First type argument is resulting voxel, second type argument is underlying voxel, third is underyling VoxelStorage, fourth is position
 #[derive(Clone, Debug)]
 pub struct VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Integer,
+            U : Clone + Integer + Unsigned + USizeAble,
             B : VoxelStorage<U, P> { 
                 
     pub base : Box<B>,
@@ -42,8 +50,8 @@ pub struct VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
 	position_type: std::marker::PhantomData<P>,
 }
 impl <T, U, B, P> VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div, 
+            P : Copy + Integer,
+            U : Clone + Integer + Unsigned + USizeAble, 
             B : VoxelStorage<U, P> { 
     pub fn new( b : Box<B>) -> VoxelPalette<T, U, B, P> {
         VoxelPalette { base : b, index : Vec::new(), rev_index : HashMap::new(), position_type: std::marker::PhantomData,}
@@ -62,8 +70,8 @@ impl <T, U, B, P> VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
 }
 
 impl <T, U, B, P> VoxelStorage<T, P> for VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Integer,
+            U : Clone + Integer + Unsigned + USizeAble,
             B : VoxelStorage<U, P> {
                 
     fn get(&self, x: P, y: P, z: P) -> Option<T> {
@@ -92,8 +100,8 @@ impl <T, U, B, P> VoxelStorage<T, P> for VoxelPalette<T, U, B, P> where T : Clon
 }
 
 impl <T, U, B, P> VoxelStorageBounded<T, P> for VoxelPalette<T, U, B, P> where T : Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Integer,
+            U : Clone + Integer + Unsigned + USizeAble,
             B : VoxelStorage<U, P> + VoxelStorageBounded<U,P> {
     fn get_bounds(&self) -> VoxelRange<P> { 
         return self.base.get_bounds();
@@ -101,8 +109,8 @@ impl <T, U, B, P> VoxelStorageBounded<T, P> for VoxelPalette<T, U, B, P> where T
 }
 
 impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + Deserialize + Clone + Eq + Hash,
-            P : Copy + Eq + Ord + Add<P, Output=P> + Sub<P, Output=P> + Mul<P, Output=P> + Div<P, Output=P>,
-            U : Clone + Eq + USizeAble + Eq + Ord + Add + Sub + Mul + Div,
+            P : Copy + Integer,
+            U : Clone + Integer + Unsigned + USizeAble,
             B : VoxelStorageIOAble<U, P> {
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]

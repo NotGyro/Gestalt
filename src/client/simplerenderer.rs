@@ -20,9 +20,10 @@ use glium::texture::Texture2dArray;
 use glium::texture::Texture2dDataSource;
 use glium::backend::glutin_backend::GlutinFacade;
 
-use std::path::Path;
 use std::error::Error;
 use std::fs::File;
+use std::path::Path;
+use std::io::BufReader;
 use std::ops::Deref;
 use std::cell::RefCell;
 use std::mem;
@@ -250,14 +251,20 @@ impl TextureArrayDyn {
         assert!(self.tex_data.len() < self.max_tex);
     }
     
-    fn ld_image(display : &GlutinFacade, path : String, size_x : u32, size_y : u32) -> Vec<u8> {
-        let mut texfile = File::open(path.clone()).unwrap();
-        let image = image::load(&texfile,
-                            image::PNG).unwrap().to_rgba();
+    fn ld_image(display : &GlutinFacade, path_name : String, size_x : u32, size_y : u32) -> Vec<u8> {
+        //let mut texfile = File::open(path.clone()).unwrap();
+        //let mut reader = BufReader::new(texfile);
+        
+        let path = Path::new(path_name.as_str());
+        //let mut buf: Vec<u8> = Vec::new();
+        //let length = reader.read_to_end(buf: &mut buf)
+        //let image = image::load(&reader,
+        //                    image::PNG).unwrap().to_rgba();
+        let image = image::open(path).unwrap().to_rgba();
         let image_dimensions = image.dimensions();
         assert_eq!(image_dimensions, (size_x, size_y));
         //According to compiler errors, a Piston image module image struct's into_raw() returns a Vec<u8>.
-        println!("Loaded texture file: {}", path.clone());
+        println!("Loaded texture file: {}", path_name.clone());
         return image.into_raw();
         //let buffer = image.into_raw();
         //return glium::texture::RawImage2d::from_raw_rgba(buffer, (size_x, size_y));

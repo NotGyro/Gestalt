@@ -1,9 +1,13 @@
 extern crate std;
+extern crate num;
+
+use std::marker::Copy;
+
 //use std::ops::{Add, Sub, Mul, Div};
 //use std::cmp::{Ord, Eq};
 use std::mem::size_of;
 use voxel::voxelstorage::*;
-use util::num::USizeAble;
+use util::numbers::USizeAble;
 use util::voxelutil::*;
 //use voxel::voxelstorage::ContiguousVS;
 use std::io;
@@ -16,8 +20,10 @@ use std::fs::OpenOptions;
 use std::io::BufWriter;
 use std::borrow::Cow;
 
-use std::ops::{Add, Sub, Mul, Div};
-use std::cmp::{Ord, Eq};
+use num::Integer;
+use num::traits::identities::One;
+use num::traits::identities::Zero;
+use num::Unsigned;
 
 /// A 3D packed array of voxels - it's a single flat buffer in memory,
 /// which is indexed by voxel positions with some math done on them. 

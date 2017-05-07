@@ -15,6 +15,8 @@ pub mod client;
 
 #[macro_use] extern crate glium;
 #[macro_use] extern crate cgmath;
+extern crate num;
+
 extern crate time;
 extern crate image;
 
@@ -177,7 +179,7 @@ fn main() {
 
     //let mut perspective_matrix : cgmath::Matrix4<f32> = cgmath::perspective(cgmath::deg(45.0), 1.333, 0.0001, 100.0);
     //let mut view_matrix : Matrix4<f32> = Matrix4::look_at(view_eye, view_center, view_up);
-    let mut model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);    
+    let mut model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);
     
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
