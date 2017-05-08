@@ -1,7 +1,18 @@
+extern crate serde;
+//extern crate serde_derive;
+extern crate serde_yaml;
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+use self::serde::{Serialize, Deserialize};
+use self::serde::de::DeserializeOwned;
+use self::serde_yaml::{to_writer, from_reader};
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MaterialID {
     pub name : String,
+}
+
+impl Into<String> for MaterialID { 
+    fn into(self) -> String { self.name }
 }
 
 #[derive(Clone)]

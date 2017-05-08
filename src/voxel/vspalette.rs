@@ -28,12 +28,11 @@ use std::ops::{Index, IndexMut};
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use self::serde::ser::Serialize;
-use self::serde_yaml::ser::Serializer;
-use self::serde_yaml::ser::to_writer;
-use self::serde::de::Deserialize;
-use self::serde_yaml::de::Deserializer;
-use self::serde_yaml::de::from_reader;
+use self::serde::{Serialize, Deserialize};
+use self::serde::de::DeserializeOwned;
+use self::serde_yaml::{to_writer, from_reader};
+//use self::serde_yaml::ser::Serializer;
+//use self::serde_yaml::de::Deserializer;
 
  
 ///Takes an underlying VoxelStorage and makes a palette of its values to another type.
@@ -108,7 +107,7 @@ impl <T, U, B, P> VoxelStorageBounded<T, P> for VoxelPalette<T, U, B, P> where T
     }
 }
 
-impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + Deserialize + Clone + Eq + Hash,
+impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + DeserializeOwned + Clone + Eq + Hash,
             P : Copy + Integer,
             U : Clone + Integer + Unsigned + USizeAble,
             B : VoxelStorageIOAble<U, P> {

@@ -44,6 +44,12 @@ impl <T> VoxelRange<T> where T : Copy + Integer {
     pub fn get_iterator(&self) -> VoxelRangeIter<T> { 
         VoxelRangeIter { range : *self, pos : Some(self.lower) }
     }
+
+    pub fn contains(&self, point : VoxelPos<T>) -> bool { 
+         ( point.x >= self.lower.x ) && ( point.x < self.upper.x ) &&
+         ( point.y >= self.lower.y ) && ( point.y < self.upper.y ) &&
+         ( point.x >= self.lower.z ) && ( point.z < self.upper.z )
+    }
 }
 
 impl <T> fmt::Display for VoxelRange<T> where T : Copy + Integer + fmt::Display {

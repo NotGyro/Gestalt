@@ -6,8 +6,6 @@
 #![allow(unused_variables)]
 #![allow(unused_must_use)]
 
-
-#![feature(zero_one)]
 //#![feature(collections)]
 pub mod util;
 pub mod voxel;
@@ -15,6 +13,7 @@ pub mod client;
 
 #[macro_use] extern crate glium;
 #[macro_use] extern crate cgmath;
+#[macro_use] extern crate serde_derive;
 extern crate num;
 
 extern crate time;
@@ -46,6 +45,7 @@ use std::cmp;
 use std::f32::consts::*;
 use std::ops::Neg;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use cgmath::Matrix4;
 use cgmath::Vector3;
@@ -108,6 +108,8 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
 }
 
 fn main() {
+
+    println!("{:?}", std::env::current_exe());
     
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
@@ -151,7 +153,7 @@ fn main() {
     println!(line!());
     let program = glium::Program::from_source(&display, vertex_shader_src.as_ref(), fragment_shader_src.as_ref(), None).unwrap();
 
-    let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+    
 
     let mut t: f32 = -0.5;
     
@@ -214,22 +216,23 @@ fn main() {
     let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), image_dimensions);
     let texture = glium::texture::Texture2d::new(&display, image).unwrap();*/
     let mut mat_art_manager = MatArtMapping::new();
-    let mut texture_manager = TextureArrayDyn::new(64, 64, 4096);
+
+    let mut renderer : SimpleVoxelMesher = SimpleVoxelMesher::new();
+
     mat_art_manager.insert(grass_id.clone(), grass_art.clone());
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
+
+    //Test this
+
+    space.unload_c(1,1,0);
 
     //let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
     let mut meshes : Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = Vec::new();
     //pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
     //                    textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
     for chunk in space.get_regions() { 
-        //Push a tuple of the boundaries of the chunk and its mesh data.
-        meshes.push(
-            (chunk, 
-             Box::new( client::simplerenderer::make_voxel_mesh(&space, &display, chunk, &mut texture_manager, &mat_art_manager) ) 
-            )
-        );
+        renderer.force_mesh(&space, &display, chunk, &mat_art_manager);
     }
     //---- Some movement stuff ----
     
@@ -247,7 +250,7 @@ fn main() {
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
     while keeprunning {
-        let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
+        //let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
 
 		if(vert_angle > 1.57) {
 			vert_angle = 1.57;
@@ -270,6 +273,7 @@ fn main() {
         let up = forward.cross( right );
 
         let click_point = camera_pos + forward.normalize(); //Normalize
+        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x as i32, y: click_point.y as i32, z: click_point.z as i32};
         
         let elapsed = (precise_time_s() - lastupdate) as f32;
         for ev in display.poll_events() {
@@ -333,23 +337,23 @@ fn main() {
                 },
                 Event::MouseInput(state, btn) => {
                     if(state == glutin::ElementState::Released) {
-                        println!("X: {}", click_point.x);
-                        println!("Y: {}", click_point.y);
-                        println!("Z: {}", click_point.z);
-                        //if((click_point.x >= 0.0) && (click_point.y >= 0.0) && (click_point.z >= 0.0)) { //Change this when it's no longer one chunk.
+                        //println!("X: {}", click_point.x);
+                        //println!("Y: {}", click_point.y);
+                        //println!("Z: {}", click_point.z);
                         match btn {
                             glutin::MouseButton::Left => {
-                                //chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, air_id.clone());
+                                space.setv(click_point_vx, air_id.clone());
+                                renderer.notify_remesh(click_point_vx);
                                 //remesh = true;
-                                let result_maybe = space.get(click_point.x as i32, click_point.y as i32, click_point.z as i32);
-                                match result_maybe { 
-                                    Some(val) => println!("The voxel is {}", val.name),
-                                    None => println!("The voxel is not loaded."),
-                                }
+                                //let result_maybe = space.get(click_point.x as i32, click_point.y as i32, click_point.z as i32);
+                                //match result_maybe { 
+                                //    Some(val) => println!("The voxel is {}", val.name),
+                                //    None => println!("The voxel is not loaded."),
+                                //}
                             },
                             glutin::MouseButton::Right => {
-                                //chunk.set(click_point.x as u16, click_point.y as u16, click_point.z as u16, stone_id.clone());
-                                //remesh = true;
+                                space.setv(click_point_vx, stone_id.clone());
+                                renderer.notify_remesh(click_point_vx);
                             }
                             _ => ()
                         }
@@ -373,59 +377,17 @@ fn main() {
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
 
-        /*if(remesh) {
-            map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
-            remesh = false;
-        }*/
+        //let mut test : _ = display.draw();
+
+        //Remesh chunks if necessary.
+        renderer.process_remesh(&space, &display, &mat_art_manager);
 
         let mut target = display.draw();
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
-
-        if(texture_manager.textures.is_some()) {
-            let textures = texture_manager.textures.unwrap(); //Move
-            let iter = mesh.into_iter();
-            for &mut (bounds, ref mesh) in iter
-            {
-                //Create a context so uniforms dies and textures is no longer borrowed.
-                {
-                    /*In C++ I did this next bit with:
-                        glm::mat4 Model = glm::translate(glm::mat4(1.0f), 
-                        glm::vec3(DrawIter->first->getXPosition()*CHUNK_SIZE, DrawIter->first->getYPosition()*CHUNK_SIZE, DrawIter->first->getZPosition()*CHUNK_SIZE));
-                    */
-                    let szx = bounds.upper.x - bounds.lower.x;
-                    let szy = bounds.upper.y - bounds.lower.y;
-                    let szz = bounds.upper.z - bounds.lower.z;
-                    let pos = bounds.lower;
-                    //let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : (pos.x * szx as i32) as f32, y : (pos.y * szy as i32) as f32, z : (pos.z * szz as i32) as f32 });
-                    let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : pos.x as f32, y : pos.y  as f32, z : pos.z  as f32 });
-                    let mvp_matrix = perspective_matrix * view_matrix * chunk_model_matrix;
-                    let uniforms = uniform! {
-                        mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
-                        tex: &textures,
-                    };
-                    /*target.draw(&vertex_buffer, &indices, &program, &uniforms,
-                        &Default::default()).unwrap();*/
-                    target.draw(&(**mesh), &indices, &program, &uniforms,
-                        &params).unwrap();
-                }
-            }
-
-            texture_manager.textures = Some(textures); //Move back
-        }
+        renderer.draw(perspective_matrix, view_matrix, &mut target, &program, &params);
         target.finish().unwrap();
         lastupdate = precise_time_s();
     }
     //--------- Save our file on closing --------------
-    /*match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&chunk_path) {
-        // The `description` method of `io::Error` returns a string that
-        // describes the error
-        Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
-        Ok(mut file) => {
-            chunk.save(&mut file);
-        },
-    };*/
+    /**/
 }

@@ -19,6 +19,10 @@ use glium::texture::RawImage2d;
 use glium::texture::Texture2dArray;
 use glium::texture::Texture2dDataSource;
 use glium::backend::glutin_backend::GlutinFacade;
+use glium::Frame;
+use glium::Surface;
+
+use cgmath::{Matrix4, Vector3, Vector4, Point3, InnerSpace};
 
 use std::error::Error;
 use std::fs::File;
@@ -27,6 +31,7 @@ use std::io::BufReader;
 use std::ops::Deref;
 use std::cell::RefCell;
 use std::mem;
+use std::collections::HashSet;
 
 #[derive(Copy, Clone)]
 pub struct PackedVertex {
@@ -294,6 +299,77 @@ struct VoxelRenderInfo {
 }
 pub type MatArtMapping = HashMap<MaterialID, MatArtSimple>;
 
+pub struct SimpleVoxelMesher {
+    meshes : HashMap<VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>>,
+    remesh_list: HashSet<VoxelRange<i32>>,
+    texture_manager : TextureArrayDyn,
+}
+impl SimpleVoxelMesher {
+    pub fn new() -> Self {
+        SimpleVoxelMesher { 
+            meshes : HashMap::new(),
+            remesh_list : HashSet::new(),
+            texture_manager : TextureArrayDyn::new(64, 64, 4096),
+        }
+    }
+    /// Add the mesh at this location to the list of meshes which need to be re-built.
+    pub fn notify_remesh(&mut self, pos : VoxelPos<i32>) {
+        for(range, _) in &self.meshes { 
+            if(range.contains(pos)) {
+                if(!self.remesh_list.contains(range)){
+                    self.remesh_list.insert(*range);
+                }
+            }
+        }
+    }
+    /// Re-mesh every updated mesh in this voxel storage.
+    pub fn process_remesh(&mut self, vs : &VoxelStorage<MaterialID, i32>, 
+                    display : &GlutinFacade, art_map : &MatArtMapping) {
+        //We use drain here to clear the list and iterate through it at the same time
+        for coords in self.remesh_list.drain() { 
+            if(self.meshes.contains_key(&coords)) {
+                self.meshes.remove(&coords);
+                self.meshes.insert(coords, Box::new( make_voxel_mesh(vs, display, coords, &mut self.texture_manager, art_map)) );
+                //Only add the mesh if we had it before.
+            }
+        }
+    }
+    
+    /// Immediately add a mess for these coordinates to the renderer.
+    pub fn force_mesh(&mut self, vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>,
+                        art_map : &MatArtMapping) {
+        if(self.meshes.contains_key(&range)) {
+            self.meshes.remove(&range);
+        }
+        self.meshes.insert(range, Box::new( make_voxel_mesh(vs, display, range, &mut self.texture_manager, art_map)) );
+    }
+
+    /// Draw the meshes within an OpenGL context.
+    pub fn draw(&mut self, perspective_matrix : Matrix4<f32>, view_matrix : Matrix4<f32>,
+            target : &mut glium::Frame, program : &glium::Program, params : &glium::DrawParameters) {
+        let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+        match self.texture_manager.textures {
+            Some(ref textures) => {
+                for (bounds, ref mesh) in &self.meshes {
+                    //Create a context so uniforms dies and textures is no longer borrowed.
+                    {
+                        let pos = bounds.lower;
+                        let chunk_model_matrix = Matrix4::from_translation(Vector3{ x : pos.x as f32, y : pos.y  as f32, z : pos.z  as f32 });
+                        let mvp_matrix = perspective_matrix * view_matrix * chunk_model_matrix;
+                        let uniforms = uniform! {
+                            mvp: Into::<[[f32; 4]; 4]>::into(mvp_matrix),
+                            tex: textures,
+                        };
+                        target.draw(&(***mesh), &indices, program, &uniforms,
+                            params).unwrap();
+                    }
+                }
+            },
+            None => (),
+        }
+    }
+}
+
 pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
                         textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
                             -> glium::VertexBuffer<PackedVertex> {
@@ -301,8 +377,6 @@ pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFac
     let mut drawable : Vec<VoxelRenderInfo> = Vec::new();
     let mut rebuild_tex : bool = false;
 
-    println!("Meshing voxel range: {}", range);
-    //println!("Meshing chunk at: {}, {}, {}", range.lower.x, range.lower.y, range.lower.z);
     for pos in range {
         let result = vs.getv(pos);
         if result.is_some() {

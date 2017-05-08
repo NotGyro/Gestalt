@@ -21,8 +21,9 @@ time = "*"
 linear-map = { git = "https://github.com/contain-rs/linear-map" }
 cgmath = { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
 
-serde = "0.8.0"
-serde_yaml = "0.4.0"
+serde = "1.0.2"
+serde_yaml = "0.7.0"
+serde_derive = "1.0.2"
 
 specs = "0.8.1"
 

@@ -1,16 +1,20 @@
 Notes
 ====
+VoxelSpace can't be the only thing that knows chunks exist. A separate loader / unloader trait and struct(s) should probably be made.
+Unloading range: Each chunk starts each sweep marked for unloading, then loading range code marks chunks in range of a loader to be kept.
+
 Todo:
 
 - [x] File I/O (don't overdo it, instead get something minimal without all of the self-describing stuff but make sure that it can be COMPOSED later.)
 - [x] Voxel bound changes. (Non-infinite voxel storages now have a trait to get the bounds).
 - [x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: No._
 - [x] Refactor Voxel Storages to use simpler trait bounds.
+- [x] Fix weird layer cake rendering thing.
 - [ ] Get SimpleRenderer culling hidden faces.
 - [ ] Multiple chunks (bigworld), loading / unloading around the player.
 - [ ] Start on Lua scripting. (Or some other scripting language?)
 - [x] Iterators over VoxelStorages
-- [ ] Basic skeleton of an entity system. I'll do this.
+- [ ] Basic skeleton of an entity system.
 - [ ] Some simplistic internal model renderer.
 - [ ] NETWORKING.
 - [ ] Event bus stuff. Ties in with networking.

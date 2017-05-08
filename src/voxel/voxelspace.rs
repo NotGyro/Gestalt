@@ -3,8 +3,9 @@ extern crate linear_map;
 extern crate num;
 
 use voxel::voxelstorage::VoxelStorage;
-use voxel::voxelarray::VoxelArray;
-use voxel::vspalette::VoxelPalette;
+use voxel::voxelstorage::VoxelStorageIOAble;
+use voxel::voxelarray::*;
+use voxel::vspalette::*;
 
 use voxel::material::MaterialID;
 use voxel::material::MaterialIndex;
@@ -116,8 +117,6 @@ pub struct VoxelSpace {
     mat_idx : MaterialIndex,
     pub not_loaded_val : MaterialID,
     pub error_val : MaterialID,
-    //upper_corner : VoxelPos<i32>, 
-    //lower_corner : VoxelPos<i32>
 }
 
 
@@ -129,8 +128,6 @@ impl VoxelSpace {
             not_loaded_val : mat_idx.for_name(String::from("reserved.not_loaded")),
             error_val : mat_idx.for_name(String::from("reserved.error")),
             mat_idx : mat_idx,
-            //upper_corner : VoxelPos { x : 0, y : 0, z : 0 },
-            //lower_corner : VoxelPos { x : 0, y : 0, z : 0 }
         }
     }
     /// Loads the chunk if there is saved data for it, or creates it via worldgen if not. 
@@ -155,11 +152,9 @@ impl VoxelSpace {
         }*/
 
         if (z == 0) {
-            //println!("Generating surface chunk at {}, {}, {}", x, y, z);
             testworldgen_surface(&mut chunk, air_mat.clone(), stone_mat.clone(), dirt_mat.clone(), grass_mat.clone());
         }
         if (z < 0) {
-            //println!("Generating underground chunk at {}, {}, {}", x, y, z);
             testworldgen_underground(&mut chunk, air_mat.clone(), stone_mat.clone());
         }
         self.chunk_list.insert(VoxelPos{ x : x, y : y, z : z}, *chunk);
@@ -171,7 +166,7 @@ impl VoxelSpace {
         self.load_or_create_c(c.x, c.y, c.z);
     }
     /// Tells you if we have loaded a chunk yet or not.
-    /// Note: These are chunk positions, not voxel positions. */
+    /// Note: These are chunk positions, not voxel positions.
     pub fn is_loaded_c(&self, x : i32, y : i32, z : i32) -> bool {
         self.chunk_list.contains_key(&VoxelPos{x : x, y : y, z : z})
     }
@@ -179,6 +174,67 @@ impl VoxelSpace {
     pub fn is_loaded(&self, x : i32, y : i32, z : i32) -> bool {
         let c = select_chunk(x,y,z);
         return self.is_loaded_c(c.x, c.y, c.z);
+    }
+
+    /// Saves a chunk.
+    /// Note: These are chunk positions, not voxel positions.
+    fn save_c(&self, x : i32, y : i32, z : i32) {
+        let display_path = format!("map/c{}x{}y{}z.bin", x, y, z);
+        let chunk_path = Path::new(&display_path);
+        println!("Saving chunk at {}, {}, {}", x, y, z);
+        match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&chunk_path) {
+            // The `description` method of `io::Error` returns a string that
+            // describes the error
+            Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
+            Ok(mut file) => {
+                let chunk_maybe = self.chunk_list.get(&VoxelPos{x : x, y : y, z : z});
+                match chunk_maybe {
+                    None => return, //We don't have a chunk for this position, we cannot save it.
+                    Some(chunk) => {
+                        chunk.save(&mut file);
+                    },
+                }
+            },
+        };
+    }
+
+    /// Saves a location which includes this voxel.
+    /// Note: These are voxel positions, not chunk positions.
+    pub fn save(&self, x : i32, y : i32, z : i32) {
+        let c = select_chunk(x,y,z);
+        self.save_c(c.x, c.y, c.z);
+    }
+
+    /// Saves all currently loaded terrain for this voxel space.
+    pub fn save_all(&self) { 
+        for (pos, chunk) in &self.chunk_list {
+            self.save_c(pos.x, pos.y, pos.z);
+        }
+    }
+
+    /// Saves and unloads a chunk.
+    /// Note: These are chunk positions, not voxel positions.
+    pub fn unload_c(&mut self, x : i32, y : i32, z : i32) {
+        self.save_c(x,y,z);
+        self.chunk_list.remove(&VoxelPos{ x : x, y : y, z : z});
+    }
+
+    /// Saves and unloads a location corresponding to this voxel.
+    /// Note: These are voxel positions, not chunk positions.
+    pub fn unload(&mut self, x : i32, y : i32, z : i32) {
+        let c = select_chunk(x,y,z);
+        self.unload_c(c.x, c.y, c.z);
+    }
+
+    pub fn unload_all(&mut self) {
+        let temp_list = self.chunk_list.clone();
+        for (pos, chunk) in temp_list { 
+            self.unload_c(pos.x, pos.y, pos.z);
+        }
     }
 
     /// Gets a list of areas full of valid voxels.
