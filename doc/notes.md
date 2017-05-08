@@ -7,11 +7,14 @@ Todo:
 
 - [x] File I/O (don't overdo it, instead get something minimal without all of the self-describing stuff but make sure that it can be COMPOSED later.)
 - [x] Voxel bound changes. (Non-infinite voxel storages now have a trait to get the bounds).
-- [x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: No._
+- [x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: Sort-of._
 - [x] Refactor Voxel Storages to use simpler trait bounds.
 - [x] Fix weird layer cake rendering thing.
 - [ ] Get SimpleRenderer culling hidden faces.
-- [ ] Multiple chunks (bigworld), loading / unloading around the player.
+- [x] Multiple chunks (bigworld)
+- [ ] Loading / unloading around the player. (Necessary for small but still chunked world?)
+- [ ] For performance, switch to using interned strings for Material ID (see https://github.com/servo/string-cache )
+- [ ] Pass material IDs by reference to avoid having to clone constantly.
 - [ ] Start on Lua scripting. (Or some other scripting language?)
 - [x] Iterators over VoxelStorages
 - [ ] Basic skeleton of an entity system.

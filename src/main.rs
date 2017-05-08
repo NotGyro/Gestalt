@@ -136,8 +136,8 @@ fn main() {
     }
     
     //---- Set up window ----
-    let screen_width : u32 = 800;
-    let screen_height : u32 = 600;
+    let screen_width : u32 = 1024;
+    let screen_height : u32 = 768;
     let display = make_display(screen_width, screen_height);
     let mut keeprunning = true;
     let mut window = display.get_window().unwrap();
@@ -342,8 +342,12 @@ fn main() {
                         //println!("Z: {}", click_point.z);
                         match btn {
                             glutin::MouseButton::Left => {
-                                space.setv(click_point_vx, air_id.clone());
-                                renderer.notify_remesh(click_point_vx);
+                                let old_material = space.getv(click_point_vx).unwrap();
+                                let set_material = air_id.clone();
+                                space.setv(click_point_vx, set_material.clone());
+                                if(old_material != set_material.clone()) {
+                                    renderer.notify_remesh(click_point_vx);
+                                }
                                 //remesh = true;
                                 //let result_maybe = space.get(click_point.x as i32, click_point.y as i32, click_point.z as i32);
                                 //match result_maybe { 
@@ -352,8 +356,12 @@ fn main() {
                                 //}
                             },
                             glutin::MouseButton::Right => {
-                                space.setv(click_point_vx, stone_id.clone());
-                                renderer.notify_remesh(click_point_vx);
+                                let old_material = space.getv(click_point_vx).unwrap();
+                                let set_material = stone_id.clone();
+                                space.setv(click_point_vx, set_material.clone());
+                                if(old_material != set_material.clone()) {
+                                    renderer.notify_remesh(click_point_vx);
+                                }
                             }
                             _ => ()
                         }
@@ -380,7 +388,13 @@ fn main() {
         //let mut test : _ = display.draw();
 
         //Remesh chunks if necessary.
+        
+        let before_remesh = precise_time_s();
         renderer.process_remesh(&space, &display, &mat_art_manager);
+        let remesh_time = precise_time_s() - before_remesh;
+        if(remesh_time > 0.01) {
+            println!("Took {} seconds to remesh chunks.", remesh_time);
+        }
 
         let mut target = display.draw();
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
@@ -389,5 +403,5 @@ fn main() {
         lastupdate = precise_time_s();
     }
     //--------- Save our file on closing --------------
-    /**/
+    space.unload_all();
 }
