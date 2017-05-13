@@ -31,6 +31,8 @@ use std::hash::Hash;
 use self::serde::{Serialize, Deserialize};
 use self::serde::de::DeserializeOwned;
 use self::serde_yaml::{to_writer, from_reader};
+
+use string_cache::DefaultAtom as Atom;
 //use self::serde_yaml::ser::Serializer;
 //use self::serde_yaml::de::Deserializer;
 
@@ -107,6 +109,7 @@ impl <T, U, B, P> VoxelStorageBounded<T, P> for VoxelPalette<T, U, B, P> where T
     }
 }
 
+/*
 impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + DeserializeOwned + Clone + Eq + Hash,
             P : Copy + Integer,
             U : Clone + Integer + Unsigned + USizeAble,
@@ -125,7 +128,7 @@ impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T 
         to_writer(writer, &self.index);
         return res;
     }
-}
+} */
 
 #[test]
 fn test_palette() {

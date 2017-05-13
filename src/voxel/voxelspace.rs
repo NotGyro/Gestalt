@@ -125,8 +125,8 @@ impl VoxelSpace {
     pub fn new(mat_idx : MaterialIndex) -> Self {
         VoxelSpace { 
             chunk_list : LinearMap::with_capacity(EXPECTED_CHUNKS),
-            not_loaded_val : mat_idx.for_name(String::from("reserved.not_loaded")),
-            error_val : mat_idx.for_name(String::from("reserved.error")),
+            not_loaded_val : mat_idx.for_name(&String::from("reserved.not_loaded")),
+            error_val : mat_idx.for_name(&String::from("reserved.error")),
             mat_idx : mat_idx,
         }
     }
@@ -141,10 +141,10 @@ impl VoxelSpace {
         if(z > 0) {
             return;
         }
-        let air_mat = self.mat_idx.for_name(String::from("test.air"));
-        let stone_mat = self.mat_idx.for_name(String::from("test.stone"));
-        let dirt_mat = self.mat_idx.for_name(String::from("test.dirt"));
-        let grass_mat = self.mat_idx.for_name(String::from("test.grass"));
+        let air_mat = self.mat_idx.for_name(&String::from("test.air"));
+        let stone_mat = self.mat_idx.for_name(&String::from("test.stone"));
+        let dirt_mat = self.mat_idx.for_name(&String::from("test.dirt"));
+        let grass_mat = self.mat_idx.for_name(&String::from("test.grass"));
 
         let mut chunk = Chunk::new_chunk(air_mat.clone());
         /*if (z > 0) { 
@@ -176,6 +176,7 @@ impl VoxelSpace {
         return self.is_loaded_c(c.x, c.y, c.z);
     }
 
+    /*
     /// Saves a chunk.
     /// Note: These are chunk positions, not voxel positions.
     fn save_c(&self, x : i32, y : i32, z : i32) {
@@ -235,7 +236,7 @@ impl VoxelSpace {
         for (pos, chunk) in temp_list { 
             self.unload_c(pos.x, pos.y, pos.z);
         }
-    }
+    } */
 
     /// Gets a list of areas full of valid voxels.
     pub fn get_regions(&self) -> Vec<VoxelRange<i32>> {
@@ -280,10 +281,10 @@ impl VoxelStorage<MaterialID, i32> for VoxelSpace {
 fn gen_test_space(range : VoxelRange<i32>) -> VoxelSpace {
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
-    let air_id : MaterialID = mat_idx.for_name(String::from("Air"));
-    let stone_id : MaterialID = mat_idx.for_name(String::from("Stone"));
-    let dirt_id : MaterialID = mat_idx.for_name(String::from("Dirt"));
-    let grass_id : MaterialID = mat_idx.for_name(String::from("Grass"));
+    let air_id : MaterialID = mat_idx.for_name(&String::from("Air"));
+    let stone_id : MaterialID = mat_idx.for_name(&String::from("Stone"));
+    let dirt_id : MaterialID = mat_idx.for_name(&String::from("Dirt"));
+    let grass_id : MaterialID = mat_idx.for_name(&String::from("Grass"));
     
     let mut space = VoxelSpace::new(mat_idx);
     for pos in range {

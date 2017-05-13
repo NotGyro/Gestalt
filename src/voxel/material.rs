@@ -1,11 +1,71 @@
 extern crate serde;
-//extern crate serde_derive;
 extern crate serde_yaml;
+extern crate string_cache;
+extern crate lazy_static;
 
 use self::serde::{Serialize, Deserialize};
 use self::serde::de::DeserializeOwned;
 use self::serde_yaml::{to_writer, from_reader};
 
+use string_cache::DefaultAtom as Atom;
+
+use std::sync::Mutex;
+
+lazy_static! {
+    static ref INTERNAL_ID_MAPPING : Mutex<Vec<String>> = Mutex::new(vec![]);
+}
+
+fn id_for(name : &String) -> Option<u64> {
+    match INTERNAL_ID_MAPPING.lock().unwrap().iter().position(|ref n| **n == *name) {
+        /// An ID exists which matches this name.
+        Some(idx) => return Some(idx as u64),
+        None => return None,
+    }
+}
+fn id_for_create(name : &String) -> u64 {
+    match id_for(name) {
+        Some(idx) => return idx,
+        None => {
+            let mut idmap_handle = INTERNAL_ID_MAPPING.lock().unwrap();
+            //The value of len(), when used as an index, is one cell past the end of the vector.
+            let temp_len = idmap_handle.len() as u64;
+            idmap_handle.push(name.clone());
+            //After pushing, temp_len will now point to the index of name in the mapping. Calling len() on it again would now yield an index one unit past name.
+            return temp_len;
+        },
+    }
+}
+fn name_for(id : u64) -> String {
+    //TODO: Better error handling here.
+    INTERNAL_ID_MAPPING.lock().unwrap().get(id as usize).unwrap().clone()
+}
+
+pub trait SerializesAs<T> {
+    fn get_serialize(&self) -> T;
+    fn set_serialize(&self, value : T);
+}
+
+/// An identifier for a material.
+/// These should act like Atoms: Constructing the same Material ID struct with the same name in two completely different contexts should result in functionally the same value.
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct MaterialID {
+    /// The internal, in-memory representation of the ID.
+    /// Since it's a Copy type and not a reference, comparisons and assignments using it should be very fast.
+    /// This should NOT be used outside of material.rs. It should not even be sent over the network.
+    /// It will not stay valid between disk writes. It really is just a volatile optimization.
+    internal_id : u64,
+}
+impl MaterialID { 
+    pub fn to_name(&self) -> String {
+        name_for(self.internal_id)
+    }
+    pub fn from_name(name : &String) -> Self {
+        MaterialID { internal_id : id_for_create(name) }
+    }
+}
+//type MaterialID = Atom;
+
+/*
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MaterialID {
     pub name : String,
@@ -13,8 +73,9 @@ pub struct MaterialID {
 
 impl Into<String> for MaterialID { 
     fn into(self) -> String { self.name }
-}
+}*/
 
+//Is this still totally necessary? I suppose it'll be necessary when whe associate behaviors with IDs.
 #[derive(Clone)]
 pub struct MaterialIndex { }
 
@@ -22,11 +83,11 @@ impl MaterialIndex {
     pub fn new() -> Self {
         MaterialIndex { }
     }
-    pub fn for_name(&self, n : String) -> MaterialID {
-        MaterialID { name : n }
+    pub fn for_name(&self, n : &String) -> MaterialID {
+        MaterialID::from_name(n)
     }
     pub fn name_of(&self, mat : MaterialID ) -> String { 
-        mat.name.clone()
+        mat.to_name()
     }
 }
 

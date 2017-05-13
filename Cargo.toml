@@ -18,18 +18,19 @@ panic = 'unwind'   # panic strategy (`-C panic=...`), can also be 'abort'
 [dependencies]
 num = "0.1.37"
 time = "*"
-linear-map = { git = "https://github.com/contain-rs/linear-map" }
 cgmath = { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
 
 serde = "1.0.2"
 serde_yaml = "0.7.0"
 serde_derive = "1.0.2"
 
+lazy_static = "0.2.8"
 specs = "0.8.1"
+string_cache = "0.5.0"
+linear-map = { git = "https://github.com/contain-rs/linear-map" }
 
 glium = "*"
 image = "0.10.0"
 shader_version = "0.2.1"
-
 
 # conrod = "0.38.2"

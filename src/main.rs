@@ -14,6 +14,8 @@ pub mod client;
 #[macro_use] extern crate glium;
 #[macro_use] extern crate cgmath;
 #[macro_use] extern crate serde_derive;
+#[macro_use] extern crate string_cache;
+#[macro_use] extern crate lazy_static;
 extern crate num;
 
 extern crate time;
@@ -113,10 +115,10 @@ fn main() {
     
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
-    let air_id : MaterialID = mat_idx.for_name(String::from("test.air"));
-    let stone_id : MaterialID = mat_idx.for_name(String::from("test.stone"));
-    let dirt_id : MaterialID = mat_idx.for_name(String::from("test.dirt"));
-    let grass_id : MaterialID = mat_idx.for_name(String::from("test.grass"));
+    let air_id : MaterialID = mat_idx.for_name(&String::from("test.air"));
+    let stone_id : MaterialID = mat_idx.for_name(&String::from("test.stone"));
+    let dirt_id : MaterialID = mat_idx.for_name(&String::from("test.dirt"));
+    let grass_id : MaterialID = mat_idx.for_name(&String::from("test.grass"));
     
     let mut space = VoxelSpace::new(mat_idx);
     
@@ -223,9 +225,7 @@ fn main() {
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
 
-    //Test this
-
-    space.unload_c(1,1,0);
+    //space.unload_c(1,1,0);
 
     //let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
     let mut meshes : Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = Vec::new();
@@ -403,5 +403,5 @@ fn main() {
         lastupdate = precise_time_s();
     }
     //--------- Save our file on closing --------------
-    space.unload_all();
+    //space.unload_all();
 }

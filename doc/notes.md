@@ -13,8 +13,14 @@ Todo:
 - [ ] Get SimpleRenderer culling hidden faces.
 - [x] Multiple chunks (bigworld)
 - [ ] Loading / unloading around the player. (Necessary for small but still chunked world?)
-- [ ] For performance, switch to using interned strings for Material ID (see https://github.com/servo/string-cache )
-- [ ] Pass material IDs by reference to avoid having to clone constantly.
+- [x] Refactor material IDs. 
+		I eventually decided on using private uint64s for the material ID value, which index a global vector of material ID names.
+		The global vector is behind a mutex.
+		This will be ever-so-slightly faster than using string_cache Atoms for basic operations like comparison and assignment.
+		However, it will be a whole lot slower for getting the string name for a Material ID, or getting a Material ID for a string name.
+		I THINK big batch operations where you can decide on a material name once and keep going with it will be where we need to do a lot of work,
+		rather than operations where you frequently reference a Material ID by name.
+		The other important thing is that this allows Material IDs to be passed-by-copy, which is a lot better ergonomically. 
 - [ ] Start on Lua scripting. (Or some other scripting language?)
 - [x] Iterators over VoxelStorages
 - [ ] Basic skeleton of an entity system.
