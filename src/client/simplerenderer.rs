@@ -373,7 +373,6 @@ impl SimpleVoxelMesher {
 pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
                         textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
                             -> glium::VertexBuffer<PackedVertex> {
-    //This function is still very not data-oriented and will probably cause the borrow checker to become very upset.
     let mut drawable : Vec<VoxelRenderInfo> = Vec::new();
     let mut rebuild_tex : bool = false;
 

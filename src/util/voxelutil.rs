@@ -34,7 +34,6 @@ impl <T> fmt::Display for VoxelPos<T> where T : Copy + Integer + fmt::Display {
     }
 }
 
-
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelRange<T : Copy + Integer> {
 	pub upper : VoxelPos<T>, pub lower : VoxelPos<T>,
@@ -107,6 +106,7 @@ impl <T> Iterator for VoxelRangeIter<T> where T : Copy + Integer {
     }
 }
 
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum VoxelAxis {
 	PosiX,
 	NegaX,
@@ -114,6 +114,41 @@ pub enum VoxelAxis {
 	NegaY,
 	PosiZ,
 	NegaZ,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct VoxelAxisIter {
+    axis : VoxelAxis,
+}
+impl VoxelAxisIter { 
+    fn new() -> Self { VoxelAxisIter { axis: VoxelAxis::PosiX } }
+}
+impl Iterator for VoxelAxisIter { 
+    type Item = VoxelAxis;
+    fn next(&mut self) -> Option<VoxelAxis> { 
+        match self.axis {
+            VoxelAxis::PosiX => return Some(VoxelAxis::NegaX),
+            VoxelAxis::NegaX => return Some(VoxelAxis::PosiY),
+            VoxelAxis::PosiY => return Some(VoxelAxis::NegaY),
+            VoxelAxis::NegaY => return Some(VoxelAxis::PosiZ),
+            VoxelAxis::PosiZ => return Some(VoxelAxis::NegaZ),
+            VoxelAxis::NegaZ => return None,
+        }
+    }
+}
+
+impl VoxelAxis {
+    fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
+    fn opposite(&self) -> Self {
+        match *self {
+            VoxelAxis::PosiX => return VoxelAxis::NegaX,
+            VoxelAxis::NegaX => return VoxelAxis::PosiX,
+            VoxelAxis::PosiY => return VoxelAxis::NegaY,
+            VoxelAxis::NegaY => return VoxelAxis::PosiY,
+            VoxelAxis::PosiZ => return VoxelAxis::NegaZ,
+            VoxelAxis::NegaZ => return VoxelAxis::PosiZ,
+        }
+    }
 }
 
 #[test]
