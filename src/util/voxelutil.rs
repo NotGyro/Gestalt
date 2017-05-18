@@ -173,14 +173,17 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => return VoxelAxis::PosiZ,
         }
     }
-    fn get_offset(&self) -> VoxelPos<i32> {
-        match *self {
-            VoxelAxis::PosiX => return VoxelPos{x : 1, y : 0, z : 0 },
-            VoxelAxis::NegaX => return VoxelPos{x : -1, y : 0, z : 0 },
-            VoxelAxis::PosiY => return VoxelPos{x : 0, y : 1, z : 0 },
-            VoxelAxis::NegaY => return VoxelPos{x : 0, y : -1, z : 0 },
-            VoxelAxis::PosiZ => return VoxelPos{x : 0, y : 0, z : 1 },
-            VoxelAxis::NegaZ => return VoxelPos{x : 0, y : 0, z : -1 },
+}
+
+impl <T> VoxelPos<T> where T : Copy + Integer {
+   fn  get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
+        match direction {
+            VoxelAxis::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
+            VoxelAxis::NegaX => return VoxelPos{x : self.x - T::one(), y : self.y, z : self.z },
+            VoxelAxis::PosiY => return VoxelPos{x : self.x, y : self.y + T::one(), z : self.z },
+            VoxelAxis::NegaY => return VoxelPos{x : self.x, y : self.y - T::one(), z : self.z },
+            VoxelAxis::PosiZ => return VoxelPos{x : self.x, y : self.y, z : self.z + T::one() },
+            VoxelAxis::NegaZ => return VoxelPos{x : self.x, y : self.y, z : self.z - T::one() },
         }
     }
 }
@@ -219,4 +222,11 @@ fn test_axis_iteration() {
     assert!(list.contains(&VoxelAxis::NegaY));
     assert!(list.contains(&VoxelAxis::PosiZ));
     assert!(list.contains(&VoxelAxis::NegaZ));
+}
+
+#[test]
+fn test_get_neighbor() {
+    let initial : VoxelPos<i32> = VoxelPos{x : 1, y : 4, z : 1};
+    let neighbor = initial.get_neighbor(VoxelAxis::PosiZ);
+    assert!( neighbor.z == 2 );
 }
