@@ -138,9 +138,6 @@ impl VoxelSpace {
         if (self.chunk_list.contains_key(&VoxelPos{ x : x, y : y, z : z})) {
             return;
         }
-        if(z > 0) {
-            return;
-        }
         let air_mat = self.mat_idx.for_name(&String::from("test.air"));
         let stone_mat = self.mat_idx.for_name(&String::from("test.stone"));
         let dirt_mat = self.mat_idx.for_name(&String::from("test.dirt"));

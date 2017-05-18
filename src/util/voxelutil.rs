@@ -10,6 +10,9 @@ use num::traits::identities::Zero;
 use std::marker::Copy;
 use std::fmt;
 
+use std::ops::Add;
+use std::ops::Sub;
+
 /*Previously, we used these for voxel position types: 
 use std::ops::{Add, Sub, Mul, Div};
 use std::cmp::{Ord, Eq};
@@ -27,6 +30,23 @@ This was kind of a mess, so I'm refactoring it to use num::Integer.
 pub struct VoxelPos<T : Copy + Integer> {
 	pub x: T, pub y: T, pub z: T,
 }
+
+impl <T> Add for VoxelPos<T> where T : Copy + Integer + Add<Output=T> {
+    type Output = VoxelPos<T>;
+
+    fn add(self, other: VoxelPos<T>) -> VoxelPos<T> {
+        VoxelPos { x: self.x + other.x, y: self.y + other.y, z : self.z + other.z }
+    }
+}
+
+impl <T> Sub for VoxelPos<T> where T : Copy + Integer + Sub<Output=T> {
+    type Output = VoxelPos<T>;
+
+    fn sub(self, other: VoxelPos<T>) -> VoxelPos<T> {
+        VoxelPos { x: self.x + other.x, y: self.y + other.y, z : self.z + other.z }
+    }
+}
+
 
 impl <T> fmt::Display for VoxelPos<T> where T : Copy + Integer + fmt::Display {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -118,22 +138,26 @@ pub enum VoxelAxis {
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelAxisIter {
-    axis : VoxelAxis,
+    axis : Option<VoxelAxis>,
 }
 impl VoxelAxisIter { 
-    fn new() -> Self { VoxelAxisIter { axis: VoxelAxis::PosiX } }
+    fn new() -> Self { VoxelAxisIter { axis: None } }
 }
 impl Iterator for VoxelAxisIter { 
     type Item = VoxelAxis;
     fn next(&mut self) -> Option<VoxelAxis> { 
+        let mut result = Some(VoxelAxis::PosiX);
         match self.axis {
-            VoxelAxis::PosiX => return Some(VoxelAxis::NegaX),
-            VoxelAxis::NegaX => return Some(VoxelAxis::PosiY),
-            VoxelAxis::PosiY => return Some(VoxelAxis::NegaY),
-            VoxelAxis::NegaY => return Some(VoxelAxis::PosiZ),
-            VoxelAxis::PosiZ => return Some(VoxelAxis::NegaZ),
-            VoxelAxis::NegaZ => return None,
+            None => (), //result = Some(VoxelAxis::PosiX,
+            Some(VoxelAxis::PosiX) => result = Some(VoxelAxis::NegaX),
+            Some(VoxelAxis::NegaX) => result = Some(VoxelAxis::PosiY),
+            Some(VoxelAxis::PosiY) => result = Some(VoxelAxis::NegaY),
+            Some(VoxelAxis::NegaY) => result = Some(VoxelAxis::PosiZ),
+            Some(VoxelAxis::PosiZ) => result = Some(VoxelAxis::NegaZ),
+            Some(VoxelAxis::NegaZ) => result = None,
         }
+        self.axis = result;
+        return result;
     }
 }
 
@@ -147,6 +171,16 @@ impl VoxelAxis {
             VoxelAxis::NegaY => return VoxelAxis::PosiY,
             VoxelAxis::PosiZ => return VoxelAxis::NegaZ,
             VoxelAxis::NegaZ => return VoxelAxis::PosiZ,
+        }
+    }
+    fn get_offset(&self) -> VoxelPos<i32> {
+        match *self {
+            VoxelAxis::PosiX => return VoxelPos{x : 1, y : 0, z : 0 },
+            VoxelAxis::NegaX => return VoxelPos{x : -1, y : 0, z : 0 },
+            VoxelAxis::PosiY => return VoxelPos{x : 0, y : 1, z : 0 },
+            VoxelAxis::NegaY => return VoxelPos{x : 0, y : -1, z : 0 },
+            VoxelAxis::PosiZ => return VoxelPos{x : 0, y : 0, z : 1 },
+            VoxelAxis::NegaZ => return VoxelPos{x : 0, y : 0, z : -1 },
         }
     }
 }
@@ -170,4 +204,19 @@ fn test_voxel_range_iteration() {
         counter = counter + 1;
     }
     assert!( counter == sz );
+}
+
+#[test]
+fn test_axis_iteration() {
+    let mut list : Vec<VoxelAxis> = Vec::new();
+    for dir in VoxelAxis::iter_all() {
+        list.push(dir);
+    }
+    assert!( list.len() == 6 );
+    assert!(list.contains(&VoxelAxis::PosiX));
+    assert!(list.contains(&VoxelAxis::NegaX));
+    assert!(list.contains(&VoxelAxis::PosiY));
+    assert!(list.contains(&VoxelAxis::NegaY));
+    assert!(list.contains(&VoxelAxis::PosiZ));
+    assert!(list.contains(&VoxelAxis::NegaZ));
 }
