@@ -70,36 +70,16 @@ fn testworldgen_underground(chunk : &mut Chunk, air_id : MaterialID, stone_id : 
 }
 
 
-fn x_to_local(x : i32) -> u16 {
-    let chunkpos_x = x % CHUNK_X_LENGTH as i32;
-    if( chunkpos_x < 0 ) {
-        return (CHUNK_X_LENGTH as i32 + chunkpos_x) as u16; //distance from edge
-    } 
-    else {
-        return chunkpos_x as u16;
-    }
+fn pos_to_local(block_pos : VoxelPos<i32>, chunk_pos : VoxelPos<i32>) -> VoxelPos<u16> {
+    let mut chunk_origin : VoxelPos<i32> = VoxelPos{ x : chunk_pos.x * CHUNK_X_LENGTH as i32, y : chunk_pos.y * CHUNK_Y_LENGTH as i32, z : chunk_pos.z * CHUNK_Z_LENGTH as i32};
+    let mut temp_pos = block_pos - chunk_origin;
+    let new_pos : VoxelPos<u16> = VoxelPos{ x : temp_pos.x as u16, y : temp_pos.y as u16, z : temp_pos.z as u16};
+    return new_pos;
 }
-fn y_to_local(y : i32) -> u16 {
-    let chunkpos_y = y % CHUNK_Y_LENGTH as i32;
-    if( chunkpos_y < 0 ) {
-        return (CHUNK_Y_LENGTH as i32 + chunkpos_y) as u16; //distance from edge
-    } 
-    else {
-        return chunkpos_y as u16;
-    }
-}
-fn z_to_local(z : i32) -> u16 {
-    let chunkpos_z = z % CHUNK_Y_LENGTH as i32;
-    if( chunkpos_z < 0 ) {
-        return (CHUNK_Z_LENGTH as i32 + chunkpos_z) as u16; //distance from edge
-    } 
-    else {
-        return chunkpos_z as u16;
-    }
-}
-fn pos_to_local(p : VoxelPos<i32>) -> VoxelPos<u16> {
+
+/*fn pos_to_local(p : VoxelPos<i32>) -> VoxelPos<u16> {
     VoxelPos { x : x_to_local(p.x), y : y_to_local(p.y), z : z_to_local(p.z) }
-}
+}*/
 
 /// Converts a unit measured in blocks (one of our i32 = 1 block) to one measured in chunks (one i32 = 1 chunk).
 fn select_chunk(xp : i32, yp : i32, zp : i32) -> VoxelPos<i32> { 
@@ -259,7 +239,7 @@ impl VoxelStorage<MaterialID, i32> for VoxelSpace {
         match chunk_maybe {
             None => return Some(self.not_loaded_val.clone()), //We don't have a chunk for this position, so it's either not loaded or not generated.
             Some(chunk) => {
-                return chunk.get(x_to_local(x), y_to_local(y), z_to_local(z));
+                return chunk.getv(pos_to_local(VoxelPos{x:x,y:y,z:z}, chunk_pos));
             }
         }
     }
@@ -267,10 +247,11 @@ impl VoxelStorage<MaterialID, i32> for VoxelSpace {
     fn set(&mut self, x: i32, y: i32, z: i32, value: MaterialID) {
         let chunk_pos = select_chunk(x,y,z);
         let mut chunk_maybe = self.chunk_list.get_mut(&chunk_pos);
+        println!("Setting on chunk: {}", chunk_pos);
         //Not sure what the best way to handle errors here is. Shouldn't panic.
         if(chunk_maybe.is_some()) {
             let mut chunk = chunk_maybe.unwrap();
-            chunk.set(x_to_local(x), y_to_local(y), z_to_local(z), value.clone());
+            chunk.setv(pos_to_local(VoxelPos{x:x,y:y,z:z}, chunk_pos), value.clone());
         }
     }
 }

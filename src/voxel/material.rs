@@ -7,6 +7,8 @@ use self::serde::{Serialize, Deserialize};
 use self::serde::de::DeserializeOwned;
 use self::serde_yaml::{to_writer, from_reader};
 
+use std::fmt;
+
 use string_cache::DefaultAtom as Atom;
 
 use std::sync::Mutex;
@@ -61,6 +63,11 @@ impl MaterialID {
     }
     pub fn from_name(name : &String) -> Self {
         MaterialID { internal_id : id_for_create(name) }
+    }
+}
+impl fmt::Display for MaterialID {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.to_name())
     }
 }
 //type MaterialID = Atom;

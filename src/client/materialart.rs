@@ -20,6 +20,8 @@ pub trait MaterialArt {
 #[derive(Clone, Debug)]
 pub struct MatArtSimple { 
     pub texture_name : String,
+    //pub cull_self : bool, //Do we cull the same material?
+    //pub cull_others : bool, //Do we cull materials other than this one?
 }
 /*
 impl MatArtStaticTyped for MatArtSimple {

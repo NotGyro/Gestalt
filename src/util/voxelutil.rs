@@ -43,7 +43,7 @@ impl <T> Sub for VoxelPos<T> where T : Copy + Integer + Sub<Output=T> {
     type Output = VoxelPos<T>;
 
     fn sub(self, other: VoxelPos<T>) -> VoxelPos<T> {
-        VoxelPos { x: self.x + other.x, y: self.y + other.y, z : self.z + other.z }
+        VoxelPos { x: self.x - other.x, y: self.y - other.y, z : self.z - other.z }
     }
 }
 
@@ -64,10 +64,76 @@ impl <T> VoxelRange<T> where T : Copy + Integer {
         VoxelRangeIter { range : *self, pos : Some(self.lower) }
     }
 
+    pub fn get_side_iterator(&self, side : VoxelAxis) -> VoxelSideIter<T> {
+        match side {
+            VoxelAxis::PosiX => { 
+                return VoxelSideIter { range : *self, 
+                direction1 : VoxelAxis::PosiY,
+                direction2 : VoxelAxis::PosiZ,
+                pos : Some(VoxelPos { x : self.upper.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
+                } 
+            },
+            VoxelAxis::NegaX => { 
+                return VoxelSideIter { range : *self, 
+                direction1 : VoxelAxis::PosiY,
+                direction2 : VoxelAxis::PosiZ,
+                pos : Some(VoxelPos { x : self.lower.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
+                }
+            },
+            VoxelAxis::PosiY => { 
+                return VoxelSideIter { range : *self, 
+                direction1 : VoxelAxis::PosiX,
+                direction2 : VoxelAxis::PosiZ,
+                pos : Some(VoxelPos { x : self.lower.x, y : self.upper.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
+                }
+            },
+            VoxelAxis::NegaY => { 
+                return VoxelSideIter { range : *self, 
+                direction1 : VoxelAxis::PosiX,
+                direction2 : VoxelAxis::PosiZ,
+                pos : Some(VoxelPos { x : self.lower.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
+                }
+            },
+            VoxelAxis::PosiZ => { 
+                return VoxelSideIter { range : *self, 
+                direction1 : VoxelAxis::PosiX,
+                direction2 : VoxelAxis::PosiY,
+                pos : Some(VoxelPos { x: self.lower.x, y : self.lower.y, z : self.upper.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
+                }
+            },
+            VoxelAxis::NegaZ => { 
+                return VoxelSideIter { range : *self, 
+                direction1 : VoxelAxis::PosiX,
+                direction2 : VoxelAxis::PosiY,
+                pos : Some(VoxelPos { x : self.lower.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
+                }
+            },
+        }
+    }
+
     pub fn contains(&self, point : VoxelPos<T>) -> bool { 
          ( point.x >= self.lower.x ) && ( point.x < self.upper.x ) &&
          ( point.y >= self.lower.y ) && ( point.y < self.upper.y ) &&
          ( point.x >= self.lower.z ) && ( point.z < self.upper.z )
+    }
+
+    pub fn get_bound(&self, direction : VoxelAxis) -> T {
+        match direction {
+            VoxelAxis::PosiX => return self.upper.x,
+            VoxelAxis::PosiY => return self.upper.y,
+            VoxelAxis::PosiZ => return self.upper.z,
+            VoxelAxis::NegaX => return self.lower.x,
+            VoxelAxis::NegaY => return self.lower.y,
+            VoxelAxis::NegaZ => return self.lower.z,
+        }
+    }
+    pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelAxis) -> bool { 
+        let mut edge = self.get_bound(side);
+        //Don't trip over off-by-one errors - the positive bounds are one past the valid coordinates. 
+        if(side.get_sign() == VoxelAxisSign::POSI) {
+            edge = edge - T::one();
+        }
+        return (point.coord_for_axis(side) == edge);
     }
 }
 
@@ -126,6 +192,43 @@ impl <T> Iterator for VoxelRangeIter<T> where T : Copy + Integer {
     }
 }
 
+pub struct VoxelSideIter<T : Copy + Integer> {
+    range : VoxelRange<T>,
+    //origin : VoxelPos<T>,
+    direction1 : VoxelAxis,
+    direction2 : VoxelAxis,
+    pos : Option<VoxelPos<T>>,
+}
+
+impl <T> Iterator for VoxelSideIter<T> where T : Copy + Integer { 
+    type Item = VoxelPos<T>;
+    fn next(&mut self) -> Option<VoxelPos<T>> { 
+        if(self.pos.is_none()) { 
+            return None;
+        }
+        let mut pos = self.pos.unwrap(); //Cannot panic if is_none() is valid
+
+        let mut over = false;
+        let ret = pos; // Our "self.pos" as well as the "pos" variable are both for the next loop, really. "Ret" can capture the first element.
+
+        pos = pos.get_neighbor(self.direction1);
+        if(pos.coord_for_axis(self.direction1) == self.range.get_bound(self.direction1)) { //Iterate over our first direction until we hit our first bound
+            pos.set_coord_for_axis(self.direction1.opposite(), self.range.get_bound(self.direction1.opposite())); //Return to start of our first direction.
+            pos = pos.get_neighbor(self.direction2); //Move forward through our second direction.
+            if(pos.coord_for_axis(self.direction2) == self.range.get_bound(self.direction2)) { //Are we at the end of our second direction? Loop finished. 
+                over = true;
+            }
+        }
+        if(over) { 
+            self.pos = None;
+        }
+        else {
+            self.pos = Some(pos);
+        }
+        return Some(ret);
+    }
+}
+
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum VoxelAxis {
 	PosiX,
@@ -137,11 +240,17 @@ pub enum VoxelAxis {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+enum VoxelAxisSign {
+    POSI,
+    NEGA,
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelAxisIter {
     axis : Option<VoxelAxis>,
 }
 impl VoxelAxisIter { 
-    fn new() -> Self { VoxelAxisIter { axis: None } }
+    pub fn new() -> Self { VoxelAxisIter { axis: None } }
 }
 impl Iterator for VoxelAxisIter { 
     type Item = VoxelAxis;
@@ -162,8 +271,8 @@ impl Iterator for VoxelAxisIter {
 }
 
 impl VoxelAxis {
-    fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
-    fn opposite(&self) -> Self {
+    pub fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
+    pub fn opposite(&self) -> Self {
         match *self {
             VoxelAxis::PosiX => return VoxelAxis::NegaX,
             VoxelAxis::NegaX => return VoxelAxis::PosiX,
@@ -173,10 +282,20 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => return VoxelAxis::PosiZ,
         }
     }
+    fn get_sign(&self) -> VoxelAxisSign { 
+        match *self {
+            VoxelAxis::PosiX => return VoxelAxisSign::POSI,
+            VoxelAxis::NegaX => return VoxelAxisSign::NEGA,
+            VoxelAxis::PosiY => return VoxelAxisSign::POSI,
+            VoxelAxis::NegaY => return VoxelAxisSign::NEGA,
+            VoxelAxis::PosiZ => return VoxelAxisSign::POSI,
+            VoxelAxis::NegaZ => return VoxelAxisSign::NEGA,
+        }
+    }
 }
 
 impl <T> VoxelPos<T> where T : Copy + Integer {
-   fn  get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
+   pub fn get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
         match direction {
             VoxelAxis::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
             VoxelAxis::NegaX => return VoxelPos{x : self.x - T::one(), y : self.y, z : self.z },
@@ -184,6 +303,26 @@ impl <T> VoxelPos<T> where T : Copy + Integer {
             VoxelAxis::NegaY => return VoxelPos{x : self.x, y : self.y - T::one(), z : self.z },
             VoxelAxis::PosiZ => return VoxelPos{x : self.x, y : self.y, z : self.z + T::one() },
             VoxelAxis::NegaZ => return VoxelPos{x : self.x, y : self.y, z : self.z - T::one() },
+        }
+    }
+   pub fn coord_for_axis(&self, direction : VoxelAxis) -> T {
+        match direction {
+            VoxelAxis::PosiX => return self.x,
+            VoxelAxis::NegaX => return self.x,
+            VoxelAxis::PosiY => return self.y,
+            VoxelAxis::NegaY => return self.y,
+            VoxelAxis::PosiZ => return self.z,
+            VoxelAxis::NegaZ => return self.z,
+        }
+    }
+   pub fn set_coord_for_axis(&mut self, direction : VoxelAxis, value: T) {
+        match direction {
+            VoxelAxis::PosiX => self.x = value,
+            VoxelAxis::NegaX => self.x = value,
+            VoxelAxis::PosiY => self.y = value,
+            VoxelAxis::NegaY => self.y = value,
+            VoxelAxis::PosiZ => self.z = value,
+            VoxelAxis::NegaZ => self.z = value,
         }
     }
 }
@@ -207,6 +346,36 @@ fn test_voxel_range_iteration() {
         counter = counter + 1;
     }
     assert!( counter == sz );
+}
+
+#[test]
+fn test_side_iteration() {
+    let side_x = 50;
+    let side_y = 10;
+    let side_z = 25;
+
+    let low : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z: 0};
+    let high : VoxelPos<i32> = VoxelPos{x: side_x as i32, y: side_y as i32, z: side_z as i32};
+    let ran : VoxelRange<i32> = VoxelRange{lower: low, upper: high};
+
+    let mut counter = 0;
+    for i in ran.get_side_iterator(VoxelAxis::PosiY) {
+        assert!( ! (i.x >= side_x) );
+        assert!( ! (i.z >= side_z) );
+        assert!( i.y == ran.upper.y );
+        counter = counter + 1;
+    }
+    assert!( counter == (side_x * side_z) );
+
+    
+    counter = 0;
+    for i in ran.get_side_iterator(VoxelAxis::NegaX) {
+        assert!( ! (i.y >= side_y) );
+        assert!( ! (i.z >= side_z) );
+        assert!( i.x == ran.lower.x );
+        counter = counter + 1;
+    }
+    assert!( counter == (side_y * side_z) );
 }
 
 #[test]

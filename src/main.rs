@@ -48,12 +48,9 @@ use std::f32::consts::*;
 use std::ops::Neg;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use num::Zero;
 
-use cgmath::Matrix4;
-use cgmath::Vector3;
-use cgmath::Vector4;
-use cgmath::Point3;
-use cgmath::InnerSpace;
+use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad};
 
 use glium::{DisplayBuild, Surface};
 use glium::glutin;
@@ -168,6 +165,7 @@ fn main() {
             write: true,
             .. Default::default()
         },
+        backface_culling : glium::draw_parameters::BackfaceCullingMode::CullClockwise,
         .. Default::default()
     };
     
@@ -175,10 +173,10 @@ fn main() {
     
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
 	
-	let mouse_sensitivity : f32 = 900.0;
-	let move_speed : f32 = 20000.0;
-	let mut horz_angle : f32 = 0.0;
-	let mut vert_angle : f32 = 0.0;
+	let mouse_sensitivity : f32 = 2.0;
+	let move_speed : f32 = 16.0;
+	let mut horz_angle : Rad<f32> = Rad::zero();
+	let mut vert_angle : Rad<f32> = Rad::zero();
 
     //let mut perspective_matrix : cgmath::Matrix4<f32> = cgmath::perspective(cgmath::deg(45.0), 1.333, 0.0001, 100.0);
     //let mut view_matrix : Matrix4<f32> = Matrix4::look_at(view_eye, view_center, view_up);
@@ -189,22 +187,6 @@ fn main() {
     
     
     let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0}; 
-    /* --------------------------- Load a chunk, maybe */
-    //let chunk_path = Path::new("testchunk.bin");
-    
-	//let mut options = OpenOptions::new();
-    /*let display_path = chunk_path.display();
-	match OpenOptions::new()
-            .read(true)
-            .open(&chunk_path) {
-        // The `description` method of `io::Error` returns a string that
-        // describes the error
-        Err(why) => println!("couldn't open {}: {}", display_path, Error::description(&why)),
-        Ok(mut file) => {
-            println!("Attempting to load {}", display_path);
-            chunk.load(&mut file);
-        },
-    };*/
     
     //---- Set up our texture(s) and chunk verticies ----
     let stone_art = MatArtSimple { texture_name : String::from("teststone.png") };
@@ -227,6 +209,8 @@ fn main() {
 
     //space.unload_c(1,1,0);
 
+    //println!("Test: {}", -204 % 10);
+
     //let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
     let mut meshes : Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = Vec::new();
     //pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
@@ -240,6 +224,9 @@ fn main() {
     let mut a_down : bool = false;
     let mut s_down : bool = false;
     let mut d_down : bool = false;
+
+    let mut set_action : bool = false;
+    let mut delete_action : bool = false;
     
     
     let screen_center_x : i32 = screen_width as i32 /2;
@@ -249,33 +236,10 @@ fn main() {
     let mut grabs_mouse : bool = true;
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
+    let mut elapsed = 0.0 as f32;
     while keeprunning {
         //let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
-
-		if(vert_angle > 1.57) {
-			vert_angle = 1.57;
-		}
-		else if(vert_angle < -1.57) {
-			vert_angle = -1.57;
-        }
         
-        let forward = Vector3::new(
-            vert_angle.cos() * horz_angle.sin(), 
-            vert_angle.cos() * horz_angle.cos(),
-			vert_angle.sin());
-            
-		let right = Vector3::new(
-			(horz_angle - PI/2.0).sin(), 
-			(horz_angle - PI/2.0).cos(),
-            0.0
-			
-		);
-        let up = forward.cross( right );
-
-        let click_point = camera_pos + forward.normalize(); //Normalize
-        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x as i32, y: click_point.y as i32, z: click_point.z as i32};
-        
-        let elapsed = (precise_time_s() - lastupdate) as f32;
         for ev in display.poll_events() {
             match ev {
                 Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
@@ -283,8 +247,8 @@ fn main() {
                     //println!("Mouse moved");
                     if(grabs_mouse) {
                     if mouse_first_moved {
-                        horz_angle += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
-                        vert_angle -= ((y - screen_center_y) as f32) * (mouse_sensitivity * elapsed);
+                        horz_angle.s += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
+                        vert_angle.s += ((y - screen_center_y) as f32) * (mouse_sensitivity * elapsed);
                     }
                     else {
                         mouse_first_moved = true;
@@ -337,31 +301,12 @@ fn main() {
                 },
                 Event::MouseInput(state, btn) => {
                     if(state == glutin::ElementState::Released) {
-                        //println!("X: {}", click_point.x);
-                        //println!("Y: {}", click_point.y);
-                        //println!("Z: {}", click_point.z);
                         match btn {
                             glutin::MouseButton::Left => {
-                                let old_material = space.getv(click_point_vx).unwrap();
-                                let set_material = air_id.clone();
-                                space.setv(click_point_vx, set_material.clone());
-                                if(old_material != set_material.clone()) {
-                                    renderer.notify_remesh(click_point_vx);
-                                }
-                                //remesh = true;
-                                //let result_maybe = space.get(click_point.x as i32, click_point.y as i32, click_point.z as i32);
-                                //match result_maybe { 
-                                //    Some(val) => println!("The voxel is {}", val.name),
-                                //    None => println!("The voxel is not loaded."),
-                                //}
+                                delete_action = true; //Replace a voxel with air
                             },
                             glutin::MouseButton::Right => {
-                                let old_material = space.getv(click_point_vx).unwrap();
-                                let set_material = stone_id.clone();
-                                space.setv(click_point_vx, set_material.clone());
-                                if(old_material != set_material.clone()) {
-                                    renderer.notify_remesh(click_point_vx);
-                                }
+                                set_action = true; //Replace a voxel with stone.
                             }
                             _ => ()
                         }
@@ -370,17 +315,69 @@ fn main() {
                 _ => (), //println!("Mystery event: {:?}", ev), 
             }
         }
+
+        //Set up position variables, and process mouse movement changes.
+        /*if(horz_angle.s > 2.0*PI) { horz_angle = 0.0 }
+        if(vert_angle.s > 2.0*PI) { vert_angle = 0.0 }
+        if(horz_angle.s < 0.0) { horz_angle = 2.0*PI + horz_angle }
+        if(vert_angle.s < 0.0) { vert_angle = 2.0*PI + vert_angle }*/
+        
+        horz_angle = horz_angle.normalize();
+        vert_angle = vert_angle.normalize();
+        
+        //Remember: Z is our vertical axis here.
+        let yaw : Quaternion<f32> = Quaternion::from_angle_z(horz_angle.neg());
+        let pitch : Quaternion<f32> = Quaternion::from_angle_y(vert_angle);
+        let rotation = (yaw * pitch).normalize();
+
+        let mut forward : Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
+        let mut right : Vector3<f32> = Vector3::new(0.0, -1.0, 0.0);
+        forward = rotation.rotate_vector(forward);
+        right = rotation.rotate_vector(right);
+        let up = forward.cross( right ).neg();
+
+        //Process input 
         if w_down {
             camera_pos += forward * (elapsed * move_speed);
         }
-        if a_down {
+        if d_down {
             camera_pos += right * (elapsed * move_speed);
         }
         if s_down {
             camera_pos += (forward * (elapsed * move_speed)).neg();
         }
-        if d_down {
+        if a_down {
             camera_pos += (right * (elapsed * move_speed)).neg();
+        }
+        
+
+        let click_point = camera_pos + forward.normalize();
+        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.round() as i32, y: click_point.y.round() as i32, z: click_point.z.round() as i32};
+        
+        if delete_action { 
+            println!("Clicked: {}", click_point_vx);
+            let old_material = space.getv(click_point_vx).unwrap();
+            let set_material = air_id.clone();
+            space.setv(click_point_vx, set_material.clone());
+            if(space.getv(click_point_vx).is_some()){
+                println!("New material is : {}", space.getv(click_point_vx).unwrap());
+            }
+            if(old_material != set_material.clone()) {
+                renderer.notify_remesh(click_point_vx);
+            }
+            delete_action = false;
+        }
+        else if set_action {
+            println!("Clicked: {}", click_point_vx);
+            let old_material = space.getv(click_point_vx).unwrap();
+            let set_material = stone_id.clone();
+            space.setv(click_point_vx, set_material.clone());
+            if(space.getv(click_point_vx).is_some()){
+                println!("New material is : {}", space.getv(click_point_vx).unwrap());
+            }
+            if(old_material != set_material.clone()) {
+                renderer.notify_remesh(click_point_vx);
+            }
         }
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
@@ -400,6 +397,7 @@ fn main() {
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
         renderer.draw(perspective_matrix, view_matrix, &mut target, &program, &params);
         target.finish().unwrap();
+        elapsed = (precise_time_s() - lastupdate) as f32;
         lastupdate = precise_time_s();
     }
     //--------- Save our file on closing --------------
