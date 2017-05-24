@@ -372,6 +372,7 @@ impl SimpleVoxelMesher {
                 //Only add the mesh if we had it before.
             }
         }
+        assert!(self.remesh_list.len() == 0);
     }
     
     /// Immediately add a mess for these coordinates to the renderer.
@@ -559,89 +560,3 @@ fn mesh_step(drawable : Vec<SideRenderInfo>, display : &GlutinFacade) -> glium::
     let vertexbuffer = glium::vertex::VertexBuffer::new(display, localbuffer.as_slice()).unwrap();
     return vertexbuffer;
 }
-
-/*
-//Old implementation.
-pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
-                        textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
-                            -> glium::VertexBuffer<PackedVertex> {
-    let mut drawable : Vec<VoxelRenderInfo> = Vec::new();
-    let mut rebuild_tex : bool = false;
-
-    for pos in range {
-        let result = vs.getv(pos);
-        if result.is_some() {
-            let x = pos.x; 
-            let y = pos.y;
-            let z = pos.z;
-            let mat_id = result.unwrap();
-            //println!("{}", mat_id.name);
-            if(art_map.contains_key(&mat_id.clone())) {
-                let art = art_map.get(&mat_id).unwrap();
-                if(!textures.has_tex(art.texture_name.clone())) {
-                    textures.add_tex(art.texture_name.clone(), display); //Load our texture if we haven't already.
-                    rebuild_tex = true;
-                }
-                let idx = textures.index_for_tex(art.texture_name.clone());
-                let vri = VoxelRenderInfo { 
-                    x : (x - range.lower.x) as u16, 
-                    y : (y - range.lower.y) as u16, 
-                    z : (z - range.lower.z) as u16, 
-                    tex_idx : idx as u32 };
-                drawable.push(vri);
-            }
-        }
-    }
-    if(rebuild_tex) { 
-        textures.rebuild(display);
-    }
-    //println!("Found {} drawable cubes.", drawable.len());
-    return mesh_step(drawable, display);
-}
-
-fn mesh_step(drawable : Vec<VoxelRenderInfo>, display : &GlutinFacade) -> glium::VertexBuffer<PackedVertex> {
-    let mut localbuffer : Vec<PackedVertex> = Vec::new();
-    for voxel in drawable.iter() {
-        //Iterate over faces:
-        for face in 0..6 {
-            for vert_iter in 0..6 {
-                let x = voxel.x;
-                let y = voxel.y;
-                let z = voxel.z;
-                let mut temp_vert = FULL_CUBE[face][vert_iter];
-                temp_vert.position[0] += x as u32;
-                temp_vert.position[1] += y as u32;
-                temp_vert.position[2] += z as u32;
-                let mut u : u32 = 0;
-                let mut v : u32 = 0;
-                //println!("{}", pv.vertexdata);
-                //println!("{}", pv.get_x());
-                //println!("{}", pv.get_y());
-                //println!("{}", pv.get_z());
-                //Do our UV the hacky way.
-                if (vert_iter == 2) || (vert_iter == 3) {
-                    u = 0;
-                    v = 1;
-                }
-                else if (vert_iter == 0) || (vert_iter == 5) {
-                    u = 1;
-                    v = 0;
-                }
-                else if vert_iter == 1 {
-                    u = 0;
-                    v = 0;
-                }
-                else if vert_iter == 4 {
-                    u = 1;
-                    v = 1;
-                }
-                let mut pv = PackedVertex::from_vertex_uv(temp_vert, u, v);
-                pv.set_tex_id(voxel.tex_idx);
-                localbuffer.push(pv);
-            }
-        }
-    }
-    let vertexbuffer = glium::vertex::VertexBuffer::new(display, localbuffer.as_slice()).unwrap();
-    return vertexbuffer;
-}
-*/

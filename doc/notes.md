@@ -10,7 +10,7 @@ Todo:
 - [x] Decide whether the "World" object implements the VoxelStorage trait or not. _Answer: Sort-of._
 - [x] Refactor Voxel Storages to use simpler trait bounds.
 - [x] Fix weird layer cake rendering thing.
-- [ ] Get SimpleRenderer culling hidden faces.
+- [x] Get SimpleRenderer culling hidden faces.
 - [x] Multiple chunks (bigworld)
 - [ ] Loading / unloading around the player. (Necessary for small but still chunked world?)
 - [x] Refactor material IDs. 
@@ -30,7 +30,7 @@ Todo:
 - [ ] Resource management system - how do we design it, anyway? Possibly you'd have a template ResourceManager<T>, and you could then 
     create a ResourceManager<Texture> / ResourceManager<Sound> and etc...
 - [ ] Bindable / rebindable keys, via TOML config file (this will probably involve macros).
-- [ ] Fix camera movement!
+- [x] Fix camera movement!
 
 ----
 

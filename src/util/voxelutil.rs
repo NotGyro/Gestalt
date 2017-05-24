@@ -114,7 +114,7 @@ impl <T> VoxelRange<T> where T : Copy + Integer {
     pub fn contains(&self, point : VoxelPos<T>) -> bool { 
          ( point.x >= self.lower.x ) && ( point.x < self.upper.x ) &&
          ( point.y >= self.lower.y ) && ( point.y < self.upper.y ) &&
-         ( point.x >= self.lower.z ) && ( point.z < self.upper.z )
+         ( point.z >= self.lower.z ) && ( point.z < self.upper.z )
     }
 
     pub fn get_bound(&self, direction : VoxelAxis) -> T {
@@ -398,4 +398,16 @@ fn test_get_neighbor() {
     let initial : VoxelPos<i32> = VoxelPos{x : 1, y : 4, z : 1};
     let neighbor = initial.get_neighbor(VoxelAxis::PosiZ);
     assert!( neighbor.z == 2 );
+}
+
+#[test]
+fn test_contains() {
+
+    let low : VoxelPos<i32> = VoxelPos{x: -40, y: -40, z: -40};
+    let high : VoxelPos<i32> = VoxelPos{x: -10 , y: -10, z: -10};
+    let ran : VoxelRange<i32> = VoxelRange{lower: low, upper: high};
+
+    for i in ran {
+        assert!( ran.contains(i) );
+    }
 }

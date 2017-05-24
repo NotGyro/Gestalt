@@ -133,6 +133,7 @@ fn main() {
             }
         }
     }
+    //space.load_or_create_c(0,0,0);
     
     //---- Set up window ----
     let screen_width : u32 = 1024;
@@ -173,7 +174,7 @@ fn main() {
     
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
 	
-	let mouse_sensitivity : f32 = 2.0;
+	let mouse_sensitivity : f32 = 4.0;
 	let move_speed : f32 = 16.0;
 	let mut horz_angle : Rad<f32> = Rad::zero();
 	let mut vert_angle : Rad<f32> = Rad::zero();
@@ -209,15 +210,10 @@ fn main() {
 
     //space.unload_c(1,1,0);
 
-    //println!("Test: {}", -204 % 10);
-
-    //let mut map_verts = Box::new(client::simplerenderer::make_voxel_mesh(&*chunk, &display, &mut texture_manager, &mat_art_manager));
-    let mut meshes : Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = Vec::new();
-    //pub fn make_voxel_mesh(vs : &VoxelStorage<MaterialID, i32>, display : &GlutinFacade, range : VoxelRange<i32>, 
-    //                    textures : &mut TextureArrayDyn, art_map : &MatArtMapping)
     for chunk in space.get_regions() { 
         renderer.force_mesh(&space, &display, chunk, &mat_art_manager);
     }
+    
     //---- Some movement stuff ----
     
     let mut w_down : bool = false;
@@ -236,7 +232,7 @@ fn main() {
     let mut grabs_mouse : bool = true;
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
-    let mut elapsed = 0.0 as f32;
+    let mut elapsed = 0.01 as f32;
     while keeprunning {
         //let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
         
@@ -291,6 +287,12 @@ fn main() {
                                     glutin::ElementState::Released => grabs_mouse = !grabs_mouse,
                                 }
                             },
+                            VirtualKeyCode::Q => { 
+                                match state {
+                                    glutin::ElementState::Pressed => (),
+                                    glutin::ElementState::Released => println!(" Vertical angle: {}", vert_angle.s),
+                                }
+                            },
                             VirtualKeyCode::Escape => { 
                                 keeprunning = false;
                             },
@@ -321,7 +323,18 @@ fn main() {
         if(vert_angle.s > 2.0*PI) { vert_angle = 0.0 }
         if(horz_angle.s < 0.0) { horz_angle = 2.0*PI + horz_angle }
         if(vert_angle.s < 0.0) { vert_angle = 2.0*PI + vert_angle }*/
-        
+
+        if(vert_angle.s < 3.14) {
+            if(vert_angle.s > 1.57) {
+                vert_angle.s = 1.57;
+            }
+        }
+        else if(vert_angle.s >= 3.14) {
+            if(vert_angle.s < 4.712) {
+                vert_angle.s = 4.712;
+            }
+        }
+
         horz_angle = horz_angle.normalize();
         vert_angle = vert_angle.normalize();
         
@@ -351,12 +364,15 @@ fn main() {
         }
         
 
-        let click_point = camera_pos + forward.normalize();
-        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.round() as i32, y: click_point.y.round() as i32, z: click_point.z.round() as i32};
+        let click_point = camera_pos + forward;
+
+        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.floor() as i32, y: click_point.y.floor() as i32, z: click_point.z.floor() as i32};
         
         if delete_action { 
-            println!("Clicked: {}", click_point_vx);
+            println!("Your position is: ({}, {}, {})", camera_pos.x, camera_pos.y, camera_pos.z);
+            println!("Clicked: ({}, {}, {})", click_point.x, click_point.y, click_point.z);
             let old_material = space.getv(click_point_vx).unwrap();
+            println!("Old material is : {}", old_material);
             let set_material = air_id.clone();
             space.setv(click_point_vx, set_material.clone());
             if(space.getv(click_point_vx).is_some()){
@@ -368,7 +384,8 @@ fn main() {
             delete_action = false;
         }
         else if set_action {
-            println!("Clicked: {}", click_point_vx);
+            println!("Your position is: ({}, {}, {})", camera_pos.x, camera_pos.y, camera_pos.z);
+            println!("Clicked: ({}, {}, {})", click_point.x, click_point.y, click_point.z);
             let old_material = space.getv(click_point_vx).unwrap();
             let set_material = stone_id.clone();
             space.setv(click_point_vx, set_material.clone());
@@ -378,6 +395,7 @@ fn main() {
             if(old_material != set_material.clone()) {
                 renderer.notify_remesh(click_point_vx);
             }
+            set_action = false;
         }
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
@@ -389,7 +407,7 @@ fn main() {
         let before_remesh = precise_time_s();
         renderer.process_remesh(&space, &display, &mat_art_manager);
         let remesh_time = precise_time_s() - before_remesh;
-        if(remesh_time > 0.01) {
+        if(remesh_time > 0.001) {
             println!("Took {} seconds to remesh chunks.", remesh_time);
         }
 

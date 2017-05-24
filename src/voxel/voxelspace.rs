@@ -222,6 +222,7 @@ impl VoxelSpace {
             let x = pos.x * CHUNK_X_LENGTH as i32;
             let y = pos.y * CHUNK_Y_LENGTH as i32;
             let z = pos.z * CHUNK_Z_LENGTH as i32;
+            
             let current = VoxelRange { 
                 lower : VoxelPos { x : x, y : y, z : z, }, 
                 upper : VoxelPos { x : x + CHUNK_X_LENGTH as i32, y : y + CHUNK_Y_LENGTH as i32, z : z + CHUNK_Z_LENGTH as i32 },
@@ -247,7 +248,6 @@ impl VoxelStorage<MaterialID, i32> for VoxelSpace {
     fn set(&mut self, x: i32, y: i32, z: i32, value: MaterialID) {
         let chunk_pos = select_chunk(x,y,z);
         let mut chunk_maybe = self.chunk_list.get_mut(&chunk_pos);
-        println!("Setting on chunk: {}", chunk_pos);
         //Not sure what the best way to handle errors here is. Shouldn't panic.
         if(chunk_maybe.is_some()) {
             let mut chunk = chunk_maybe.unwrap();
