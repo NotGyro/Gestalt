@@ -133,7 +133,6 @@ fn main() {
             }
         }
     }
-    //space.load_or_create_c(0,0,0);
     
     //---- Set up window ----
     let screen_width : u32 = 1024;
@@ -142,6 +141,7 @@ fn main() {
     let mut keeprunning = true;
     let mut window = display.get_window().unwrap();
     //window.set_cursor_state(glutin::CursorState::Grab);
+
     //---- Set up screen and some basic graphics stuff ----
     let mut vshaderfile = File::open("vertexshader.glsl").unwrap();
     let mut fshaderfile = File::open("fragmentshader.glsl").unwrap();
@@ -156,9 +156,6 @@ fn main() {
     
 
     let mut t: f32 = -0.5;
-    
-    //println!(line!());
-    //println!(line!());
     
     let params = glium::DrawParameters {
         depth: glium::Depth {
@@ -193,13 +190,7 @@ fn main() {
     let stone_art = MatArtSimple { texture_name : String::from("teststone.png") };
     let dirt_art = MatArtSimple { texture_name : String::from("testdirt.png") };
     let grass_art = MatArtSimple { texture_name : String::from("testgrass.png") };
-    
-    /*let mut texfile = File::open("teststone.png").unwrap();
-    let image = image::load(&texfile,
-                        image::PNG).unwrap().to_rgba();
-    let image_dimensions = image.dimensions();
-    let image = glium::texture::RawImage2d::from_raw_rgba_reversed(image.into_raw(), image_dimensions);
-    let texture = glium::texture::Texture2d::new(&display, image).unwrap();*/
+
     let mut mat_art_manager = MatArtMapping::new();
 
     let mut renderer : SimpleVoxelMesher = SimpleVoxelMesher::new();
@@ -208,12 +199,12 @@ fn main() {
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
 
-    //space.unload_c(1,1,0);
+    space.unload_c(1,1,0);
 
     for chunk in space.get_regions() { 
         renderer.force_mesh(&space, &display, chunk, &mat_art_manager);
     }
-    
+
     //---- Some movement stuff ----
     
     let mut w_down : bool = false;
@@ -223,6 +214,8 @@ fn main() {
 
     let mut set_action : bool = false;
     let mut delete_action : bool = false;
+    let mut pick_action : bool = false;
+    let mut current_block : MaterialID = MaterialID::from_name(&String::from("Air"));
     
     
     let screen_center_x : i32 = screen_width as i32 /2;
@@ -302,14 +295,17 @@ fn main() {
                     }
                 },
                 Event::MouseInput(state, btn) => {
-                    if(state == glutin::ElementState::Released) {
+                    if(state == glutin::ElementState::Pressed) {
                         match btn {
                             glutin::MouseButton::Left => {
                                 delete_action = true; //Replace a voxel with air
                             },
                             glutin::MouseButton::Right => {
                                 set_action = true; //Replace a voxel with stone.
-                            }
+                            },
+                            glutin::MouseButton::Middle => {
+                                pick_action = true; //Replace a voxel with stone.
+                            },
                             _ => ()
                         }
                     }
@@ -317,12 +313,6 @@ fn main() {
                 _ => (), //println!("Mystery event: {:?}", ev), 
             }
         }
-
-        //Set up position variables, and process mouse movement changes.
-        /*if(horz_angle.s > 2.0*PI) { horz_angle = 0.0 }
-        if(vert_angle.s > 2.0*PI) { vert_angle = 0.0 }
-        if(horz_angle.s < 0.0) { horz_angle = 2.0*PI + horz_angle }
-        if(vert_angle.s < 0.0) { vert_angle = 2.0*PI + vert_angle }*/
 
         if(vert_angle.s < 3.14) {
             if(vert_angle.s > 1.57) {
@@ -338,7 +328,7 @@ fn main() {
         horz_angle = horz_angle.normalize();
         vert_angle = vert_angle.normalize();
         
-        //Remember: Z is our vertical axis here.
+        //Clockwise to counter-clockwise.
         let yaw : Quaternion<f32> = Quaternion::from_angle_z(horz_angle.neg());
         let pitch : Quaternion<f32> = Quaternion::from_angle_y(vert_angle);
         let rotation = (yaw * pitch).normalize();
@@ -347,6 +337,7 @@ fn main() {
         let mut right : Vector3<f32> = Vector3::new(0.0, -1.0, 0.0);
         forward = rotation.rotate_vector(forward);
         right = rotation.rotate_vector(right);
+        //Remember: Z is our vertical axis here. Cross product would get our downward vector by the right-hand rule.
         let up = forward.cross( right ).neg();
 
         //Process input 
@@ -369,33 +360,26 @@ fn main() {
         let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.floor() as i32, y: click_point.y.floor() as i32, z: click_point.z.floor() as i32};
         
         if delete_action { 
-            println!("Your position is: ({}, {}, {})", camera_pos.x, camera_pos.y, camera_pos.z);
-            println!("Clicked: ({}, {}, {})", click_point.x, click_point.y, click_point.z);
             let old_material = space.getv(click_point_vx).unwrap();
-            println!("Old material is : {}", old_material);
             let set_material = air_id.clone();
             space.setv(click_point_vx, set_material.clone());
-            if(space.getv(click_point_vx).is_some()){
-                println!("New material is : {}", space.getv(click_point_vx).unwrap());
-            }
             if(old_material != set_material.clone()) {
                 renderer.notify_remesh(click_point_vx);
             }
             delete_action = false;
         }
         else if set_action {
-            println!("Your position is: ({}, {}, {})", camera_pos.x, camera_pos.y, camera_pos.z);
-            println!("Clicked: ({}, {}, {})", click_point.x, click_point.y, click_point.z);
             let old_material = space.getv(click_point_vx).unwrap();
-            let set_material = stone_id.clone();
+            let set_material = current_block;
             space.setv(click_point_vx, set_material.clone());
-            if(space.getv(click_point_vx).is_some()){
-                println!("New material is : {}", space.getv(click_point_vx).unwrap());
-            }
             if(old_material != set_material.clone()) {
                 renderer.notify_remesh(click_point_vx);
             }
             set_action = false;
+        }
+        else if pick_action {
+            current_block = space.getv(click_point_vx).unwrap();
+            pick_action = false;
         }
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
@@ -409,7 +393,7 @@ fn main() {
         let remesh_time = precise_time_s() - before_remesh;
         if(remesh_time > 0.001) {
             println!("Took {} seconds to remesh chunks.", remesh_time);
-        }
+        } //Remeshing is over an order of magnitude (15x!!) faster after compiling optimized rather than debug.
 
         let mut target = display.draw();
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
@@ -419,5 +403,5 @@ fn main() {
         lastupdate = precise_time_s();
     }
     //--------- Save our file on closing --------------
-    //space.unload_all();
+    space.unload_all();
 }

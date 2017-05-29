@@ -22,6 +22,7 @@ Todo:
 		rather than operations where you frequently reference a Material ID by name.
 		The other important thing is that this allows Material IDs to be passed-by-copy, which is a lot better ergonomically. 
 - [ ] Start on Lua scripting. (Or some other scripting language?)
+- [ ] Logging. Log4j? 
 - [x] Iterators over VoxelStorages
 - [ ] Basic skeleton of an entity system.
 - [ ] Some simplistic internal model renderer.

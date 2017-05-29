@@ -153,7 +153,7 @@ impl VoxelSpace {
         return self.is_loaded_c(c.x, c.y, c.z);
     }
 
-    /*
+    
     /// Saves a chunk.
     /// Note: These are chunk positions, not voxel positions.
     fn save_c(&self, x : i32, y : i32, z : i32) {
@@ -213,7 +213,7 @@ impl VoxelSpace {
         for (pos, chunk) in temp_list { 
             self.unload_c(pos.x, pos.y, pos.z);
         }
-    } */
+    }
 
     /// Gets a list of areas full of valid voxels.
     pub fn get_regions(&self) -> Vec<VoxelRange<i32>> {

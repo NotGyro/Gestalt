@@ -109,7 +109,7 @@ impl <T, U, B, P> VoxelStorageBounded<T, P> for VoxelPalette<T, U, B, P> where T
     }
 }
 
-/*
+
 impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T : Serialize + DeserializeOwned + Clone + Eq + Hash,
             P : Copy + Integer,
             U : Clone + Integer + Unsigned + USizeAble,
@@ -128,7 +128,7 @@ impl <T, U, B, P> VoxelStorageIOAble<T, P> for VoxelPalette<T, U, B, P> where T 
         to_writer(writer, &self.index);
         return res;
     }
-} */
+} 
 
 #[test]
 fn test_palette() {
