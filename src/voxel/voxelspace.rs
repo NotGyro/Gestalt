@@ -57,7 +57,6 @@ fn testworldgen_surface(chunk : &mut Chunk, air_id : MaterialID, stone_id : Mate
             chunk.set(x, y, surface, grass_id.clone());
         }
     }
-    chunk.set(8, 8, (surface+2), stone_id.clone());
 }
 fn testworldgen_underground(chunk : &mut Chunk, air_id : MaterialID, stone_id : MaterialID) {
     for x in 0 .. CHUNK_X_LENGTH as u16 {
@@ -113,11 +112,14 @@ impl VoxelSpace {
     /// Loads the chunk if there is saved data for it, or creates it via worldgen if not. 
     /// Note: These are chunk positions, not voxel positions. 
     pub fn load_or_create_c(&mut self, x : i32, y : i32, z : i32) {
-        //TODO: loading
         //TODO: extract worldgen out into its own thing
+        //If we can load this chunk from disk, we do not need to generate it.
+        //All loading / adding-to-list tasks are taken care of in self.load_c(x,y,z)).
+        self.load_c(x,y,z); //So if it's loaded, we'll return in the next block.
         if (self.chunk_list.contains_key(&VoxelPos{ x : x, y : y, z : z})) {
             return;
         }
+        println!("Generating chunk at {}, {}, {}", x, y, z);
         let air_mat = self.mat_idx.for_name(&String::from("test.air"));
         let stone_mat = self.mat_idx.for_name(&String::from("test.stone"));
         let dirt_mat = self.mat_idx.for_name(&String::from("test.dirt"));
@@ -153,7 +155,48 @@ impl VoxelSpace {
         return self.is_loaded_c(c.x, c.y, c.z);
     }
 
-    
+    /// Loads a chunk by chunk position.
+    /// Returns true if the chunk exists to load.
+    fn load_c(&mut self, x : i32, y : i32, z : i32) -> bool {
+        let display_path = format!("map/c{}x{}y{}z.bin", x, y, z);
+        let chunk_path = Path::new(&display_path);
+        match OpenOptions::new()
+            .read(true)
+            .open(&chunk_path) {
+            // The `description` method of `io::Error` returns a string that
+            // describes the error
+            //let result_chunk = Option<
+            Err(_) => return false, //Chunk does not exist previously.
+            Ok(mut file) => {
+                println!("Loading chunk at {}, {}, {}", x, y, z);
+                let mut allocate = false;
+                match self.chunk_list.get(&VoxelPos{x : x, y : y, z : z}) {
+                    None => {
+                        allocate = true;
+                    }, //We don't have a chunk for this position, create a new one and load it from disk.
+                    Some(chunk) => { //We have a chunk for this position, load the data over it.
+                        allocate = false;
+                    },
+                }
+                if(allocate == true) { 
+                    let mut chunk = Chunk::new_chunk(MaterialID::from_name(&String::from("test.air")));
+                    chunk.load(&mut file);
+                    self.chunk_list.insert(VoxelPos{ x : x, y : y, z : z}, *chunk);
+                }
+                else {
+                    let mut chunk = self.chunk_list.get_mut(&VoxelPos{x : x, y : y, z : z}).unwrap();
+                    chunk.load(&mut file);
+                }
+                return true;
+            },
+        };
+    }
+    /// Loads a location which includes this voxel.
+    /// Note: These are voxel positions, not chunk positions.
+    pub fn load(&mut self, x : i32, y : i32, z : i32) {
+        let c = select_chunk(x,y,z);
+        self.load_c(c.x, c.y, c.z);
+    }
     /// Saves a chunk.
     /// Note: These are chunk positions, not voxel positions.
     fn save_c(&self, x : i32, y : i32, z : i32) {

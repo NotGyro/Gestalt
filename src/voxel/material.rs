@@ -43,11 +43,6 @@ fn name_for(id : u64) -> String {
     INTERNAL_ID_MAPPING.lock().unwrap().get(id as usize).unwrap().clone()
 }
 
-pub trait SerializeAs<T> {
-    fn get_serialize(&self) -> T;
-    fn from_serialize(value : T) -> Self;
-}
-
 /// An identifier for a material.
 /// These should act like Atoms: Constructing the same Material ID struct with the same name in two completely different contexts should result in functionally the same value.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -72,6 +67,11 @@ impl fmt::Display for MaterialID {
     }
 }
 /*
+pub trait SerializeAs<T> {
+    fn get_serialize(&self) -> T;
+    fn from_serialize(value : T) -> Self;
+}
+
 impl SerializeAs<String> for MaterialID { 
     fn get_serialize(&self) -> String {
         self.to_name()
@@ -91,13 +91,11 @@ impl<'de> Deserialize<'de> for MaterialID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where D: Deserializer<'de>
     {
+        //Many thanks to dtolnay on IRC for the much, MUCH more elegant implementation.
+        String::deserialize(deserializer).map(|name| MaterialID::from_name(&name))
+        /*
         enum Field { Name };
 
-        // This part could also be generated independently by:
-        //
-        //    #[derive(Deserialize)]
-        //    #[serde(field_identifier, rename_all = "lowercase")]
-        //    enum Field { Secs, Nanos }
         impl<'de> Deserialize<'de> for Field {
             fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
                 where D: Deserializer<'de>
@@ -131,7 +129,7 @@ impl<'de> Deserialize<'de> for MaterialID {
             type Value = MaterialID;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("struct MaterialID")
+                formatter.write_str("unique Material name")
             }
 
             fn visit_seq<V>(self, mut seq: V) -> Result<MaterialID, V::Error>
@@ -139,6 +137,14 @@ impl<'de> Deserialize<'de> for MaterialID {
             {
                 let name : String = seq.next_element()?
                               .ok_or_else(|| de::Error::invalid_length(0, &self))?;
+                Ok(MaterialID::from_name(&name))
+            }
+
+            fn visit_str<E>(self, name: &str) -> Result<Self::Value, E> {
+                Ok(MaterialID::from_name(&String::from(name)))
+            }
+
+            fn visit_string<E>(self, name: String) -> Result<Self::Value, E> {
                 Ok(MaterialID::from_name(&name))
             }
 
@@ -162,7 +168,7 @@ impl<'de> Deserialize<'de> for MaterialID {
         }
 
         const FIELDS: &'static [&'static str] = &["name"];
-        deserializer.deserialize_struct("MaterialID", FIELDS, NameVisitor)
+        deserializer.deserialize_struct("MaterialID", FIELDS, NameVisitor)*/
     }
 }
 //type MaterialID = Atom;

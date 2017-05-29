@@ -199,7 +199,7 @@ fn main() {
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
 
-    space.unload_c(1,1,0);
+    //space.unload_c(1,1,0);
 
     for chunk in space.get_regions() { 
         renderer.force_mesh(&space, &display, chunk, &mat_art_manager);
@@ -215,7 +215,7 @@ fn main() {
     let mut set_action : bool = false;
     let mut delete_action : bool = false;
     let mut pick_action : bool = false;
-    let mut current_block : MaterialID = MaterialID::from_name(&String::from("Air"));
+    let mut current_block : MaterialID = MaterialID::from_name(&String::from("test.stone"));
     
     
     let screen_center_x : i32 = screen_width as i32 /2;
