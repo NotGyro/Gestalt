@@ -66,20 +66,6 @@ impl fmt::Display for MaterialID {
         write!(f, "{}", self.to_name())
     }
 }
-/*
-pub trait SerializeAs<T> {
-    fn get_serialize(&self) -> T;
-    fn from_serialize(value : T) -> Self;
-}
-
-impl SerializeAs<String> for MaterialID { 
-    fn get_serialize(&self) -> String {
-        self.to_name()
-    }
-    fn from_serialize(value : String) -> Self {
-        MaterialID::from_name(&value)
-    }
-}*/
 
 impl Serialize for MaterialID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -93,95 +79,12 @@ impl<'de> Deserialize<'de> for MaterialID {
     {
         //Many thanks to dtolnay on IRC for the much, MUCH more elegant implementation.
         String::deserialize(deserializer).map(|name| MaterialID::from_name(&name))
-        /*
-        enum Field { Name };
-
-        impl<'de> Deserialize<'de> for Field {
-            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
-                where D: Deserializer<'de>
-            {
-                struct FieldVisitor;
-
-                impl<'de> Visitor<'de> for FieldVisitor {
-                    type Value = Field;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("`name`")
-                    }
-
-                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
-                        where E: de::Error
-                    {
-                        match value {
-                            "name" => Ok(Field::Name),
-                            _ => Err(de::Error::unknown_field(value, FIELDS)),
-                        }
-                    }
-                }
-
-                deserializer.deserialize_identifier(FieldVisitor)
-            }
-        }
-
-        struct NameVisitor;
-
-        impl<'de> Visitor<'de> for NameVisitor {
-            type Value = MaterialID;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("unique Material name")
-            }
-
-            fn visit_seq<V>(self, mut seq: V) -> Result<MaterialID, V::Error>
-                where V: SeqAccess<'de>
-            {
-                let name : String = seq.next_element()?
-                              .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                Ok(MaterialID::from_name(&name))
-            }
-
-            fn visit_str<E>(self, name: &str) -> Result<Self::Value, E> {
-                Ok(MaterialID::from_name(&String::from(name)))
-            }
-
-            fn visit_string<E>(self, name: String) -> Result<Self::Value, E> {
-                Ok(MaterialID::from_name(&name))
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<MaterialID, V::Error>
-                where V: MapAccess<'de>
-            {
-                let mut name = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Name => {
-                            if name.is_some() {
-                                return Err(de::Error::duplicate_field("name"));
-                            }
-                            name = Some(map.next_value()?);
-                        }
-                    }
-                }
-                let name : String = name.ok_or_else(|| de::Error::missing_field("name"))?;
-                Ok(MaterialID::from_name(&name))
-            }
-        }
-
-        const FIELDS: &'static [&'static str] = &["name"];
-        deserializer.deserialize_struct("MaterialID", FIELDS, NameVisitor)*/
     }
 }
-//type MaterialID = Atom;
 
-/*
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MaterialID {
-    pub name : String,
+impl Into<&String> for MaterialID { 
+    fn into(self) -> String { self.to_name() }
 }
-
-impl Into<String> for MaterialID { 
-    fn into(self) -> String { self.name }
-}*/
 
 //Is this still totally necessary? I suppose it'll be necessary when whe associate behaviors with IDs.
 #[derive(Clone)]

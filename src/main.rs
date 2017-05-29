@@ -89,7 +89,7 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
                     //ee should be a glutin::CreationError.
                     match ee {
                         glutin::CreationError::OsError(s) => println!("OS Error: {}", s),
-                        glutin::CreationError::NotSupported => println!("BackendCreationError is  NotSupported."),
+                        glutin::CreationError::NotSupported => println!("BackendCreationError is \"NotSupported.\""),
                         glutin::CreationError::NoBackendAvailable(eee) => {
                             println!("No Backend error: {}", eee);
                             println!("{}", eee.cause().unwrap());
@@ -199,8 +199,6 @@ fn main() {
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
 
-    //space.unload_c(1,1,0);
-
     for chunk in space.get_regions() { 
         renderer.force_mesh(&space, &display, chunk, &mat_art_manager);
     }
@@ -227,13 +225,11 @@ fn main() {
     let mut lastupdate = precise_time_s();
     let mut elapsed = 0.01 as f32;
     while keeprunning {
-        //let mut mesh : &mut Vec<(VoxelRange<i32>, Box<glium::VertexBuffer<PackedVertex>>)> = meshes.as_mut();
         
         for ev in display.poll_events() {
             match ev {
                 Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
                 Event::MouseMoved(x, y) => {
-                    //println!("Mouse moved");
                     if(grabs_mouse) {
                     if mouse_first_moved {
                         horz_angle.s += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
@@ -384,8 +380,6 @@ fn main() {
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
 
-        //let mut test : _ = display.draw();
-
         //Remesh chunks if necessary.
         
         let before_remesh = precise_time_s();
@@ -393,7 +387,7 @@ fn main() {
         let remesh_time = precise_time_s() - before_remesh;
         if(remesh_time > 0.001) {
             println!("Took {} seconds to remesh chunks.", remesh_time);
-        } //Remeshing is over an order of magnitude (15x!!) faster after compiling optimized rather than debug.
+        } //Remeshing is one to two whole orders of magnitude (!!) faster after compiling optimized rather than debug.
 
         let mut target = display.draw();
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
