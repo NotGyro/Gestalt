@@ -12,7 +12,7 @@ Todo:
 - [x] Fix weird layer cake rendering thing.
 - [x] Get SimpleRenderer culling hidden faces.
 - [x] Multiple chunks (bigworld)
-- [ ] Loading / unloading around the player. (Necessary for small but still chunked world?)
+- [x] Loading / unloading around the player. (Necessary for small but still chunked world?)
 - [x] Refactor material IDs. 
 		I eventually decided on using private uint64s for the material ID value, which index a global vector of material ID names.
 		The global vector is behind a mutex.
@@ -22,7 +22,7 @@ Todo:
 		rather than operations where you frequently reference a Material ID by name.
 		The other important thing is that this allows Material IDs to be passed-by-copy, which is a lot better ergonomically. 
 - [ ] Start on Lua scripting. (Or some other scripting language?)
-- [ ] Logging. Log4j? 
+- [ ] Logging. Log4rs? 
 - [x] Iterators over VoxelStorages
 - [ ] Basic skeleton of an entity system.
 - [ ] Some simplistic internal model renderer.

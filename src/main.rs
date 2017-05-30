@@ -45,12 +45,14 @@ use std::io::Cursor;
 use std::io;
 use std::cmp;
 use std::f32::consts::*;
+use std::f32;
+use std::f32::*;
 use std::ops::Neg;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use num::Zero;
 
-use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad};
+use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad, ApproxEq, BaseFloat};
 
 use glium::{DisplayBuild, Surface};
 use glium::glutin;
@@ -104,6 +106,145 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
         },
     };
     return display;
+}
+
+/*impl From<Point3<f32>> for VoxelPos<i32> { 
+    fn from(point : Point3<f32>) -> VoxelPos<i32> {
+        VoxelPos{x: point.x.floor() as i32, y: point.y.floor() as i32, z: point.z.floor() as i32}
+    }
+}
+impl From<Vector3<f32>> for VoxelPos<i32> { 
+    fn from(point : Vector3<f32>) -> VoxelPos<i32> {
+        VoxelPos{x: point.x.floor() as i32, y: point.y.floor() as i32, z: point.z.floor() as i32}
+    }
+}*/
+
+#[derive(Clone, Debug)]
+pub struct VoxelRaycast {
+	pub pos : VoxelPos<i32>,
+    tMax : Vector3<f32>, //Where does the ray cross the first voxel boundary? (in all directions)
+    tDelta : Vector3<f32>, //How far along do we need to move for the length of that movement to equal the width of a voxel?
+    stepDir : VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
+}
+
+pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -> VoxelRaycast {
+    //Voxel is assumed to be 1x1x1 in this situation.
+    let mut first_step = origin + direction;
+    //Set up our step sign variable.
+    let mut step_dir : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
+    if(direction.x >= 0.0) { 
+        step_dir.x = 1;
+    }
+    else {
+        step_dir.x = -1;
+    }
+    if(direction.y >= 0.0) { 
+        step_dir.y = 1;
+    }
+    else {
+        step_dir.y = -1;
+    }
+    if(direction.z >= 0.0) { 
+        step_dir.z = 1;
+    }
+    else {
+        step_dir.z = -1;
+    }
+
+    let voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
+    //Distance along the ray to the next voxel from our origin
+    let next_voxel_boundary = voxel_origin + step_dir;
+
+    //Set up our tMax - distances to next cell
+    let mut t_max : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
+    if(direction.x != 0.0) { 
+        t_max.x = (next_voxel_boundary.x as f32 - origin.x)/direction.x;
+    }
+    else {
+        t_max.x = f32::MAX; //Undefined in this direction
+    }
+    if(direction.y != 0.0) { 
+        t_max.y = (next_voxel_boundary.y as f32 - origin.y)/direction.y;
+    }
+    else {
+        t_max.y = f32::MAX; //Undefined in this direction
+    }
+    if(direction.z != 0.0) { 
+        t_max.z = (next_voxel_boundary.z as f32 - origin.z)/direction.z;
+    }
+    else {
+        t_max.z = f32::MAX; //Undefined in this direction
+    }
+
+    //Set up our tDelta - movement per iteration.
+    //Again, voxel is assumed to be 1x1x1 in this situation.
+    let mut t_delta : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
+    if(direction.x != 0.0) { 
+        t_delta.x = 1.0/(direction.x*step_dir.x as f32);
+    }
+    else {
+        t_delta.x = f32::MAX; //Undefined in this direction
+    }
+    if(direction.y != 0.0) { 
+        t_delta.y = 1.0/(direction.y*step_dir.y as f32);
+    }
+    else {
+        t_delta.y = f32::MAX; //Undefined in this direction
+    }
+    if(direction.z != 0.0) { 
+        t_delta.z = 1.0/(direction.z*step_dir.z as f32);
+    }
+    else {
+        t_delta.z = f32::MAX; //Undefined in this direction
+    }
+
+    VoxelRaycast { pos : voxel_origin,
+        tMax : t_max,
+        tDelta : t_delta,
+        stepDir : step_dir,
+    }
+}
+
+/* 
+Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "A Fast Voxel Traversal Algorithm for Ray Tracing" (2011)
+*/
+impl VoxelRaycast { 
+    pub fn step(&mut self) { 
+        if(self.tMax.x < self.tMax.y) {
+            if(self.tMax.x < self.tMax.z) {
+                self.pos.x = self.pos.x + self.stepDir.x;
+                self.tMax.x= self.tMax.x + self.tDelta.x;
+            } else  {
+                self.pos.z = self.pos.z + self.stepDir.z;
+                self.tMax.z= self.tMax.z + self.tDelta.z;
+            }
+        } else  {
+            if(self.tMax.y < self.tMax.z) {
+                self.pos.y = self.pos.y + self.stepDir.y;
+                self.tMax.y = self.tMax.y + self.tDelta.y;
+            } else  {
+                self.pos.z = self.pos.z + self.stepDir.z;
+                self.tMax.z= self.tMax.z + self.tDelta.z;
+            }
+        }
+    }
+}
+
+//Just a test here. Not for use in production.
+fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut VoxelRaycast) -> Option<VoxelPos<i32>> {
+    let mut count = 0;
+    const MAX_COUNT : usize = 4096; //TODO: Don't use a magic number.
+    loop {
+        let result = space.getv(raycast.pos);
+        if(result.unwrap() != air_id) { 
+            return Some(raycast.pos);
+        }
+        count = count + 1;
+        if(count > MAX_COUNT) {
+            return None;
+        }
+        raycast.step();
+    }
 }
 
 fn main() {
@@ -351,32 +492,38 @@ fn main() {
         }
         
 
-        let click_point = camera_pos + forward;
+        //let click_point = camera_pos + forward;
 
-        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.floor() as i32, y: click_point.y.floor() as i32, z: click_point.z.floor() as i32};
+        //let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.floor() as i32, y: click_point.y.floor() as i32, z: click_point.z.floor() as i32};
+
+        if(delete_action || set_action || pick_action ) {
+            let mut raycast = construct_voxel_raycast(camera_pos, forward);
+            let struck_pos = voxel_raycast_first(&space, air_id, &mut raycast).unwrap();
+            println!("{}", struck_pos);
+            println!("{}", space.getv(struck_pos).unwrap());
+
+            if delete_action { 
+                let old_material = space.getv(struck_pos).unwrap();
+                space.setv(struck_pos, air_id.clone());
+                if(old_material != air_id) {
+                    renderer.notify_remesh(struck_pos);
+                }
+                delete_action = false;
+            }
+            else if set_action {
+                let old_material = space.getv(struck_pos).unwrap();
+                space.setv(struck_pos, current_block);
+                if(old_material != current_block) {
+                    renderer.notify_remesh(struck_pos);
+                }
+                set_action = false;
+            }
+            else if pick_action {
+                current_block = space.getv(struck_pos).unwrap();
+                pick_action = false;
+            }
+        }
         
-        if delete_action { 
-            let old_material = space.getv(click_point_vx).unwrap();
-            let set_material = air_id.clone();
-            space.setv(click_point_vx, set_material.clone());
-            if(old_material != set_material.clone()) {
-                renderer.notify_remesh(click_point_vx);
-            }
-            delete_action = false;
-        }
-        else if set_action {
-            let old_material = space.getv(click_point_vx).unwrap();
-            let set_material = current_block;
-            space.setv(click_point_vx, set_material.clone());
-            if(old_material != set_material.clone()) {
-                renderer.notify_remesh(click_point_vx);
-            }
-            set_action = false;
-        }
-        else if pick_action {
-            current_block = space.getv(click_point_vx).unwrap();
-            pick_action = false;
-        }
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
 

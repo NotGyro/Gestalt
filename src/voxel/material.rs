@@ -82,9 +82,10 @@ impl<'de> Deserialize<'de> for MaterialID {
     }
 }
 
+/*
 impl Into<&String> for MaterialID { 
     fn into(self) -> String { self.to_name() }
-}
+}*/
 
 //Is this still totally necessary? I suppose it'll be necessary when whe associate behaviors with IDs.
 #[derive(Clone)]
