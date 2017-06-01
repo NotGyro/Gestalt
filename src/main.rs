@@ -122,9 +122,10 @@ impl From<Vector3<f32>> for VoxelPos<i32> {
 #[derive(Clone, Debug)]
 pub struct VoxelRaycast {
 	pub pos : VoxelPos<i32>,
-    tMax : Vector3<f32>, //Where does the ray cross the first voxel boundary? (in all directions)
-    tDelta : Vector3<f32>, //How far along do we need to move for the length of that movement to equal the width of a voxel?
-    stepDir : VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
+    t_max : Vector3<f32>, //Where does the ray cross the first voxel boundary? (in all directions)
+    t_delta : Vector3<f32>, //How far along do we need to move for the length of that movement to equal the width of a voxel?
+    step_dir : VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
+    last_direction : VoxelAxisUnsigned,
 }
 
 pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -> VoxelRaycast {
@@ -151,11 +152,11 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
         step_dir.z = -1;
     }
 
-    let voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
+    let mut voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
     //Distance along the ray to the next voxel from our origin
     let next_voxel_boundary = voxel_origin + step_dir;
 
-    //Set up our tMax - distances to next cell
+    //Set up our t_max - distances to next cell
     let mut t_max : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
     if(direction.x != 0.0) { 
         t_max.x = (next_voxel_boundary.x as f32 - origin.x)/direction.x;
@@ -176,7 +177,7 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
         t_max.z = f32::MAX; //Undefined in this direction
     }
 
-    //Set up our tDelta - movement per iteration.
+    //Set up our t_delta - movement per iteration.
     //Again, voxel is assumed to be 1x1x1 in this situation.
     let mut t_delta : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
     if(direction.x != 0.0) { 
@@ -197,11 +198,27 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
     else {
         t_delta.z = f32::MAX; //Undefined in this direction
     }
-
+    
+    //Resolve some weird sign bugs.
+    let mut negative : bool =false;
+    let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
+    if (direction.x<0.0) { 
+        step_negative.x = -1; negative=true; 
+    }
+    if (direction.y<0.0) { 
+        step_negative.y = -1; negative=true; 
+    }
+    if (direction.z<0.0) {
+        step_negative.z = -1; negative=true; 
+    }
+    if negative {
+        voxel_origin = voxel_origin + step_negative;
+    }
     VoxelRaycast { pos : voxel_origin,
-        tMax : t_max,
-        tDelta : t_delta,
-        stepDir : step_dir,
+        t_max : t_max,
+        t_delta : t_delta,
+        step_dir : step_dir,
+        last_direction : VoxelAxisUnsigned::Z,
     }
 }
 
@@ -210,22 +227,56 @@ Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "
 */
 impl VoxelRaycast { 
     pub fn step(&mut self) { 
-        if(self.tMax.x < self.tMax.y) {
-            if(self.tMax.x < self.tMax.z) {
-                self.pos.x = self.pos.x + self.stepDir.x;
-                self.tMax.x= self.tMax.x + self.tDelta.x;
+        if(self.t_max.x < self.t_max.y) {
+            if(self.t_max.x < self.t_max.z) {
+                self.pos.x = self.pos.x + self.step_dir.x;
+                self.t_max.x= self.t_max.x + self.t_delta.x;
+                self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
             } else  {
-                self.pos.z = self.pos.z + self.stepDir.z;
-                self.tMax.z= self.tMax.z + self.tDelta.z;
+                self.pos.z = self.pos.z + self.step_dir.z;
+                self.t_max.z= self.t_max.z + self.t_delta.z;
+                self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
             }
         } else  {
-            if(self.tMax.y < self.tMax.z) {
-                self.pos.y = self.pos.y + self.stepDir.y;
-                self.tMax.y = self.tMax.y + self.tDelta.y;
+            if(self.t_max.y < self.t_max.z) {
+                self.pos.y = self.pos.y + self.step_dir.y;
+                self.t_max.y = self.t_max.y + self.t_delta.y;
+                self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
             } else  {
-                self.pos.z = self.pos.z + self.stepDir.z;
-                self.tMax.z= self.tMax.z + self.tDelta.z;
+                self.pos.z = self.pos.z + self.step_dir.z;
+                self.t_max.z= self.t_max.z + self.t_delta.z;
+                self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
             }
+        }
+    }
+    pub fn get_last_direction(&self) -> VoxelAxis { 
+        match self.last_direction { 
+            VoxelAxisUnsigned::X => {
+                if(self.step_dir.x < 0) {
+                    //The reason these are all the opposite of what they seem like they should be is we're getting the side the raycast hit.
+                    //The last direction we traveled will be the opposite of the normal of the side we struck.
+                    return VoxelAxis::PosiX; 
+                } 
+                else { 
+                    return VoxelAxis::NegaX;
+                }
+            },
+            VoxelAxisUnsigned::Y => {
+                if(self.step_dir.y < 0) {
+                    return VoxelAxis::PosiY;
+                } 
+                else { 
+                    return VoxelAxis::NegaY;
+                }
+            },
+            VoxelAxisUnsigned::Z => {
+                if(self.step_dir.z < 0) {
+                    return VoxelAxis::PosiZ;
+                } 
+                else { 
+                    return VoxelAxis::NegaZ;
+                }
+            },
         }
     }
 }
@@ -312,8 +363,6 @@ fn main() {
     
 	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
 	
-	let mouse_sensitivity : f32 = 4.0;
-	let move_speed : f32 = 16.0;
 	let mut horz_angle : Rad<f32> = Rad::zero();
 	let mut vert_angle : Rad<f32> = Rad::zero();
 
@@ -365,8 +414,10 @@ fn main() {
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
     let mut elapsed = 0.01 as f32;
+	let mouse_sensitivity : f32 = 4.0;
+	let move_speed : f32 = 16.0;
+
     while keeprunning {
-        
         for ev in display.poll_events() {
             match ev {
                 Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
@@ -414,7 +465,15 @@ fn main() {
                             VirtualKeyCode::C => { 
                                 match state {
                                     glutin::ElementState::Pressed => (),
-                                    glutin::ElementState::Released => grabs_mouse = !grabs_mouse,
+                                    glutin::ElementState::Released => {
+                                        grabs_mouse = !grabs_mouse;
+                                        if(grabs_mouse) { 
+                                            window.set_cursor_state(glutin::CursorState::Grab);
+                                        }
+                                        else {
+                                            window.set_cursor_state(glutin::CursorState::Normal);
+                                        }
+                                    },
                                 }
                             },
                             VirtualKeyCode::Q => { 
@@ -450,7 +509,7 @@ fn main() {
                 _ => (), //println!("Mystery event: {:?}", ev), 
             }
         }
-
+        /*
         if(vert_angle.s < 3.14) {
             if(vert_angle.s > 1.57) {
                 vert_angle.s = 1.57;
@@ -460,10 +519,10 @@ fn main() {
             if(vert_angle.s < 4.712) {
                 vert_angle.s = 4.712;
             }
-        }
+        }*/
 
-        horz_angle = horz_angle.normalize();
-        vert_angle = vert_angle.normalize();
+        //horz_angle = horz_angle.normalize();
+        //vert_angle = vert_angle.normalize();
         
         //Clockwise to counter-clockwise.
         let yaw : Quaternion<f32> = Quaternion::from_angle_z(horz_angle.neg());
@@ -477,20 +536,7 @@ fn main() {
         //Remember: Z is our vertical axis here. Cross product would get our downward vector by the right-hand rule.
         let up = forward.cross( right ).neg();
 
-        //Process input 
-        if w_down {
-            camera_pos += forward * (elapsed * move_speed);
-        }
-        if d_down {
-            camera_pos += right * (elapsed * move_speed);
-        }
-        if s_down {
-            camera_pos += (forward * (elapsed * move_speed)).neg();
-        }
-        if a_down {
-            camera_pos += (right * (elapsed * move_speed)).neg();
-        }
-        
+        //Process input        
 
         //let click_point = camera_pos + forward;
 
@@ -511,10 +557,14 @@ fn main() {
                 delete_action = false;
             }
             else if set_action {
-                let old_material = space.getv(struck_pos).unwrap();
-                space.setv(struck_pos, current_block);
+                //Get the side our raycast hit.
+                let direction = raycast.get_last_direction();
+                let block_pos = struck_pos.get_neighbor(direction);
+                //Now we can set our position.
+                let old_material = space.getv(block_pos).unwrap();
+                space.setv(block_pos, current_block);
                 if(old_material != current_block) {
-                    renderer.notify_remesh(struck_pos);
+                    renderer.notify_remesh(block_pos);
                 }
                 set_action = false;
             }
@@ -522,6 +572,19 @@ fn main() {
                 current_block = space.getv(struck_pos).unwrap();
                 pick_action = false;
             }
+        }
+
+        if w_down {
+            camera_pos += forward * (elapsed * move_speed);
+        }
+        if d_down {
+            camera_pos += right * (elapsed * move_speed);
+        }
+        if s_down {
+            camera_pos += (forward * (elapsed * move_speed)).neg();
+        }
+        if a_down {
+            camera_pos += (right * (elapsed * move_speed)).neg();
         }
         
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);

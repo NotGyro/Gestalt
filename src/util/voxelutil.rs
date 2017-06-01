@@ -238,6 +238,12 @@ pub enum VoxelAxis {
 	PosiZ,
 	NegaZ,
 }
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum VoxelAxisUnsigned {
+	X,
+	Y,
+	Z,
+}
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 enum VoxelAxisSign {
