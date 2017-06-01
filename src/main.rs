@@ -108,12 +108,12 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
     return display;
 }
 
-/*impl From<Point3<f32>> for VoxelPos<i32> { 
+/*impl From<Point3<f32>> for VoxelPos<i32> {
     fn from(point : Point3<f32>) -> VoxelPos<i32> {
         VoxelPos{x: point.x.floor() as i32, y: point.y.floor() as i32, z: point.z.floor() as i32}
     }
 }
-impl From<Vector3<f32>> for VoxelPos<i32> { 
+impl From<Vector3<f32>> for VoxelPos<i32> {
     fn from(point : Vector3<f32>) -> VoxelPos<i32> {
         VoxelPos{x: point.x.floor() as i32, y: point.y.floor() as i32, z: point.z.floor() as i32}
     }
@@ -133,19 +133,19 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
     let mut first_step = origin + direction;
     //Set up our step sign variable.
     let mut step_dir : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-    if(direction.x >= 0.0) { 
+    if(direction.x >= 0.0) {
         step_dir.x = 1;
     }
     else {
         step_dir.x = -1;
     }
-    if(direction.y >= 0.0) { 
+    if(direction.y >= 0.0) {
         step_dir.y = 1;
     }
     else {
         step_dir.y = -1;
     }
-    if(direction.z >= 0.0) { 
+    if(direction.z >= 0.0) {
         step_dir.z = 1;
     }
     else {
@@ -158,19 +158,19 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
 
     //Set up our t_max - distances to next cell
     let mut t_max : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
-    if(direction.x != 0.0) { 
+    if(direction.x != 0.0) {
         t_max.x = (next_voxel_boundary.x as f32 - origin.x)/direction.x;
     }
     else {
         t_max.x = f32::MAX; //Undefined in this direction
     }
-    if(direction.y != 0.0) { 
+    if(direction.y != 0.0) {
         t_max.y = (next_voxel_boundary.y as f32 - origin.y)/direction.y;
     }
     else {
         t_max.y = f32::MAX; //Undefined in this direction
     }
-    if(direction.z != 0.0) { 
+    if(direction.z != 0.0) {
         t_max.z = (next_voxel_boundary.z as f32 - origin.z)/direction.z;
     }
     else {
@@ -180,36 +180,36 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
     //Set up our t_delta - movement per iteration.
     //Again, voxel is assumed to be 1x1x1 in this situation.
     let mut t_delta : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
-    if(direction.x != 0.0) { 
+    if(direction.x != 0.0) {
         t_delta.x = 1.0/(direction.x*step_dir.x as f32);
     }
     else {
         t_delta.x = f32::MAX; //Undefined in this direction
     }
-    if(direction.y != 0.0) { 
+    if(direction.y != 0.0) {
         t_delta.y = 1.0/(direction.y*step_dir.y as f32);
     }
     else {
         t_delta.y = f32::MAX; //Undefined in this direction
     }
-    if(direction.z != 0.0) { 
+    if(direction.z != 0.0) {
         t_delta.z = 1.0/(direction.z*step_dir.z as f32);
     }
     else {
         t_delta.z = f32::MAX; //Undefined in this direction
     }
-    
+
     //Resolve some weird sign bugs.
     let mut negative : bool =false;
     let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-    if (direction.x<0.0) { 
-        step_negative.x = -1; negative=true; 
+    if (direction.x<0.0) {
+        step_negative.x = -1; negative=true;
     }
-    if (direction.y<0.0) { 
-        step_negative.y = -1; negative=true; 
+    if (direction.y<0.0) {
+        step_negative.y = -1; negative=true;
     }
     if (direction.z<0.0) {
-        step_negative.z = -1; negative=true; 
+        step_negative.z = -1; negative=true;
     }
     if negative {
         voxel_origin = voxel_origin + step_negative;
@@ -222,11 +222,11 @@ pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -
     }
 }
 
-/* 
+/*
 Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "A Fast Voxel Traversal Algorithm for Ray Tracing" (2011)
 */
-impl VoxelRaycast { 
-    pub fn step(&mut self) { 
+impl VoxelRaycast {
+    pub fn step(&mut self) {
         if(self.t_max.x < self.t_max.y) {
             if(self.t_max.x < self.t_max.z) {
                 self.pos.x = self.pos.x + self.step_dir.x;
@@ -249,31 +249,31 @@ impl VoxelRaycast {
             }
         }
     }
-    pub fn get_last_direction(&self) -> VoxelAxis { 
-        match self.last_direction { 
+    pub fn get_last_direction(&self) -> VoxelAxis {
+        match self.last_direction {
             VoxelAxisUnsigned::X => {
                 if(self.step_dir.x < 0) {
                     //The reason these are all the opposite of what they seem like they should be is we're getting the side the raycast hit.
                     //The last direction we traveled will be the opposite of the normal of the side we struck.
-                    return VoxelAxis::PosiX; 
-                } 
-                else { 
+                    return VoxelAxis::PosiX;
+                }
+                else {
                     return VoxelAxis::NegaX;
                 }
             },
             VoxelAxisUnsigned::Y => {
                 if(self.step_dir.y < 0) {
                     return VoxelAxis::PosiY;
-                } 
-                else { 
+                }
+                else {
                     return VoxelAxis::NegaY;
                 }
             },
             VoxelAxisUnsigned::Z => {
                 if(self.step_dir.z < 0) {
                     return VoxelAxis::PosiZ;
-                } 
-                else { 
+                }
+                else {
                     return VoxelAxis::NegaZ;
                 }
             },
@@ -287,7 +287,7 @@ fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut 
     const MAX_COUNT : usize = 4096; //TODO: Don't use a magic number.
     loop {
         let result = space.getv(raycast.pos);
-        if(result.unwrap() != air_id) { 
+        if(result.unwrap() != air_id) {
             return Some(raycast.pos);
         }
         count = count + 1;
@@ -298,19 +298,44 @@ fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut 
     }
 }
 
+use std::time::Instant;
+
+fn fps_limit(fps : u64, frame_start : Instant) {
+    use std::time::Duration;
+    use std::thread::sleep;
+
+    let now = Instant::now();
+
+    /* we allocate N ms for each frame and then we subtract the difference between the start and
+     * the end of the frame from it, we use the result as the duration to sleep
+     * #: allocated unit
+     * +: allocated unit, used
+     * assuming unit = 10ms and fps = 10, [##########]
+     * [+++++++###], thus we sleep ### -> 30 ms in order to fill it
+     */
+    let diff = now.duration_since(frame_start);
+    let allocated = Duration::from_millis(1000 / fps);
+    let sleepdur = allocated.checked_sub(diff);
+    match sleepdur {
+        Some(x) => sleep(x),
+        None => ()
+    }
+}
+
+
 fn main() {
 
     println!("{:?}", std::env::current_exe());
-    
+
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
     let air_id : MaterialID = mat_idx.for_name(&String::from("test.air"));
     let stone_id : MaterialID = mat_idx.for_name(&String::from("test.stone"));
     let dirt_id : MaterialID = mat_idx.for_name(&String::from("test.dirt"));
     let grass_id : MaterialID = mat_idx.for_name(&String::from("test.grass"));
-    
+
     let mut space = VoxelSpace::new(mat_idx);
-    
+
     let lower_x : i32 = -2;
     let upper_x : i32 = 2;
     let lower_y : i32 = -2;
@@ -325,7 +350,7 @@ fn main() {
             }
         }
     }
-    
+
     //---- Set up window ----
     let screen_width : u32 = 1024;
     let screen_height : u32 = 768;
@@ -341,14 +366,14 @@ fn main() {
     let mut fragment_shader_src = String::new();
     vshaderfile.read_to_string(&mut vertex_shader_src);
     fshaderfile.read_to_string(&mut fragment_shader_src);
-    
+
     println!(line!());
     let program = glium::Program::from_source(&display, vertex_shader_src.as_ref(), fragment_shader_src.as_ref(), None).unwrap();
 
-    
+
 
     let mut t: f32 = -0.5;
-    
+
     let params = glium::DrawParameters {
         depth: glium::Depth {
             test: glium::draw_parameters::DepthTest::IfLess,
@@ -358,24 +383,24 @@ fn main() {
         backface_culling : glium::draw_parameters::BackfaceCullingMode::CullClockwise,
         .. Default::default()
     };
-    
+
     //---- Set up our camera ----
-    
-	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
-	
+
+	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0};
+
 	let mut horz_angle : Rad<f32> = Rad::zero();
 	let mut vert_angle : Rad<f32> = Rad::zero();
 
     //let mut perspective_matrix : cgmath::Matrix4<f32> = cgmath::perspective(cgmath::deg(45.0), 1.333, 0.0001, 100.0);
     //let mut view_matrix : Matrix4<f32> = Matrix4::look_at(view_eye, view_center, view_up);
     let mut model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);
-    
+
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
-    
-    
-    let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0}; 
-    
+
+
+    let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0};
+
     //---- Set up our texture(s) and chunk verticies ----
     let stone_art = MatArtSimple { texture_name : String::from("teststone.png") };
     let dirt_art = MatArtSimple { texture_name : String::from("testdirt.png") };
@@ -389,12 +414,12 @@ fn main() {
     mat_art_manager.insert(stone_id.clone(), stone_art.clone());
     mat_art_manager.insert(dirt_id.clone(), dirt_art.clone());
 
-    for chunk in space.get_regions() { 
+    for chunk in space.get_regions() {
         renderer.force_mesh(&space, &display, chunk, &mat_art_manager);
     }
 
     //---- Some movement stuff ----
-    
+
     let mut w_down : bool = false;
     let mut a_down : bool = false;
     let mut s_down : bool = false;
@@ -404,70 +429,75 @@ fn main() {
     let mut delete_action : bool = false;
     let mut pick_action : bool = false;
     let mut current_block : MaterialID = MaterialID::from_name(&String::from("test.stone"));
-    
-    
+
+
     let screen_center_x : i32 = screen_width as i32 /2;
     let screen_center_y : i32 = screen_height as i32 /2;
-    
+
     let mut mouse_first_moved : bool = false;
     let mut grabs_mouse : bool = true;
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
     let mut elapsed = 0.01 as f32;
-	let mouse_sensitivity : f32 = 4.0;
+	let mouse_sensitivity : f32 = 1.0;
 	let move_speed : f32 = 16.0;
 
     while keeprunning {
+        let start = Instant::now();
         for ev in display.poll_events() {
             match ev {
                 Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
                 Event::MouseMoved(x, y) => {
                     if(grabs_mouse) {
-                    if mouse_first_moved {
-                        horz_angle.s += ((x - screen_center_x) as f32) * (mouse_sensitivity * elapsed);
-                        vert_angle.s += ((y - screen_center_y) as f32) * (mouse_sensitivity * elapsed);
-                    }
-                    else {
-                        mouse_first_moved = true;
-                    }
-                    mouse_prev_x = x;
-                    mouse_prev_y = y;
-                    window.set_cursor_position(screen_center_x, screen_center_y);
+                        if mouse_first_moved {
+                            horz_angle.s += ((x - screen_center_x) as f32) * mouse_sensitivity * elapsed;
+                            vert_angle.s += ((y - screen_center_y) as f32) * mouse_sensitivity * elapsed;
+                        }
+                        else {
+                            mouse_first_moved = true;
+                        }
+                        mouse_prev_x = x;
+                        mouse_prev_y = y;
+                        window.set_cursor_position(screen_center_x, screen_center_y);
+
+                        let now = precise_time_s();
+                        elapsed = (now - lastupdate) as f32;
+                        lastupdate = now;
                     }
                 },
                 Event::KeyboardInput(state, sc, keyopt) => {
                     match keyopt {
                         Some(key) => match key {
-                            VirtualKeyCode::W => { 
+                            VirtualKeyCode::W => {
                                 match state {
                                     glutin::ElementState::Pressed => w_down = true,
                                     glutin::ElementState::Released => w_down = false,
                                 }
                             },
-                            VirtualKeyCode::A => { 
+                            VirtualKeyCode::A => {
                                 match state {
                                     glutin::ElementState::Pressed => a_down = true,
                                     glutin::ElementState::Released => a_down = false,
                                 }
                             },
-                            VirtualKeyCode::S => { 
+                            VirtualKeyCode::S => {
                                 match state {
                                     glutin::ElementState::Pressed => s_down = true,
                                     glutin::ElementState::Released => s_down = false,
                                 }
                             },
-                            VirtualKeyCode::D => { 
+                            VirtualKeyCode::D => {
                                 match state {
                                     glutin::ElementState::Pressed => d_down = true,
                                     glutin::ElementState::Released => d_down = false,
                                 }
                             },
-                            VirtualKeyCode::C => { 
+                            VirtualKeyCode::C => {
                                 match state {
                                     glutin::ElementState::Pressed => (),
                                     glutin::ElementState::Released => {
                                         grabs_mouse = !grabs_mouse;
-                                        if(grabs_mouse) { 
+                                        if(grabs_mouse) {
                                             window.set_cursor_state(glutin::CursorState::Grab);
                                         }
                                         else {
@@ -476,13 +506,13 @@ fn main() {
                                     },
                                 }
                             },
-                            VirtualKeyCode::Q => { 
+                            VirtualKeyCode::Q => {
                                 match state {
                                     glutin::ElementState::Pressed => (),
                                     glutin::ElementState::Released => println!(" Vertical angle: {}", vert_angle.s),
                                 }
                             },
-                            VirtualKeyCode::Escape => { 
+                            VirtualKeyCode::Escape => {
                                 keeprunning = false;
                             },
                             _ => ()
@@ -506,7 +536,7 @@ fn main() {
                         }
                     }
                 },
-                _ => (), //println!("Mystery event: {:?}", ev), 
+                _ => (), //println!("Mystery event: {:?}", ev),
             }
         }
         /*
@@ -523,7 +553,7 @@ fn main() {
 
         //horz_angle = horz_angle.normalize();
         //vert_angle = vert_angle.normalize();
-        
+
         //Clockwise to counter-clockwise.
         let yaw : Quaternion<f32> = Quaternion::from_angle_z(horz_angle.neg());
         let pitch : Quaternion<f32> = Quaternion::from_angle_y(vert_angle);
@@ -536,7 +566,7 @@ fn main() {
         //Remember: Z is our vertical axis here. Cross product would get our downward vector by the right-hand rule.
         let up = forward.cross( right ).neg();
 
-        //Process input        
+        //Process input
 
         //let click_point = camera_pos + forward;
 
@@ -548,7 +578,7 @@ fn main() {
             println!("{}", struck_pos);
             println!("{}", space.getv(struck_pos).unwrap());
 
-            if delete_action { 
+            if delete_action {
                 let old_material = space.getv(struck_pos).unwrap();
                 space.setv(struck_pos, air_id.clone());
                 if(old_material != air_id) {
@@ -586,12 +616,12 @@ fn main() {
         if a_down {
             camera_pos += (right * (elapsed * move_speed)).neg();
         }
-        
+
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
 
         //Remesh chunks if necessary.
-        
+
         let before_remesh = precise_time_s();
         renderer.process_remesh(&space, &display, &mat_art_manager);
         let remesh_time = precise_time_s() - before_remesh;
@@ -603,8 +633,11 @@ fn main() {
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
         renderer.draw(perspective_matrix, view_matrix, &mut target, &program, &params);
         target.finish().unwrap();
-        elapsed = (precise_time_s() - lastupdate) as f32;
-        lastupdate = precise_time_s();
+
+        let now = precise_time_s();
+        elapsed = (now - lastupdate) as f32;
+        lastupdate = now;
+        fps_limit(60, start);
     }
     //--------- Save our file on closing --------------
     space.unload_all();
