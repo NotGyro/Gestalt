@@ -466,16 +466,16 @@ fn main() {
                 Event::MouseMoved(x, y) => {
                     if(grabs_mouse) {
                         if mouse_first_moved {
-                            let mut amt_x = (x - screen_center_x) as f32 / elapsed; //Pixels moved by cursor per second.
+                            let mut amt_x = (x - screen_center_x); //Pixels moved by cursor per second.
                             /*if(amt_x.abs() > mouse_move_max) {
                                 amt_x = mouse_move_max * amt_x.signum();
                             }*/
-                            let mut amt_y = (y - screen_center_y) as f32 / elapsed; //Pixels moved by cursor per second.
+                            let mut amt_y = (y - screen_center_y); //Pixels moved by cursor per second.
                             /*if(amt_y.abs() > mouse_move_max) {
                                 amt_y = mouse_move_max * amt_y.signum();
                             }*/
-                            horz_angle.s += amt_x * mouse_sensitivity * elapsed;
-                            vert_angle.s += amt_y * mouse_sensitivity * elapsed;
+                            horz_angle.s += amt_x as f32 * mouse_sensitivity;
+                            vert_angle.s += amt_y as f32 * mouse_sensitivity;
                         }
                         else {
                             mouse_first_moved = true;
