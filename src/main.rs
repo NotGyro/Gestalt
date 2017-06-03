@@ -69,12 +69,6 @@ use glium::glutin::CursorState;
 use glium::texture::Texture2dArray;
 use glium::backend::glutin_backend::GlutinFacade;
 
-/*use piston::event_loop::{ Events, EventLoop, EventSettings };
-use flate2::read::GzDecoder;
-use glutin_window::*;
-use gfx::traits::Device;
-use piston::window::{ Size, Window, AdvancedWindow, OpenGLWindow, WindowSettings };*/
-
 // This function only gets compiled if the target OS is linux
 #[cfg(target_os = "linux")]
 fn are_you_on_linux() {
@@ -119,179 +113,6 @@ fn make_display(screen_width : u32, screen_height : u32) -> GlutinFacade {
         },
     };
     return display;
-}
-
-/*impl From<Point3<f32>> for VoxelPos<i32> {
-    fn from(point : Point3<f32>) -> VoxelPos<i32> {
-        VoxelPos{x: point.x.floor() as i32, y: point.y.floor() as i32, z: point.z.floor() as i32}
-    }
-}
-impl From<Vector3<f32>> for VoxelPos<i32> {
-    fn from(point : Vector3<f32>) -> VoxelPos<i32> {
-        VoxelPos{x: point.x.floor() as i32, y: point.y.floor() as i32, z: point.z.floor() as i32}
-    }
-}*/
-
-#[derive(Clone, Debug)]
-pub struct VoxelRaycast {
-	pub pos : VoxelPos<i32>,
-    t_max : Vector3<f32>, //Where does the ray cross the first voxel boundary? (in all directions)
-    t_delta : Vector3<f32>, //How far along do we need to move for the length of that movement to equal the width of a voxel?
-    step_dir : VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
-    last_direction : VoxelAxisUnsigned,
-}
-
-pub fn construct_voxel_raycast(origin : Point3<f32>, direction : Vector3<f32>) -> VoxelRaycast {
-    //Voxel is assumed to be 1x1x1 in this situation.
-    let mut first_step = origin + direction;
-    //Set up our step sign variable.
-    let mut step_dir : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-    if(direction.x >= 0.0) {
-        step_dir.x = 1;
-    }
-    else {
-        step_dir.x = -1;
-    }
-    if(direction.y >= 0.0) {
-        step_dir.y = 1;
-    }
-    else {
-        step_dir.y = -1;
-    }
-    if(direction.z >= 0.0) {
-        step_dir.z = 1;
-    }
-    else {
-        step_dir.z = -1;
-    }
-
-    let mut voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
-    //Distance along the ray to the next voxel from our origin
-    let next_voxel_boundary = voxel_origin + step_dir;
-
-    //Set up our t_max - distances to next cell
-    let mut t_max : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
-    if(direction.x != 0.0) {
-        t_max.x = (next_voxel_boundary.x as f32 - origin.x)/direction.x;
-    }
-    else {
-        t_max.x = f32::MAX; //Undefined in this direction
-    }
-    if(direction.y != 0.0) {
-        t_max.y = (next_voxel_boundary.y as f32 - origin.y)/direction.y;
-    }
-    else {
-        t_max.y = f32::MAX; //Undefined in this direction
-    }
-    if(direction.z != 0.0) {
-        t_max.z = (next_voxel_boundary.z as f32 - origin.z)/direction.z;
-    }
-    else {
-        t_max.z = f32::MAX; //Undefined in this direction
-    }
-
-    //Set up our t_delta - movement per iteration.
-    //Again, voxel is assumed to be 1x1x1 in this situation.
-    let mut t_delta : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
-    if(direction.x != 0.0) {
-        t_delta.x = 1.0/(direction.x*step_dir.x as f32);
-    }
-    else {
-        t_delta.x = f32::MAX; //Undefined in this direction
-    }
-    if(direction.y != 0.0) {
-        t_delta.y = 1.0/(direction.y*step_dir.y as f32);
-    }
-    else {
-        t_delta.y = f32::MAX; //Undefined in this direction
-    }
-    if(direction.z != 0.0) {
-        t_delta.z = 1.0/(direction.z*step_dir.z as f32);
-    }
-    else {
-        t_delta.z = f32::MAX; //Undefined in this direction
-    }
-
-    //Resolve some weird sign bugs.
-    let mut negative : bool =false;
-    let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-    if (direction.x<0.0) {
-        step_negative.x = -1; negative=true;
-    }
-    if (direction.y<0.0) {
-        step_negative.y = -1; negative=true;
-    }
-    if (direction.z<0.0) {
-        step_negative.z = -1; negative=true;
-    }
-    if negative {
-        voxel_origin = voxel_origin + step_negative;
-    }
-    VoxelRaycast { pos : voxel_origin,
-        t_max : t_max,
-        t_delta : t_delta,
-        step_dir : step_dir,
-        last_direction : VoxelAxisUnsigned::Z,
-    }
-}
-
-/*
-Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "A Fast Voxel Traversal Algorithm for Ray Tracing" (2011)
-*/
-impl VoxelRaycast {
-    pub fn step(&mut self) {
-        if(self.t_max.x < self.t_max.y) {
-            if(self.t_max.x < self.t_max.z) {
-                self.pos.x = self.pos.x + self.step_dir.x;
-                self.t_max.x= self.t_max.x + self.t_delta.x;
-                self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
-            } else  {
-                self.pos.z = self.pos.z + self.step_dir.z;
-                self.t_max.z= self.t_max.z + self.t_delta.z;
-                self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
-            }
-        } else  {
-            if(self.t_max.y < self.t_max.z) {
-                self.pos.y = self.pos.y + self.step_dir.y;
-                self.t_max.y = self.t_max.y + self.t_delta.y;
-                self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
-            } else  {
-                self.pos.z = self.pos.z + self.step_dir.z;
-                self.t_max.z= self.t_max.z + self.t_delta.z;
-                self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
-            }
-        }
-    }
-    pub fn get_last_direction(&self) -> VoxelAxis {
-        match self.last_direction {
-            VoxelAxisUnsigned::X => {
-                if(self.step_dir.x < 0) {
-                    //The reason these are all the opposite of what they seem like they should be is we're getting the side the raycast hit.
-                    //The last direction we traveled will be the opposite of the normal of the side we struck.
-                    return VoxelAxis::PosiX;
-                }
-                else {
-                    return VoxelAxis::NegaX;
-                }
-            },
-            VoxelAxisUnsigned::Y => {
-                if(self.step_dir.y < 0) {
-                    return VoxelAxis::PosiY;
-                }
-                else {
-                    return VoxelAxis::NegaY;
-                }
-            },
-            VoxelAxisUnsigned::Z => {
-                if(self.step_dir.z < 0) {
-                    return VoxelAxis::PosiZ;
-                }
-                else {
-                    return VoxelAxis::NegaZ;
-                }
-            },
-        }
-    }
 }
 
 //Just a test here. Not for use in production.
@@ -450,7 +271,6 @@ fn main() {
     let mut elapsed = 0.01 as f32;
 	let mouse_sensitivity : f32 = 0.0005;
 	let move_speed : f32 = 16.0;
-    //let mouse_move_max = 18; 
 
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
@@ -466,16 +286,8 @@ fn main() {
                 Event::MouseMoved(x, y) => {
                     if(grabs_mouse) {
                         if mouse_first_moved {
-                            let mut amt_x = (x - screen_center_x); //Pixels moved by cursor per second.
-                            /*if(amt_x.abs() > mouse_move_max) {
-                                amt_x = mouse_move_max * amt_x.signum();
-                            }*/
-                            let mut amt_y = (y - screen_center_y); //Pixels moved by cursor per second.
-                            /*if(amt_y.abs() > mouse_move_max) {
-                                amt_y = mouse_move_max * amt_y.signum();
-                            }*/
-                            horz_angle.s += amt_x as f32 * mouse_sensitivity;
-                            vert_angle.s += amt_y as f32 * mouse_sensitivity;
+                            horz_angle.s += (x - screen_center_x) as f32 * mouse_sensitivity;
+                            vert_angle.s += (y - screen_center_y) as f32 * mouse_sensitivity;
                         }
                         else {
                             mouse_first_moved = true;
@@ -597,7 +409,7 @@ fn main() {
         //let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.floor() as i32, y: click_point.y.floor() as i32, z: click_point.z.floor() as i32};
 
         if(delete_action || set_action || pick_action ) {
-            let mut raycast = construct_voxel_raycast(camera_pos, forward);
+            let mut raycast = VoxelRaycast::new(camera_pos, forward);
             let struck_pos = voxel_raycast_first(&space, air_id, &mut raycast).unwrap();
             println!("{}", struck_pos);
             println!("{}", space.getv(struck_pos).unwrap());
