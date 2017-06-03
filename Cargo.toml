@@ -32,4 +32,12 @@ glium = "*"
 image = "0.10.0"
 shader_version = "0.2.1"
 
+# piston = "0.32.0"
+# pistoncore-glutin_window = "0.37.0"
+# gfx = "0.16.0"
+# gfx_core = "0.7.0"
+# gfx_device_gl = "0.14.0"
+# camera_controllers = "0.21.0"
+# fps_counter = "0.2.0"
+
 # conrod = "0.38.2"

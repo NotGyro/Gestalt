@@ -21,6 +21,16 @@ extern crate num;
 extern crate time;
 extern crate image;
 
+//Piston stuff.
+/*extern crate camera_controllers;
+extern crate fps_counter;
+#[macro_use] extern crate gfx;
+extern crate gfx_core;
+extern crate gfx_device_gl;
+extern crate piston;
+extern crate glutin_window;*/
+//End of piston stuff.
+
 use time::*;
 
 use std::vec::Vec;
@@ -39,17 +49,14 @@ use std::path::Path;
 use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::{BufWriter, Cursor};
 use std::fs::OpenOptions;
-use std::io::BufWriter;
-use std::io::Cursor;
-use std::io;
-use std::cmp;
+use std::{io, cmp};
 use std::f32::consts::*;
 use std::f32;
 use std::f32::*;
 use std::ops::Neg;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use num::Zero;
 
 use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad, ApproxEq, BaseFloat};
@@ -61,6 +68,12 @@ use glium::glutin::VirtualKeyCode;
 use glium::glutin::CursorState;
 use glium::texture::Texture2dArray;
 use glium::backend::glutin_backend::GlutinFacade;
+
+/*use piston::event_loop::{ Events, EventLoop, EventSettings };
+use flate2::read::GzDecoder;
+use glutin_window::*;
+use gfx::traits::Device;
+use piston::window::{ Size, Window, AdvancedWindow, OpenGLWindow, WindowSettings };*/
 
 // This function only gets compiled if the target OS is linux
 #[cfg(target_os = "linux")]
@@ -354,9 +367,11 @@ fn main() {
     //---- Set up window ----
     let screen_width : u32 = 1024;
     let screen_height : u32 = 768;
+
     let display = make_display(screen_width, screen_height);
     let mut keeprunning = true;
     let mut window = display.get_window().unwrap();
+
     //window.set_cursor_state(glutin::CursorState::Grab);
 
     //---- Set up screen and some basic graphics stuff ----
@@ -369,8 +384,6 @@ fn main() {
 
     println!(line!());
     let program = glium::Program::from_source(&display, vertex_shader_src.as_ref(), fragment_shader_src.as_ref(), None).unwrap();
-
-
 
     let mut t: f32 = -0.5;
 
@@ -394,10 +407,6 @@ fn main() {
     //let mut perspective_matrix : cgmath::Matrix4<f32> = cgmath::perspective(cgmath::deg(45.0), 1.333, 0.0001, 100.0);
     //let mut view_matrix : Matrix4<f32> = Matrix4::look_at(view_eye, view_center, view_up);
     let mut model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);
-
-    let mut mouse_prev_x : i32 = 0;
-    let mut mouse_prev_y : i32 = 0;
-
 
     let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0};
 
@@ -439,19 +448,34 @@ fn main() {
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
     let mut elapsed = 0.01 as f32;
-	let mouse_sensitivity : f32 = 1.0;
+	let mouse_sensitivity : f32 = 0.0005;
 	let move_speed : f32 = 16.0;
+    //let mouse_move_max = 18; 
+
+    let mut mouse_prev_x : i32 = 0;
+    let mut mouse_prev_y : i32 = 0;
+    
+    window.set_cursor_state(glutin::CursorState::Grab);
 
     while keeprunning {
         let start = Instant::now();
+
         for ev in display.poll_events() {
             match ev {
                 Event::Closed => {keeprunning = false},   // The window has been closed by the user, external to our game (hitting x in corner, for example)
                 Event::MouseMoved(x, y) => {
                     if(grabs_mouse) {
                         if mouse_first_moved {
-                            horz_angle.s += ((x - screen_center_x) as f32) * mouse_sensitivity * elapsed;
-                            vert_angle.s += ((y - screen_center_y) as f32) * mouse_sensitivity * elapsed;
+                            let mut amt_x = (x - screen_center_x) as f32 / elapsed; //Pixels moved by cursor per second.
+                            /*if(amt_x.abs() > mouse_move_max) {
+                                amt_x = mouse_move_max * amt_x.signum();
+                            }*/
+                            let mut amt_y = (y - screen_center_y) as f32 / elapsed; //Pixels moved by cursor per second.
+                            /*if(amt_y.abs() > mouse_move_max) {
+                                amt_y = mouse_move_max * amt_y.signum();
+                            }*/
+                            horz_angle.s += amt_x * mouse_sensitivity * elapsed;
+                            vert_angle.s += amt_y * mouse_sensitivity * elapsed;
                         }
                         else {
                             mouse_first_moved = true;
@@ -460,9 +484,9 @@ fn main() {
                         mouse_prev_y = y;
                         window.set_cursor_position(screen_center_x, screen_center_y);
 
-                        let now = precise_time_s();
+                        /*let now = precise_time_s();
                         elapsed = (now - lastupdate) as f32;
-                        lastupdate = now;
+                        lastupdate = now;*/
                     }
                 },
                 Event::KeyboardInput(state, sc, keyopt) => {
@@ -539,7 +563,7 @@ fn main() {
                 _ => (), //println!("Mystery event: {:?}", ev),
             }
         }
-        /*
+        
         if(vert_angle.s < 3.14) {
             if(vert_angle.s > 1.57) {
                 vert_angle.s = 1.57;
@@ -549,10 +573,10 @@ fn main() {
             if(vert_angle.s < 4.712) {
                 vert_angle.s = 4.712;
             }
-        }*/
+        }
 
-        //horz_angle = horz_angle.normalize();
-        //vert_angle = vert_angle.normalize();
+        horz_angle = horz_angle.normalize();
+        vert_angle = vert_angle.normalize();
 
         //Clockwise to counter-clockwise.
         let yaw : Quaternion<f32> = Quaternion::from_angle_z(horz_angle.neg());
