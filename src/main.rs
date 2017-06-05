@@ -447,6 +447,9 @@ fn main() {
                     }
                 },
                 None => { 
+                    delete_action = false;
+                    set_action = false;
+                    pick_action = false;
                     println!("Could not raycast to a loaded / valid voxel.");
                 },
             }
