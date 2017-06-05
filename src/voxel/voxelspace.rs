@@ -94,8 +94,8 @@ fn select_chunk(xp : i32, yp : i32, zp : i32) -> VoxelPos<i32> {
 pub struct VoxelSpace {
     chunk_list : LinearMap<VoxelPos<i32>, Chunk>,
     mat_idx : MaterialIndex,
-    pub not_loaded_val : MaterialID,
-    pub error_val : MaterialID,
+    //pub not_loaded_val : MaterialID,
+    //pub error_val : MaterialID,
 }
 
 
@@ -104,8 +104,8 @@ impl VoxelSpace {
     pub fn new(mat_idx : MaterialIndex) -> Self {
         VoxelSpace { 
             chunk_list : LinearMap::with_capacity(EXPECTED_CHUNKS),
-            not_loaded_val : mat_idx.for_name(&String::from("reserved.not_loaded")),
-            error_val : mat_idx.for_name(&String::from("reserved.error")),
+            //not_loaded_val : mat_idx.for_name(&String::from("reserved.not_loaded")),
+            //error_val : mat_idx.for_name(&String::from("reserved.error")),
             mat_idx : mat_idx,
         }
     }
@@ -281,7 +281,7 @@ impl VoxelStorage<MaterialID, i32> for VoxelSpace {
         let chunk_pos = select_chunk(x,y,z);
         let chunk_maybe = self.chunk_list.get(&chunk_pos);
         match chunk_maybe {
-            None => return Some(self.not_loaded_val.clone()), //We don't have a chunk for this position, so it's either not loaded or not generated.
+            None => return None, //We don't have a chunk for this position, so it's either not loaded or not generated.
             Some(chunk) => {
                 return chunk.getv(pos_to_local(VoxelPos{x:x,y:y,z:z}, chunk_pos));
             }
@@ -347,7 +347,6 @@ fn test_get_ranges() {
     for reg in regions {
         for pos in reg { 
             assert!(space.getv(pos).is_some());
-            assert!( space.getv(pos).unwrap() != space.not_loaded_val );
         }
     }
 }

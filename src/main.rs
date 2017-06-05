@@ -121,8 +121,13 @@ fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut 
     const MAX_COUNT : usize = 4096; //TODO: Don't use a magic number.
     loop {
         let result = space.getv(raycast.pos);
-        if(result.unwrap() != air_id) {
-            return Some(raycast.pos);
+        match result {
+            Some(val) => { 
+                if val != air_id {
+                    return Some(raycast.pos)
+                }
+            },
+            None => return None,
         }
         count = count + 1;
         if(count > MAX_COUNT) {
@@ -410,33 +415,40 @@ fn main() {
 
         if(delete_action || set_action || pick_action ) {
             let mut raycast = VoxelRaycast::new(camera_pos, forward);
-            let struck_pos = voxel_raycast_first(&space, air_id, &mut raycast).unwrap();
-            println!("{}", struck_pos);
-            println!("{}", space.getv(struck_pos).unwrap());
+            let struck_pos_maybe = voxel_raycast_first(&space, air_id, &mut raycast);
+            match struck_pos_maybe { 
+                Some(struck_pos) => {
+                    println!("{}", struck_pos);
+                    println!("{}", space.getv(struck_pos).unwrap());
 
-            if delete_action {
-                let old_material = space.getv(struck_pos).unwrap();
-                space.setv(struck_pos, air_id.clone());
-                if(old_material != air_id) {
-                    renderer.notify_remesh(struck_pos);
-                }
-                delete_action = false;
-            }
-            else if set_action {
-                //Get the side our raycast hit.
-                let direction = raycast.get_last_direction();
-                let block_pos = struck_pos.get_neighbor(direction);
-                //Now we can set our position.
-                let old_material = space.getv(block_pos).unwrap();
-                space.setv(block_pos, current_block);
-                if(old_material != current_block) {
-                    renderer.notify_remesh(block_pos);
-                }
-                set_action = false;
-            }
-            else if pick_action {
-                current_block = space.getv(struck_pos).unwrap();
-                pick_action = false;
+                    if delete_action {
+                        let old_material = space.getv(struck_pos).unwrap();
+                        space.setv(struck_pos, air_id.clone());
+                        if(old_material != air_id) {
+                            renderer.notify_remesh(struck_pos);
+                        }
+                        delete_action = false;
+                    }
+                    else if set_action {
+                        //Get the side our raycast hit.
+                        let direction = raycast.get_last_direction();
+                        let block_pos = struck_pos.get_neighbor(direction);
+                        //Now we can set our position.
+                        let old_material = space.getv(block_pos).unwrap();
+                        space.setv(block_pos, current_block);
+                        if(old_material != current_block) {
+                            renderer.notify_remesh(block_pos);
+                        }
+                        set_action = false;
+                    }
+                    else if pick_action {
+                        current_block = space.getv(struck_pos).unwrap();
+                        pick_action = false;
+                    }
+                },
+                None => { 
+                    println!("Could not raycast to a loaded / valid voxel.");
+                },
             }
         }
 
