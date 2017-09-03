@@ -32,6 +32,9 @@ glium = "*"
 image = "0.10.0"
 shader_version = "0.2.1"
 
+hlua = "0.4.0" # This is our Lua until I can be bothered to wrap LuaJIT. It's Lua 5.2, so LuaJIT may just be a drop-in replacement. 
+# hlua =  { git = "https://github.com/tomaka/hlua.git", rev = "a6b3bc8" } # Git repo version is necessary for fine-grained library open methods, such as "open_string()"
+
 # piston = "0.32.0"
 # pistoncore-glutin_window = "0.37.0"
 # gfx = "0.16.0"
