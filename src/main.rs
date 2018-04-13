@@ -21,6 +21,9 @@ extern crate num;
 extern crate time;
 extern crate image;
 
+#[macro_use] extern crate hlua;
+use hlua::Lua;
+
 //Piston stuff.
 /*extern crate camera_controllers;
 extern crate fps_counter;
@@ -68,6 +71,7 @@ use glium::glutin::VirtualKeyCode;
 use glium::glutin::CursorState;
 use glium::texture::Texture2dArray;
 use glium::backend::glutin_backend::GlutinFacade;
+
 
 // This function only gets compiled if the target OS is linux
 #[cfg(target_os = "linux")]
@@ -161,6 +165,16 @@ fn fps_limit(fps : u64, frame_start : Instant) {
     }
 }
 
+implement_lua_push!(MaterialID, |mut metatable| {
+                // you can define all the member functions of Foo here
+                // see the official Lua documentation for metatables
+                metatable.set("__call", hlua::function0(|| println!("hello from foo")));
+                metatable.set("__eq", hlua::function2(|mat1: &mut MaterialID, mat2: &mut MaterialID| mat1 == mat2));
+                metatable.set("__index".to_string(),
+                    vec![("name".to_string(), hlua::function1(|mat: &mut MaterialID| mat.to_name()))]);
+});
+
+implement_lua_read!(MaterialID);
 
 fn main() {
 
@@ -264,13 +278,38 @@ fn main() {
     let mut delete_action : bool = false;
     let mut pick_action : bool = false;
     let mut current_block : MaterialID = MaterialID::from_name(&String::from("test.stone"));
-
-
+    
     let screen_center_x : i32 = screen_width as i32 /2;
     let screen_center_y : i32 = screen_height as i32 /2;
 
     let mut mouse_first_moved : bool = false;
     let mut grabs_mouse : bool = true;
+    //---- Test Lua a bit ----
+    fn lua_println(a: String) { 
+        println!("{:?}", a);
+    }
+
+    let mut lua = Lua::new();
+    let mut lua_file = File::open("main.lua").unwrap();
+    let mut lua_src = String::new();
+    lua_file.read_to_string(&mut lua_src);
+    
+    lua.open_base();
+    lua.open_bit32();
+    lua.open_debug();
+    lua.open_string();
+    lua.open_table();
+
+    lua.set("println", hlua::function1(lua_println));
+
+    let lua_mat_test = MaterialID::from_name(&String::from("luatest"));
+    lua.set("test", lua_mat_test);
+
+    lua.execute::<()>(lua_src.as_str());
+
+    let hello : String = lua.get::<_, &'static str>("hello").unwrap();
+    println!("{:?}", hello);
+
     //---- A mainloop ----
     let mut lastupdate = precise_time_s();
     let mut elapsed = 0.01 as f32;
@@ -420,9 +459,15 @@ fn main() {
                 Some(struck_pos) => {
                     println!("{}", struck_pos);
                     println!("{}", space.getv(struck_pos).unwrap());
-
                     if delete_action {
                         let old_material = space.getv(struck_pos).unwrap();
+
+                        let mut foo: Option<hlua::LuaFunction<_>> = lua.get("handle_clicked"); //TODO: Remove this. Just a test.
+                        match foo {
+                            Some(mut func) => {let a : i32 = func.call_with_args(old_material).unwrap();},
+                            None    => {println!("No click handler found.");},
+                        };
+
                         space.setv(struck_pos, air_id.clone());
                         if(old_material != air_id) {
                             renderer.notify_remesh(struck_pos);
@@ -450,7 +495,7 @@ fn main() {
                     delete_action = false;
                     set_action = false;
                     pick_action = false;
-                    println!("Could not raycast to a loaded / valid voxel.");
+                    println!("Could not raycast to a loaded / valid voxel. Raycast data: {:?}", raycast);
                 },
             }
         }
