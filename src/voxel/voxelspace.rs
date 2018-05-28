@@ -18,6 +18,7 @@ use std::path::Path;
 use std::error::Error;
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::fs::DirBuilder;
 
 use std::marker::Copy;
 
@@ -200,8 +201,16 @@ impl VoxelSpace {
     /// Saves a chunk.
     /// Note: These are chunk positions, not voxel positions.
     fn save_c(&self, x : i32, y : i32, z : i32) {
-        let display_path = format!("map/c{}x{}y{}z.bin", x, y, z);
+        //Make sure we have a directory.
+        let mappath = "map";
+
+        DirBuilder::new()
+            .recursive(true) // Recursive mode also means we don't get an error if the path doesn't exist yet.
+            .create(mappath).unwrap();
+
+        let display_path = format!("{}/c{}x{}y{}z.bin", mappath, x, y, z);
         let chunk_path = Path::new(&display_path);
+        //Save the map.
         println!("Saving chunk at {}, {}, {}", x, y, z);
         match OpenOptions::new()
             .write(true)
