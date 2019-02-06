@@ -2,17 +2,21 @@ extern crate log;
 extern crate lazy_static;
 extern crate std;
 extern crate chrono;
+extern crate crossbeam;
+extern crate parking_lot;
 
 use log::{SetLoggerError, Level, LevelFilter, Record, Metadata};
 use std::collections::vec_deque::VecDeque;
-use std::sync::Mutex;
+use parking_lot::Mutex;
+
+use crossbeam::crossbeam_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
 
 pub struct GameLoggerState {
     pub filter_print : LevelFilter,
     pub filter_to_file : LevelFilter, 
     pub filter_game_console : LevelFilter,
-    pub game_console_log : VecDeque<String>,
-    pub game_console_log_max : usize,
+    pub console_sender : Sender<String>,
+    pub console_receiver : Receiver<String>, 
     /// Used to print current game logic tick, which makes things much more informative.
     pub current_tick : u64,
 }
@@ -22,22 +26,19 @@ impl GameLoggerState {
     /// For example, you probably don't want to log the result of the command
     /// you just typed, however, you probably do want to see it in the console.
     fn push_to_console(&mut self, message : String) {
-        self.game_console_log.push_back(message);
-        // Prevent us from eating all of the user's memory, pop the oldest message.
-        if(self.game_console_log.len() >= self.game_console_log_max) {
-            self.game_console_log.pop_front();
-        }
+        self.console_sender.send(message.clone());
     }
 }
 
 lazy_static! {
     pub static ref GAME_LOGGER_STATE : Mutex<GameLoggerState> = {
+        let (s, r) = bounded(128);
         Mutex::new(GameLoggerState { 
             filter_print : LevelFilter::max(),  
             filter_to_file : LevelFilter::max(),
             filter_game_console : LevelFilter::max(),
-            game_console_log : VecDeque::new(),
-            game_console_log_max : 128,
+            console_sender : s, 
+            console_receiver : r,
             current_tick : 0,
         })
     };
@@ -59,7 +60,7 @@ impl log::Log for GameLogger {
     // Always enabled - handles multiple levels.
     fn enabled(&self, metadata: &Metadata) -> bool { true }
     fn log(&self, record: &Record) {
-        let mut gls = GAME_LOGGER_STATE.lock().expect("Unable to acquire game logger state mutex while logging a message!");
+        let mut gls = GAME_LOGGER_STATE.lock(); //.expect("Unable to acquire game logger state mutex while logging a message!");
         let message = GameLogger::make_log_entry(&gls, &record); 
         // Print to stderr, if and only if this is at error level.
         if record.level() == Level::Error {
