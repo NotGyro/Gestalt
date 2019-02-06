@@ -32,6 +32,9 @@ image = "0.10.0"
 parking_lot = "0.7.1"
 crossbeam = "0.7.1"
 
+log = "0.4.6" # Note: I'm going to roll my own implementation, but still use the facade to work with it.
+chrono = "0.4.6"
+
 # gluon = "0.8.1"
 
 # Vulkano things.

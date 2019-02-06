@@ -15,6 +15,12 @@ extern crate serde;
 extern crate time;
 extern crate image;
 
+#[macro_use] extern crate log;
+extern crate chrono;
+
+use util::logger;
+use util::logger::*;
+
 use time::*;
 use std::thread::sleep;
 use std::time::Duration;
@@ -102,8 +108,18 @@ fn fps_limit(fps : u64, frame_start : Instant) {
 }
 
 fn main() {
-
+    //This MUST be the first thing we call. 
+    init_logger();
     println!("{:?}", std::env::current_exe());
+    //Messing around with logging a bit.
+    trace!("Hello, world!");
+    info!("I have a logger now!");
+    error!("Oh no! This is an error");
+    let gls = GAME_LOGGER_STATE.lock().unwrap();
+    let count = gls.game_console_log.len();
+    drop(gls);
+    trace!("So far we have logged {} messages.", count); 
+
 /*
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
