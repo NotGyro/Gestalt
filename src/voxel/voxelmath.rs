@@ -1,5 +1,6 @@
 extern crate std;
 extern crate num;
+extern crate serde;
 
 use std::iter::{Iterator, IntoIterator};
 
@@ -19,7 +20,7 @@ use std::f32;
 use std::f32::*;
 use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad, ApproxEq, BaseFloat};
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelPos<T : Copy + Integer> {
 	pub x: T, pub y: T, pub z: T,
 }
@@ -47,7 +48,7 @@ impl <T> fmt::Display for VoxelPos<T> where T : Copy + Integer + fmt::Display {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelRange<T : Copy + Integer> {
 	pub upper : VoxelPos<T>, pub lower : VoxelPos<T>,
 }

@@ -41,6 +41,7 @@ use voxel::voxelarray::*;
 
 use voxel::voxelmath::*;
 
+use voxel::voxelevent::*;
 use util::event::EventBus;
 
 // This function only gets compiled if the target OS is linux

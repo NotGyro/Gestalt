@@ -33,11 +33,11 @@ pub struct VoxelArray<T: Clone, P: Copy + Integer + One + Zero + USizeAble> {
 }
 
 impl <T:Clone, P: Copy + Integer + One + Zero + USizeAble> VoxelArray<T, P> {
-    pub fn load_new(szx: P, szy: P, szz: P, dat: Vec<T>) -> Box<VoxelArray<T, P>> {
+    pub fn load_new(szx: P, szy: P, szz: P, dat: Vec<T>) -> VoxelArray<T, P> {
 	let bnd = VoxelRange::<P> { lower : VoxelPos::<P>{x : P::zero(), y : P::zero(), z : P::zero()},
                                     upper : VoxelPos{x : szx, y : szy, z : szy}};
-        return Box::new(VoxelArray{size_x: szx, size_y: szy, size_z: szz, 
-                                    data: dat, bounds : bnd});
+        return VoxelArray{size_x: szx, size_y: szy, size_z: szz, 
+                                    data: dat, bounds : bnd};
     }
 }
 
@@ -117,7 +117,7 @@ fn test_array_raccess() {
     	test_chunk.push(i as u16);
     }
 
-    let mut test_va : Box<VoxelArray<u16,u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : VoxelArray<u16,u16> = VoxelArray::load_new(16, 16, 16, test_chunk);
     
     let testpos = VoxelPos{x: 14, y: 14, z: 14};
     assert!(test_va.get(testpos).unwrap() == 3822);
@@ -134,7 +134,7 @@ fn test_array_iterative() {
     	test_chunk.push(16);
     }
 
-    let mut test_va : Box<VoxelArray<u16, u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    let mut test_va : VoxelArray<u16, u16> = VoxelArray::load_new(16, 16, 16, test_chunk);
     for pos in test_va.get_bounds() {
     	assert!(test_va.get(pos).unwrap() == 16);
     	test_va.set(pos, (pos.x as u16 % 10));
