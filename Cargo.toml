@@ -24,23 +24,21 @@ serde_yaml = "0.7.0"
 serde_derive = "1.0.2"
 
 lazy_static = "0.2.8"
-specs = "0.8.1"
 string_cache = "0.5.0"
 linear-map = { git = "https://github.com/contain-rs/linear-map" }
 
-glium = "*"
 image = "0.10.0"
-shader_version = "0.2.1"
 
-hlua = "0.4.0" # This is our Lua until I can be bothered to wrap LuaJIT. It's Lua 5.2, so LuaJIT may just be a drop-in replacement. 
-# hlua =  { git = "https://github.com/tomaka/hlua.git", rev = "a6b3bc8" } # Git repo version is necessary for fine-grained library open methods, such as "open_string()"
+parking_lot = "0.7.1"
+crossbeam = "0.7.1"
 
-# piston = "0.32.0"
-# pistoncore-glutin_window = "0.37.0"
-# gfx = "0.16.0"
-# gfx_core = "0.7.0"
-# gfx_device_gl = "0.14.0"
-# camera_controllers = "0.21.0"
-# fps_counter = "0.2.0"
+# gluon = "0.8.1"
 
-# conrod = "0.38.2"
+# Vulkano things.
+vulkano = "*"
+vulkano-shaders = "*"
+winit = "*"
+vulkano-win = "*"
+
+[workspace]
+exclude = ["gamedata"]	# Probably not necessary, but just in case - don't treat game data as a Rust crate.

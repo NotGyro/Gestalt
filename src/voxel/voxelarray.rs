@@ -3,13 +3,10 @@ extern crate num;
 
 use std::marker::Copy;
 
-//use std::ops::{Add, Sub, Mul, Div};
-//use std::cmp::{Ord, Eq};
 use std::mem::size_of;
 use voxel::voxelstorage::*;
 use util::numbers::USizeAble;
-use util::voxelutil::*;
-//use voxel::voxelstorage::ContiguousVS;
+use voxel::voxelmath::*;
 use std::io;
 use std::io::prelude::*;
 use std::mem;
@@ -29,36 +26,35 @@ use num::Unsigned;
 /// which is indexed by voxel positions with some math done on them. 
 /// Should have a fixed, constant size after creation.
 #[derive(Clone, Debug)]
-pub struct VoxelArray<T: Clone> {
-    size_x: u16, size_y: u16, size_z: u16,
+pub struct VoxelArray<T: Clone, P: Copy + Integer + One + Zero + USizeAble> {
+    size_x: P, size_y: P, size_z: P,
     data: Vec<T>,
-    bounds : VoxelRange<u16>,
+    bounds : VoxelRange<P>,
 }
 
-impl <T:Clone> VoxelArray<T> {
-
-	pub fn load_new(szx: u16, szy: u16, szz: u16, dat: Vec<T>) -> Box<VoxelArray<T>> {
-		let bnd = VoxelRange::<u16> { lower : VoxelPos::<u16>{x : 0, y : 0, z : 0},
-              upper : VoxelPos{x : szx, y : szy, z : szy}};
+impl <T:Clone, P: Copy + Integer + One + Zero + USizeAble> VoxelArray<T, P> {
+    pub fn load_new(szx: P, szy: P, szz: P, dat: Vec<T>) -> Box<VoxelArray<T, P>> {
+	let bnd = VoxelRange::<P> { lower : VoxelPos::<P>{x : P::zero(), y : P::zero(), z : P::zero()},
+                                    upper : VoxelPos{x : szx, y : szy, z : szy}};
         return Box::new(VoxelArray{size_x: szx, size_y: szy, size_z: szz, 
-            data: dat, bounds : bnd});
-	}
+                                    data: dat, bounds : bnd});
+    }
 }
 
-impl <T: Clone> VoxelStorage<T, u16> for VoxelArray<T> {
-    fn get(&self, x: u16, y: u16, z: u16) -> Option<T> {
+impl <T: Clone, P: Copy + Integer + One + Zero + USizeAble> VoxelStorage<T, P> for VoxelArray<T, P> {
+    fn get(&self, coord: VoxelPos<P>) -> Option<T> {
     	//Bounds-check.
-    	if (x >= self.size_x) ||
-    		(y >= self.size_y) ||
-    		(z >= self.size_z)
+    	if (coord.x >= self.size_x) ||
+    		(coord.y >= self.size_y) ||
+    		(coord.z >= self.size_z)
     	{
     		return None;
     	}
     	//Packed array access
     	let result : Option<&T> = self.data.get((
-    		(z * (self.size_x * self.size_y)) +
-    		(y * (self.size_x))
-    		+ x) as usize);
+    		(coord.z * (self.size_x * self.size_y)) +
+    		(coord.y * (self.size_x))
+    		+ coord.x).as_usize());
     	if result.is_none() {
     		return None;
     	}
@@ -67,31 +63,31 @@ impl <T: Clone> VoxelStorage<T, u16> for VoxelArray<T> {
     	}
     }
 
-    fn set(&mut self, x: u16, y: u16, z: u16, value: T) {
-    	if (x >= self.size_x) ||
-    		(y >= self.size_y) ||
-    		(z >= self.size_z)
+    fn set(&mut self, coord: VoxelPos<P>, value: T) {
+    	if (coord.x >= self.size_x) ||
+    		(coord.y >= self.size_y) ||
+    		(coord.z >= self.size_z)
     	{
     		return;
     	}
-    	//u16acked array access
+    	//Packed array access
     	(*self.data.get_mut((
-    		(z * (self.size_x * self.size_y)) +
-    		(y * (self.size_x))
-    		+ x) as usize).unwrap()) = value;
+    		(coord.z * (self.size_x * self.size_y)) +
+    		(coord.y * (self.size_x))
+    		+ coord.x).as_usize()).unwrap()) = value;
     }
 
     //Intializes a voxel storage, with each cell set to default value.
-    //fn init_new(&mut self, size_x: u16, size_y: u16, size_z: u16, default: T);
+    //fn init_new(&mut self, size_x: P, size_y: u16, size_z: u16, default: T);
     //Uninitialized version of the above. Still allocates, probably.
-    //fn init_new_uninitialized(&mut self, size_x: u16, size_y: u16, size_z: P);
+    //fn init_new_uninitialized(&mut self, size_x: P, size_y: u16, size_z: P);
 
     //Gets how many bytes this structure takes up in memory.
     /*fn get_footprint(&self) -> usize {
     	return ((size_of::<T>() as u16) * (self.size_x * self.size_y * self.size_z)) as usize;
     }*/
 }
-impl <T: Clone> VoxelStorageIOAble<T> for VoxelArray<T> { 
+impl <T: Clone, P> VoxelStorageIOAble<T, P> for VoxelArray<T, P> where P : Copy + Integer + One + Zero + USizeAble { 
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
     fn load<R: Read + Sized>(&mut self, reader: &mut R) { 
@@ -107,8 +103,8 @@ impl <T: Clone> VoxelStorageIOAble<T> for VoxelArray<T> {
     }
 }
 
-impl <T: Clone> VoxelStorageBounded<T> for VoxelArray<T> { 
-    fn get_bounds(&self) -> VoxelRange<u16> { 
+impl <T: Clone, P> VoxelStorageBounded<T, P> for VoxelArray<T, P> where P : Copy + Integer + One + Zero + USizeAble { 
+    fn get_bounds(&self) -> VoxelRange<P> { 
         return self.bounds;
     }
 }
@@ -121,11 +117,12 @@ fn test_array_raccess() {
     	test_chunk.push(i as u16);
     }
 
-    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-
-    assert!(test_va.get(14,14,14).unwrap() == 3822);
-    test_va.set(14,14,14,9);
-    assert!(test_va.get(14,14,14).unwrap() == 9);
+    let mut test_va : Box<VoxelArray<u16,u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    
+    let testpos = VoxelPos{x: 14, y: 14, z: 14};
+    assert!(test_va.get(testpos).unwrap() == 3822);
+    test_va.set(testpos,9);
+    assert!(test_va.get(testpos).unwrap() == 9);
 }
 
 
@@ -137,19 +134,12 @@ fn test_array_iterative() {
     	test_chunk.push(16);
     }
 
-    let mut test_va : Box<VoxelArray<u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
-    let xsz : u16 = test_va.get_bounds().upper.x;
-    let ysz : u16 = test_va.get_bounds().upper.y;
-    let zsz : u16 = test_va.get_bounds().upper.z;
-	for x in 0 .. xsz as u16 {
-		for y in 0 .. ysz as u16 {
-			for z in 0 .. zsz as u16 {
-				assert!(test_va.get(x,y,z).unwrap() == 16);
-				test_va.set(x,y,z, (x as u16 % 10));
-			}
-		}
-	}
-	assert!(test_va.get(10,0,0).unwrap() == 0);
-	assert!(test_va.get(11,0,0).unwrap() == 1);
+    let mut test_va : Box<VoxelArray<u16, u16>> = VoxelArray::load_new(16, 16, 16, test_chunk);
+    for pos in test_va.get_bounds() {
+    	assert!(test_va.get(pos).unwrap() == 16);
+    	test_va.set(pos, (pos.x as u16 % 10));
+    }
+    assert!(test_va.get(VoxelPos{x: 10, y: 0, z: 0}).unwrap() == 0);
+    assert!(test_va.get(VoxelPos{x: 11, y: 0, z: 0}).unwrap() == 1);
     //assert_eq!(test_va.get_data_size(), (OURSIZE * 2));
 }

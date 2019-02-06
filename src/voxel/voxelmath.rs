@@ -19,15 +19,6 @@ use std::f32;
 use std::f32::*;
 use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad, ApproxEq, BaseFloat};
 
-
-/*Previously, we used these for voxel position types: 
-use std::ops::{Add, Sub, Mul, Div};
-use std::cmp::{Ord, Eq};
-use std::num::{One};
-And then: T : Copy + Integer
-This was kind of a mess, so I'm refactoring it to use num::Integer.
-*/
-
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelPos<T : Copy + Integer> {
 	pub x: T, pub y: T, pub z: T,

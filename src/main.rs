@@ -1,10 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_parens)]
-#![allow(unused_assignments)]
-#![allow(unused_mut)]
-#![allow(unused_variables)]
-#![allow(unused_must_use)]
-
 //#![feature(collections)]
 pub mod util;
 pub mod voxel;
@@ -12,7 +5,10 @@ pub mod voxel;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate string_cache;
 #[macro_use] extern crate lazy_static;
+#[macro_use] extern crate crossbeam;
+//#[macro_use] extern crate gluon;
 extern crate num;
+extern crate serde;
 
 #[macro_use] extern crate cgmath;
 
@@ -24,20 +20,12 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use std::vec::Vec;
-use voxel::voxelstorage::*;
-use voxel::voxelarray::*;
-use voxel::vspalette::*;
-use voxel::material::*;
-use voxel::voxelspace::*;
-
-use util::voxelutil::*;
 
 use std::path::Path;
 use std::error::Error;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::prelude::*;
 use std::io::{BufWriter, Cursor};
-use std::fs::OpenOptions;
 use std::{io, cmp};
 use std::f32::consts::*;
 use std::f32;
@@ -45,6 +33,15 @@ use std::f32::*;
 use std::ops::Neg;
 use std::collections::{HashMap, HashSet};
 use num::Zero;
+
+//use gluon::vm::api::IO;
+
+use voxel::voxelstorage::*;
+use voxel::voxelarray::*;
+
+use voxel::voxelmath::*;
+
+use util::event::EventBus;
 
 // This function only gets compiled if the target OS is linux
 #[cfg(target_os = "linux")]
@@ -57,7 +54,7 @@ fn are_you_on_linux() {
 fn are_you_on_linux() {
         println!("You are *not* running linux!")
 }
-
+/*
 //Just a test here. Not for use in production.
 fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut VoxelRaycast) -> Option<VoxelPos<i32>> {
     let mut count = 0;
@@ -79,7 +76,7 @@ fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut 
         raycast.step();
     }
 }
-
+*/
 use std::time::Instant;
 
 fn fps_limit(fps : u64, frame_start : Instant) {
@@ -106,7 +103,7 @@ fn fps_limit(fps : u64, frame_start : Instant) {
 fn main() {
 
     println!("{:?}", std::env::current_exe());
-
+/*
     let mat_idx : MaterialIndex = MaterialIndex::new();
 
     let air_id : MaterialID = mat_idx.for_name(&String::from("test.air"));
@@ -137,29 +134,6 @@ fn main() {
 
     let mut keeprunning = true;
 
-    //window.set_cursor_state(glutin::CursorState::Grab);
-
-    //---- Set up screen and some basic graphics stuff ----
-    /*let mut vshaderfile = File::open("vertexshader.glsl").unwrap();
-    let mut fshaderfile = File::open("fragmentshader.glsl").unwrap();
-    let mut vertex_shader_src = String::new();
-    let mut fragment_shader_src = String::new();
-    vshaderfile.read_to_string(&mut vertex_shader_src);
-    fshaderfile.read_to_string(&mut fragment_shader_src);*/
-
-    //---- Set up our camera ----
-
-	//let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0};
-
-	//let mut horz_angle : Rad<f32> = Rad::zero();
-	//let mut vert_angle : Rad<f32> = Rad::zero();
-
-    //let mut perspective_matrix : cgmath::Matrix4<f32> = cgmath::perspective(cgmath::deg(45.0), 1.333, 0.0001, 100.0);
-    //let mut view_matrix : Matrix4<f32> = Matrix4::look_at(view_eye, view_center, view_up);
-    //let mut model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);
-
-    //let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {s : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0};
-
     //---- Some movement stuff ----
 
     let mut w_down : bool = false;
@@ -186,7 +160,22 @@ fn main() {
 
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
-    
+  */  
+    //---- Let's try Gluon ----
+    /*let glu_path = "gamedata/main.glu";
+    let vm = gluon::new_vm();
+    let mut glu_source = String::new();
+    let mut file = File::open(glu_path).expect(&format!("File {} not found.", glu_path));
+    match file.read_to_string(&mut glu_source) {
+        Ok(_) => println!("Successfully loaded Gluon file!"),
+        Err(err) => eprint!("Could not load Gluon script file: {:?}", err),  
+    }
+
+    let result = gluon::Compiler::new()
+        .run_io(true)
+        .run_expr::<IO<()>>(&vm, "test", &glu_source)
+        .unwrap();
+    */
     //window.set_cursor_state(glutin::CursorState::Grab);
 
     /*while keeprunning {
@@ -200,8 +189,8 @@ fn main() {
         if(precise_time_s() > 20.0f64) { keeprunning = false; }
     }*/ 
 
-    sleep(Duration::new(10, 0));
+    sleep(Duration::new(1, 0));
 
     //--------- Save our file on closing --------------
-    space.unload_all();
+    //space.unload_all();
 }
