@@ -51,6 +51,8 @@ use voxel::voxelmath::*;
 use voxel::voxelevent::*;
 use util::event::EventBus;
 
+use voxel::block::BlockID;
+
 // This function only gets compiled if the target OS is linux
 #[cfg(target_os = "linux")]
 fn are_you_on_linux() {
