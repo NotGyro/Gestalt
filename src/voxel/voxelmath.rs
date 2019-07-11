@@ -5,8 +5,8 @@ extern crate serde;
 use std::iter::{Iterator, IntoIterator};
 
 use num::Integer;
-use num::traits::identities::One;
-use num::traits::identities::Zero;
+//use num::traits::identities::One;
+//use num::traits::identities::Zero;
 
 use std::marker::Copy;
 use std::fmt;
@@ -15,10 +15,10 @@ use std::ops::Add;
 use std::ops::Sub;
 
 //Stuff for Voxel Raycasts.
-use std::f32::consts::*;
+//use std::f32::consts::*;
 use std::f32;
-use std::f32::*;
-use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad, ApproxEq, BaseFloat};
+//use std::f32::*;
+use cgmath::{Vector3, Point3};
 
 #[derive(Copy, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelPos<T : Copy + Integer> {
@@ -124,10 +124,10 @@ impl <T> VoxelRange<T> where T : Copy + Integer {
     pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelAxis) -> bool { 
         let mut edge = self.get_bound(side);
         //Don't trip over off-by-one errors - the positive bounds are one past the valid coordinates. 
-        if(side.get_sign() == VoxelAxisSign::POSI) {
+        if side.get_sign() == VoxelAxisSign::POSI {
             edge = edge - T::one();
         }
-        return (point.coord_for_axis(side) == edge);
+        return point.coord_for_axis(side) == edge;
     }
 }
 
@@ -153,7 +153,7 @@ pub struct VoxelRangeIter<T : Copy + Integer> {
 impl <T> Iterator for VoxelRangeIter<T> where T : Copy + Integer { 
     type Item = VoxelPos<T>;
     fn next(&mut self) -> Option<VoxelPos<T>> { 
-        if(self.pos.is_none()) { 
+        if self.pos.is_none() { 
             return None;
         }
         let pos = self.pos.unwrap(); //Cannot panic if is_none() is valid
@@ -165,18 +165,18 @@ impl <T> Iterator for VoxelRangeIter<T> where T : Copy + Integer {
         let mut over = false;
         
         z = z + T::one();
-        if(z >= self.range.upper.z) {
+        if z >= self.range.upper.z {
             z = self.range.lower.z;
             y = y + T::one();
-            if(y >= self.range.upper.y) {
+            if y >= self.range.upper.y {
                 y = self.range.lower.y;
                 x = x + T::one();
-                if(x >= self.range.upper.x) { 
+                if x >= self.range.upper.x { 
                     over = true;
                 }
             }
         }
-        if(over) { 
+        if over { 
             self.pos = None;
         }
         else {
@@ -197,7 +197,7 @@ pub struct VoxelSideIter<T : Copy + Integer> {
 impl <T> Iterator for VoxelSideIter<T> where T : Copy + Integer { 
     type Item = VoxelPos<T>;
     fn next(&mut self) -> Option<VoxelPos<T>> { 
-        if(self.pos.is_none()) { 
+        if self.pos.is_none() { 
             return None;
         }
         let mut pos = self.pos.unwrap(); //Cannot panic if is_none() is valid
@@ -206,14 +206,14 @@ impl <T> Iterator for VoxelSideIter<T> where T : Copy + Integer {
         let ret = pos; // Our "self.pos" as well as the "pos" variable are both for the next loop, really. "Ret" can capture the first element.
 
         pos = pos.get_neighbor(self.direction1);
-        if(pos.coord_for_axis(self.direction1) == self.range.get_bound(self.direction1)) { //Iterate over our first direction until we hit our first bound
+        if pos.coord_for_axis(self.direction1) == self.range.get_bound(self.direction1) { //Iterate over our first direction until we hit our first bound
             pos.set_coord_for_axis(self.direction1.opposite(), self.range.get_bound(self.direction1.opposite())); //Return to start of our first direction.
             pos = pos.get_neighbor(self.direction2); //Move forward through our second direction.
-            if(pos.coord_for_axis(self.direction2) == self.range.get_bound(self.direction2)) { //Are we at the end of our second direction? Loop finished. 
+            if pos.coord_for_axis(self.direction2) == self.range.get_bound(self.direction2) { //Are we at the end of our second direction? Loop finished. 
                 over = true;
             }
         }
-        if(over) { 
+        if over { 
             self.pos = None;
         }
         else {
@@ -340,8 +340,8 @@ Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "
 */
 impl VoxelRaycast {
     pub fn step(&mut self) {
-        if(self.t_max.x < self.t_max.y) {
-            if(self.t_max.x < self.t_max.z) {
+        if self.t_max.x < self.t_max.y {
+            if self.t_max.x < self.t_max.z {
                 self.pos.x = self.pos.x + self.step_dir.x;
                 self.t_max.x= self.t_max.x + self.t_delta.x;
                 self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
@@ -351,7 +351,7 @@ impl VoxelRaycast {
                 self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
             }
         } else  {
-            if(self.t_max.y < self.t_max.z) {
+            if self.t_max.y < self.t_max.z {
                 self.pos.y = self.pos.y + self.step_dir.y;
                 self.t_max.y = self.t_max.y + self.t_delta.y;
                 self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
@@ -365,7 +365,7 @@ impl VoxelRaycast {
     pub fn get_last_direction(&self) -> VoxelAxis {
         match self.last_direction {
             VoxelAxisUnsigned::X => {
-                if(self.step_dir.x < 0) {
+                if self.step_dir.x < 0 {
                     //The reason these are all the opposite of what they seem like they should be is we're getting the side the raycast hit.
                     //The last direction we traveled will be the opposite of the normal of the side we struck.
                     return VoxelAxis::PosiX;
@@ -375,7 +375,7 @@ impl VoxelRaycast {
                 }
             },
             VoxelAxisUnsigned::Y => {
-                if(self.step_dir.y < 0) {
+                if self.step_dir.y < 0 {
                     return VoxelAxis::PosiY;
                 }
                 else {
@@ -383,7 +383,7 @@ impl VoxelRaycast {
                 }
             },
             VoxelAxisUnsigned::Z => {
-                if(self.step_dir.z < 0) {
+                if self.step_dir.z < 0 {
                     return VoxelAxis::PosiZ;
                 }
                 else {
@@ -394,22 +394,21 @@ impl VoxelRaycast {
     }
     pub fn new(origin : Point3<f32>, direction : Vector3<f32>) -> VoxelRaycast {
         //Voxel is assumed to be 1x1x1 in this situation.
-        let mut first_step = origin + direction;
         //Set up our step sign variable.
         let mut step_dir : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-        if(direction.x >= 0.0) {
+        if direction.x >= 0.0 {
             step_dir.x = 1;
         }
         else {
             step_dir.x = -1;
         }
-        if(direction.y >= 0.0) {
+        if direction.y >= 0.0 {
             step_dir.y = 1;
         }
         else {
             step_dir.y = -1;
         }
-        if(direction.z >= 0.0) {
+        if direction.z >= 0.0 {
             step_dir.z = 1;
         }
         else {
@@ -422,19 +421,19 @@ impl VoxelRaycast {
 
         //Set up our t_max - distances to next cell
         let mut t_max : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
-        if(direction.x != 0.0) {
+        if direction.x != 0.0 {
             t_max.x = (next_voxel_boundary.x as f32 - origin.x)/direction.x;
         }
         else {
             t_max.x = f32::MAX; //Undefined in this direction
         }
-        if(direction.y != 0.0) {
+        if direction.y != 0.0 {
             t_max.y = (next_voxel_boundary.y as f32 - origin.y)/direction.y;
         }
         else {
             t_max.y = f32::MAX; //Undefined in this direction
         }
-        if(direction.z != 0.0) {
+        if direction.z != 0.0 {
             t_max.z = (next_voxel_boundary.z as f32 - origin.z)/direction.z;
         }
         else {
@@ -444,19 +443,19 @@ impl VoxelRaycast {
         //Set up our t_delta - movement per iteration.
         //Again, voxel is assumed to be 1x1x1 in this situation.
         let mut t_delta : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
-        if(direction.x != 0.0) {
+        if direction.x != 0.0 {
             t_delta.x = 1.0/(direction.x*step_dir.x as f32);
         }
         else {
             t_delta.x = f32::MAX; //Undefined in this direction
         }
-        if(direction.y != 0.0) {
+        if direction.y != 0.0 {
             t_delta.y = 1.0/(direction.y*step_dir.y as f32);
         }
         else {
             t_delta.y = f32::MAX; //Undefined in this direction
         }
-        if(direction.z != 0.0) {
+        if direction.z != 0.0 {
             t_delta.z = 1.0/(direction.z*step_dir.z as f32);
         }
         else {
@@ -466,13 +465,13 @@ impl VoxelRaycast {
         //Resolve some weird sign bugs.
         let mut negative : bool =false;
         let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-        if (direction.x<0.0) {
+        if direction.x<0.0 {
             step_negative.x = -1; negative=true;
         }
-        if (direction.y<0.0) {
+        if direction.y<0.0 {
             step_negative.y = -1; negative=true;
         }
-        if (direction.z<0.0) {
+        if direction.z<0.0 {
             step_negative.z = -1; negative=true;
         }
         if negative {

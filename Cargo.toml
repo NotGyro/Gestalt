@@ -2,7 +2,7 @@
 
 name = "gestalt"
 version = "0.0.1"
-authors = [ "Samuel Cutlip <gyro@zettabyte.ws>" ]
+authors = [ "Sam Cutlip <gyro@zettabyte.ws>" ]
 
 [profile.dev]
 opt-level = 0      # controls the `--opt-level` the compiler builds with
@@ -17,7 +17,9 @@ panic = 'unwind'   # panic strategy (`-C panic=...`), can also be 'abort'
 [dependencies]
 num = "0.1.37"
 time = "*"
-cgmath = { git = "https://github.com/brendanzab/cgmath.git", rev = "3e6974b" }
+cgmath = { version = "0.16", features = ["mint"] }
+mint = "0.5"
+three = "0.4.0"
 
 serde = { version = "1.0.2", features = ["std"] }
 serde_yaml = "0.7.0"
@@ -38,10 +40,10 @@ chrono = "0.4.6"
 # gluon = "0.8.1"
 
 # Vulkano things.
-vulkano = "*"
-vulkano-shaders = "*"
-winit = "*"
-vulkano-win = "*"
+# vulkano = "*"
+# vulkano-shaders = "*"
+# winit = "*"
+# vulkano-win = "*"
 
 [workspace]
 exclude = ["gamedata"]	# Probably not necessary, but just in case - don't treat game data as a Rust crate.

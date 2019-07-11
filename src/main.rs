@@ -19,27 +19,17 @@ extern crate image;
 #[macro_use] extern crate log;
 extern crate chrono;
 
+extern crate mint;
+extern crate three;
+
 use util::logger;
 use util::logger::*;
 
-use time::*;
-use std::thread::sleep;
-use std::time::Duration;
-
 use std::vec::Vec;
 
-use std::path::Path;
-use std::error::Error;
-use std::fs::{File, OpenOptions};
-use std::io::prelude::*;
-use std::io::{BufWriter, Cursor};
 use std::{io, cmp};
-use std::f32::consts::*;
-use std::f32;
-use std::f32::*;
-use std::ops::Neg;
-use std::collections::{HashMap, HashSet};
 use num::Zero;
+use std::thread;
 
 //use gluon::vm::api::IO;
 
@@ -53,17 +43,11 @@ use util::event::EventBus;
 
 use voxel::block::BlockID;
 
-// This function only gets compiled if the target OS is linux
-#[cfg(target_os = "linux")]
-fn are_you_on_linux() {
-        println!("You are running linux!")
-}
+use cgmath::prelude::*;
+use three::Object;
 
-// And this function only gets compiled if the target OS is *not* linux
-#[cfg(not(target_os = "linux"))]
-fn are_you_on_linux() {
-        println!("You are *not* running linux!")
-}
+const COLOR_BACKGROUND: three::Color = 0xf0e0b6;
+
 /*
 //Just a test here. Not for use in production.
 fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut VoxelRaycast) -> Option<VoxelPos<i32>> {
@@ -89,27 +73,6 @@ fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut 
 */
 use std::time::Instant;
 
-fn fps_limit(fps : u64, frame_start : Instant) {
-    use std::time::Duration;
-
-    let now = Instant::now();
-
-    /* we allocate N ms for each frame and then we subtract the difference between the start and
-     * the end of the frame from it, we use the result as the duration to sleep
-     * #: allocated unit
-     * +: allocated unit, used
-     * assuming unit = 10ms and fps = 10, [##########]
-     * [+++++++###], thus we sleep ### -> 30 ms in order to fill it
-     */
-    let diff = now.duration_since(frame_start);
-    let allocated = Duration::from_millis(1000 / fps);
-    let sleepdur = allocated.checked_sub(diff);
-    match sleepdur {
-        Some(x) => sleep(x),
-        None => ()
-    }
-}
-
 fn main() {
     //This MUST be the first thing we call. 
     init_logger();
@@ -121,6 +84,76 @@ fn main() {
     let gls = GAME_LOGGER_STATE.lock();
     let receiver = gls.console_receiver.clone();
     drop(gls);
+    /*
+    let receiver_move = receiver.clone();
+    
+    let log_thread = thread::spawn(move || {
+        loop {
+            let msg = receiver_move.recv();
+        }
+    });
+    */
+    let mut win = three::Window::new("Gestalt");
+    win.scene.background = three::Background::Color(COLOR_BACKGROUND);
+    let cam = win.factory.perspective_camera(75.0, 1.0 .. 50.0);
+    cam.set_position([0.0, 0.0, 10.0]);
+
+    let mbox = {
+        let geometry = three::Geometry::cuboid(3.0, 2.0, 1.0);
+        let material = three::material::Wireframe { color: 0x00FF00 };
+        win.factory.mesh(geometry, material)
+    };
+
+        mbox.set_position([-3.0, -3.0, 0.0]);
+    win.scene.add(&mbox);
+
+    let mcyl = {
+        let geometry = three::Geometry::cylinder(1.0, 2.0, 2.0, 5);
+        let material = three::material::Wireframe { color: 0xFF0000 };
+        win.factory.mesh(geometry, material)
+    };
+    mcyl.set_position([3.0, -3.0, 0.0]);
+    win.scene.add(&mcyl);
+
+    let msphere = {
+        let geometry = three::Geometry::uv_sphere(2.0, 5, 5);
+        let material = three::material::Wireframe { color: 0xFF0000 };
+        win.factory.mesh(geometry, material)
+    };
+    msphere.set_position([-3.0, 3.0, 0.0]);
+    win.scene.add(&msphere);
+
+    // test removal from scene
+    win.scene.remove(&mcyl);
+    win.scene.remove(&mbox);
+    win.scene.add(&mcyl);
+    win.scene.add(&mbox);
+
+    let mline = {
+        let geometry = three::Geometry::with_vertices(vec![
+            [-2.0, -1.0, 0.0].into(),
+            [0.0, 1.0, 0.0].into(),
+            [2.0, -1.0, 0.0].into(),
+        ]);
+        let material = three::material::Line { color: 0x0000FF };
+        win.factory.mesh(geometry, material)
+    };
+    mline.set_position([3.0, 3.0, 0.0]);
+    win.scene.add(&mline);
+
+    let mut angle = cgmath::Rad::zero();
+    while win.update() && !win.input.hit(three::KEY_ESCAPE) {
+        if let Some(diff) = win.input.timed(three::AXIS_LEFT_RIGHT) {
+            angle += cgmath::Rad(1.5 * diff);
+            let q = cgmath::Quaternion::from_angle_y(angle);
+            mbox.set_orientation(q);
+            mcyl.set_orientation(q);
+            msphere.set_orientation(q);
+            mline.set_orientation(q);
+        }
+        win.render(&cam);
+    }
+
     let v : Vec<String> = receiver.try_iter().collect();
     trace!("So far we have logged {} messages.", v.len()); 
     info!("Quitting application.");

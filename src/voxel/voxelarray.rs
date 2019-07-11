@@ -3,24 +3,15 @@ extern crate num;
 
 use std::marker::Copy;
 
-use std::mem::size_of;
 use voxel::voxelstorage::*;
 use util::numbers::USizeAble;
 use voxel::voxelmath::*;
-use std::io;
 use std::io::prelude::*;
 use std::mem;
-use std::path::Path;
-use std::error::Error;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::BufWriter;
-use std::borrow::Cow;
 
 use num::Integer;
 use num::traits::identities::One;
 use num::traits::identities::Zero;
-use num::Unsigned;
 
 /// A 3D packed array of voxels - it's a single flat buffer in memory,
 /// which is indexed by voxel positions with some math done on them. 

@@ -4,8 +4,9 @@ extern crate std;
 extern crate crossbeam;
 
 use std::fmt::Debug;
-use serde::{Serialize, Deserialize};
-use crossbeam::crossbeam_channel::{unbounded, Sender, Receiver, SendError, RecvError, TryRecvError};
+//use serde::{Serialize, Deserialize};
+use serde::Serialize;
+use crossbeam::crossbeam_channel::{unbounded, Sender, Receiver, SendError}; // RecvError, TryRecvError};
 use self::linear_map::LinearMap;
 use std::result::Result;
 

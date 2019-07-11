@@ -6,10 +6,10 @@ extern crate crossbeam;
 extern crate parking_lot;
 
 use log::{SetLoggerError, Level, LevelFilter, Record, Metadata};
-use std::collections::vec_deque::VecDeque;
+//use std::collections::vec_deque::VecDeque;
 use parking_lot::Mutex;
 
-use crossbeam::crossbeam_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
+use crossbeam::crossbeam_channel::{unbounded, Sender, Receiver}; //iSendError, RecvError, TryRecvError};
 
 pub struct GameLoggerState {
     pub filter_print : LevelFilter,
@@ -32,7 +32,7 @@ impl GameLoggerState {
 
 lazy_static! {
     pub static ref GAME_LOGGER_STATE : Mutex<GameLoggerState> = {
-        let (s, r) = bounded(128);
+        let (s, r) = unbounded();
         Mutex::new(GameLoggerState { 
             filter_print : LevelFilter::max(),  
             filter_to_file : LevelFilter::max(),

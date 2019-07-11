@@ -1,12 +1,9 @@
 extern crate std;
 extern crate num;
 
-use std::string::String;
-use std::vec::Vec;
 use std::marker::Copy;
 use voxel::voxelmath::VoxelPos;
 use voxel::voxelmath::VoxelRange;
-use std::io;
 use std::io::prelude::*;
 
 //Previously, we used these for voxel position types:

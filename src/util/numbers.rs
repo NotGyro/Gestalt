@@ -1,9 +1,5 @@
 extern crate std;
 
-use std::ops::{Add, Sub, Mul, Div};
-use std::cmp::{Ord, Eq};
-use std::string::String;
-
 pub trait USizeAble {
     fn as_usize(&self) -> usize;
     fn from_usize(val : usize) -> Self;
