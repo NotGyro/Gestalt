@@ -6,13 +6,7 @@ use voxel::voxelmath::VoxelPos;
 use voxel::voxelmath::VoxelRange;
 use std::io::prelude::*;
 
-//Previously, we used these for voxel position types:
-//use std::ops::{Add, Sub, Mul, Div};
-//use std::cmp::{Ord, Eq};
-
 use num::Integer;
-use num::traits::identities::One;
-use num::traits::identities::Zero;
 
 
 /// A basic trait for any 3d grid data structure.
@@ -29,22 +23,34 @@ use num::traits::identities::Zero;
 /// calling these methods / treating them as "flat" voxel
 /// structures implies acting on a level of detail of 0.
 
-pub trait VoxelStorage<T: Clone, P: Copy + Integer + One + Zero> {
+pub trait VoxelStorage<T: Clone, P: Copy + Integer> {
     fn get(&self, coord: VoxelPos<P>) -> Option<T>;
     fn set(&mut self, coord: VoxelPos<P>, value: T);
 }
-
-pub trait VoxelStorageIOAble<T : Clone, P: Copy + Integer + One + Zero> : VoxelStorage<T, P> where P : Copy + Integer {
+/*
+pub trait VoxelStorageIOAble<T : Clone, P: Copy + Integer> : VoxelStorage<T, P> where P : Copy + Integer {
     fn load<R: Read + Sized>(&mut self, reader: &mut R);
     fn save<W: Write + Sized>(&self, writer: &mut W) -> Result<usize, std::io::Error>;
 }
-
+*/
 
 /// Any VoxelStorage which has defined, finite bounds.
 /// Must provide a valid voxel for any position within
 /// the range provided by get_bounds().
 /// Usually, this implies that the voxel storage is not paged.
-
-pub trait VoxelStorageBounded<T: Clone, P: Copy + Integer + One + Zero> : VoxelStorage<T, P> { 
+pub trait VoxelStorageBounded<T: Clone, P: Copy + Integer> : VoxelStorage<T, P> { 
     fn get_bounds(&self) -> VoxelRange<P>;
+}
+
+/// Copy voxels from one storage to another. 
+pub fn voxel_blit<T: Clone, P: Copy + Integer>(source_range : VoxelRange<P>, source: &VoxelStorage<T, P>, 
+                                                dest_origin: VoxelPos<P>, dest: &mut VoxelStorage<T,P>) {
+    for pos in source_range {
+        let opt = source.get(pos);
+        match opt {
+            Some(voxel) => { let offset_pos = (pos - source_range.lower) + dest_origin;
+                dest.set(offset_pos, voxel); },
+            None() => { /* Skip a turn. */ },
+        }
+    }
 }

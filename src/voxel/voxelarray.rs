@@ -4,35 +4,47 @@ extern crate num;
 use std::marker::Copy;
 
 use voxel::voxelstorage::*;
-use util::numbers::USizeAble;
 use voxel::voxelmath::*;
 use std::io::prelude::*;
 use std::mem;
+use std::default::Default;
 
 use num::Integer;
-use num::traits::identities::One;
-use num::traits::identities::Zero;
 
 /// A 3D packed array of voxels - it's a single flat buffer in memory,
 /// which is indexed by voxel positions with some math done on them. 
 /// Should have a fixed, constant size after creation.
 #[derive(Clone, Debug)]
-pub struct VoxelArray<T: Clone, P: Copy + Integer + One + Zero + USizeAble> {
+pub struct VoxelArray<T: Clone, P: Copy + Integer + Into<usize>> {
     size_x: P, size_y: P, size_z: P,
     data: Vec<T>,
-    bounds : VoxelRange<P>,
 }
 
-impl <T:Clone, P: Copy + Integer + One + Zero + USizeAble> VoxelArray<T, P> {
+impl <T:Clone, P: Copy + Integer + Into<usize>> VoxelArray<T, P> {
     pub fn load_new(szx: P, szy: P, szz: P, dat: Vec<T>) -> VoxelArray<T, P> {
-	let bnd = VoxelRange::<P> { lower : VoxelPos::<P>{x : P::zero(), y : P::zero(), z : P::zero()},
-                                    upper : VoxelPos{x : szx, y : szy, z : szy}};
-        return VoxelArray{size_x: szx, size_y: szy, size_z: szz, 
-                                    data: dat, bounds : bnd};
+        VoxelArray{size_x: szx, size_y: szy, size_z: szz, data: dat}
+    }
+
+    /// Make a new VoxelArray wherein every value is set to val
+    pub fn new_solid(szx: P, szy: P, szz: P, val:T) -> VoxelArray<T, P> {
+        VoxelArray{size_x: szx, size_y: szy, size_z: szz, data: vec![ val; szx*szy*szz] }
+    }
+
+    /// Replaces the data inside a chunk all at once. This drops the old self.data.
+    pub fn replace_data(&mut self, data: Vec<T>) {
+        // TODO: Better error handling here 
+        // Make sure these are the same size and not going to invalidate our size fields.
+        assert_eq!(self.data.len(), data.len());
+        self.data = data;
     }
 }
 
-impl <T: Clone, P: Copy + Integer + One + Zero + USizeAble> VoxelStorage<T, P> for VoxelArray<T, P> {
+impl <T:Clone + Default, P: Copy + Integer + Into<usize>> VoxelArray<T, P> {
+    /// Make a new VoxelArray wherein every value is set to T::Default
+    pub fn new_empty(szx: P, szy: P, szz: P) -> VoxelArray<T, P> { VoxelArray::new_solid(szx, szy, szz,T::default()) }
+}
+
+impl <T: Clone, P: Copy + Integer + Into<usize>> VoxelStorage<T, P> for VoxelArray<T, P> {
     fn get(&self, coord: VoxelPos<P>) -> Option<T> {
     	//Bounds-check.
     	if (coord.x >= self.size_x) ||
@@ -67,18 +79,9 @@ impl <T: Clone, P: Copy + Integer + One + Zero + USizeAble> VoxelStorage<T, P> f
     		(coord.y * (self.size_x))
     		+ coord.x).as_usize()).unwrap()) = value;
     }
-
-    //Intializes a voxel storage, with each cell set to default value.
-    //fn init_new(&mut self, size_x: P, size_y: u16, size_z: u16, default: T);
-    //Uninitialized version of the above. Still allocates, probably.
-    //fn init_new_uninitialized(&mut self, size_x: P, size_y: u16, size_z: P);
-
-    //Gets how many bytes this structure takes up in memory.
-    /*fn get_footprint(&self) -> usize {
-    	return ((size_of::<T>() as u16) * (self.size_x * self.size_y * self.size_z)) as usize;
-    }*/
 }
-impl <T: Clone, P> VoxelStorageIOAble<T, P> for VoxelArray<T, P> where P : Copy + Integer + One + Zero + USizeAble { 
+/*
+impl <T: Clone, P> VoxelStorageIOAble<T, P> for VoxelArray<T, P> where P : Copy + Integer + Into<usize> { 
     #[allow(mutable_transmutes)]
     #[allow(unused_must_use)]
     fn load<R: Read + Sized>(&mut self, reader: &mut R) { 
@@ -92,12 +95,10 @@ impl <T: Clone, P> VoxelStorageIOAble<T, P> for VoxelArray<T, P> where P : Copy 
 		let array: &[u8] = unsafe { mem::transmute(&*self.data) };
     	writer.write(array)
     }
-}
+}*/
 
-impl <T: Clone, P> VoxelStorageBounded<T, P> for VoxelArray<T, P> where P : Copy + Integer + One + Zero + USizeAble { 
-    fn get_bounds(&self) -> VoxelRange<P> { 
-        return self.bounds;
-    }
+impl <T: Clone, P> VoxelStorageBounded<T, P> for VoxelArray<T, P> where P : Copy + Integer + Into<usize> { 
+    fn get_bounds(&self) -> VoxelRange<P> { VoxelRange { upper: vpos!(self.size_x, self.size_y, self.size_z), lower: vpos!(0,0,0) } }
 }
 
 #[test]

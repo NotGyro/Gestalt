@@ -1,6 +1,6 @@
 use util::event::*;
 
-extern crate serde;
+//extern crate serde;
 extern crate std;
 extern crate num;
 
@@ -13,7 +13,7 @@ use voxel::voxelmath::*;
 use voxel::voxelstorage::VoxelStorage;
 use voxel::voxelarray::VoxelArray;
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct OneVoxelChange<T : Clone, P : Copy + Integer> {
     new_value : T,
     pos : VoxelPos<P>,
@@ -25,7 +25,7 @@ impl <T, P> OneVoxelChange<T, P> where T : Clone, P : Copy + Integer {
     }
 }
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct SetVoxelRange<T : Clone, P : Copy + Integer> { 
     new_value : T, 
     range : VoxelRange<P>,
@@ -53,6 +53,8 @@ impl <T, P> VoxelEvent<T, P> where T : Clone, P : Copy + Integer {
         }
     }
 }
+
+// Used for tests
 const CHUNK_X_LENGTH : u32 = 16;
 const CHUNK_Y_LENGTH : u32 = 16;
 const CHUNK_Z_LENGTH : u32 = 16;

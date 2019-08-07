@@ -5,8 +5,6 @@ extern crate serde;
 use std::iter::{Iterator, IntoIterator};
 
 use num::Integer;
-//use num::traits::identities::One;
-//use num::traits::identities::Zero;
 
 use std::marker::Copy;
 use std::fmt;
@@ -14,12 +12,56 @@ use std::fmt;
 use std::ops::Add;
 use std::ops::Sub;
 
-//Stuff for Voxel Raycasts.
-//use std::f32::consts::*;
-use std::f32;
-//use std::f32::*;
 use cgmath::{Vector3, Point3};
+use std::f32;
 
+use std::convert::From;
+use std::convert::Into;
+
+
+pub trait USizeAble {
+    fn as_usize(&self) -> usize;
+    fn from_usize(val : usize) -> Self;
+}
+
+impl USizeAble for u8 {
+    fn as_usize(&self) -> usize {
+        (*self) as usize
+    }
+    fn from_usize(val : usize) -> Self {
+        val as u8
+    }    
+}
+impl USizeAble for u16 {
+    fn as_usize(&self) -> usize {
+        (*self) as usize
+    }
+    fn from_usize(val : usize) -> Self {
+        val as u16
+    }    
+}
+impl USizeAble for u32 {
+    fn as_usize(&self) -> usize {
+     From<T>
+    }From<T>
+    fn from_usize(val : usize) -> Self {
+        val as u32
+    }    
+}
+impl USizeAble for u64 {
+    fn as_usize(&self) -> usize {
+        (*self) as usize
+    }
+    fn from_usize(val : usize) -> Self {
+        val as u64
+    }    
+}
+
+impl<T> From<T> for usize where T : USizeAble {
+    fn from(val: T) { val.as_usize() }
+}
+
+/// A point in Voxel space. (A cell.)
 #[derive(Copy, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelPos<T : Copy + Integer> {
 	pub x: T, pub y: T, pub z: T,
@@ -48,16 +90,31 @@ impl <T> fmt::Display for VoxelPos<T> where T : Copy + Integer + fmt::Display {
     }
 }
 
+macro_rules! vpos {
+    ($x:expr, $y:expr, $z:expr) => { VoxelPos { x: $x, y: $y, z : $z } };
+}
+
+/// Represents any rectangular cuboid in voxel space.
 #[derive(Copy, Serialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelRange<T : Copy + Integer> {
 	pub upper : VoxelPos<T>, pub lower : VoxelPos<T>,
 }
 
-impl <T> VoxelRange<T> where T : Copy + Integer { 
+impl <T> VoxelRange<T> where T : Copy + Integer {
+    /// Shift / move our position by offset
+    pub fn get_shifted(&self, offset : VoxelPos<T>) -> VoxelRange<T> { VoxelRange{ upper: self.upper + offset, lower: self.lower + offset } }
+    /// Shift / move our position by offset
+    pub fn shift(&mut self, offset: VoxelPos<T>) {
+        let shifted = self.get_shifted(offset);
+        self.lower = shifted.lower;
+        self.upper = shifted.upper;
+    }
+    /// Get an iterator which will visit each element of this range exactly once.
     pub fn get_iterator(&self) -> VoxelRangeIter<T> { 
         VoxelRangeIter { range : *self, pos : Some(self.lower) }
     }
-
+    /// Get an iterator which will visit every voxel laying along the selected side of your cuboid.
+    /// For example, VoxelAxis::NegaZ will visit all of the voxels in this range where z = self.lower.z
     pub fn get_side_iterator(&self, side : VoxelAxis) -> VoxelSideIter<T> {
         match side {
             VoxelAxis::PosiX => { 
@@ -104,13 +161,13 @@ impl <T> VoxelRange<T> where T : Copy + Integer {
             },
         }
     }
-
+    /// Does the provided point fall within this VoxelRange?
     pub fn contains(&self, point : VoxelPos<T>) -> bool { 
          ( point.x >= self.lower.x ) && ( point.x < self.upper.x ) &&
          ( point.y >= self.lower.y ) && ( point.y < self.upper.y ) &&
          ( point.z >= self.lower.z ) && ( point.z < self.upper.z )
     }
-
+    /// Gives you the furthest position inside this VoxelRange along the direction you provide.
     pub fn get_bound(&self, direction : VoxelAxis) -> T {
         match direction {
             VoxelAxis::PosiX => return self.upper.x,
@@ -121,6 +178,8 @@ impl <T> VoxelRange<T> where T : Copy + Integer {
             VoxelAxis::NegaZ => return self.lower.z,
         }
     }
+
+    /// Does the voxel you gave lie along the selected side of this rectangle?
     pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelAxis) -> bool { 
         let mut edge = self.get_bound(side);
         //Don't trip over off-by-one errors - the positive bounds are one past the valid coordinates. 
@@ -223,6 +282,7 @@ impl <T> Iterator for VoxelSideIter<T> where T : Copy + Integer {
     }
 }
 
+/// A signed direction in voxel space. 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum VoxelAxis {
 	PosiX,
@@ -232,6 +292,8 @@ pub enum VoxelAxis {
 	PosiZ,
 	NegaZ,
 }
+
+/// Describes an unsigned cartesian axis in 3D space
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum VoxelAxisUnsigned {
 	X,
@@ -239,12 +301,28 @@ pub enum VoxelAxisUnsigned {
 	Z,
 }
 
+/// Make sure we can "downcast" this enum so it's just the axis and not a direction
+impl From<VoxelAxis> for VoxelAxisUnsigned {
+    fn from(axis: VoxelAxis) -> VoxelAxisUnsigned {
+        match axis {
+            VoxelAxis::PosiX => VoxelAxisUnsigned::X,
+            VoxelAxis::NegaX => VoxelAxisUnsigned::X,
+            VoxelAxis::PosiY => VoxelAxisUnsigned::Y,
+            VoxelAxis::NegaY => VoxelAxisUnsigned::Y,
+            VoxelAxis::PosiZ => VoxelAxisUnsigned::Z,
+            VoxelAxis::NegaZ => VoxelAxisUnsigned::Z,
+        }
+    }
+}
+
+/// Represents the sign of a VoxelAxis.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 enum VoxelAxisSign {
     POSI,
     NEGA,
 }
 
+/// An iterator over each of the 6 cardinal directions in voxel space.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct VoxelAxisIter {
     axis : Option<VoxelAxis>,
@@ -271,6 +349,7 @@ impl Iterator for VoxelAxisIter {
 }
 
 impl VoxelAxis {
+    /// Gives you an iterator over each of the 6 cardinal directions in voxel space.
     pub fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
     pub fn opposite(&self) -> Self {
         match *self {
@@ -292,10 +371,34 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => return VoxelAxisSign::NEGA,
         }
     }
+    fn split(&self) -> (VoxelAxisSign, VoxelAxisUnsigned) { (self.clone().into(), self.get_sign())}
+    fn from_parts(sign : VoxelAxisSign, axis : VoxelAxisUnsigned) -> Self {
+        match axis {
+            VoxelAxisUnsigned::X => { 
+                match sign { 
+                    POSI => return VoxelAxis::PosiX,
+                    NEGA => return VoxelAxis::NegaX,
+                }
+            },
+            VoxelAxisUnsigned::Y => { 
+                match sign { 
+                    POSI => return VoxelAxis::PosiY,
+                    NEGA => return VoxelAxis::NegaY,
+                }
+            },
+            VoxelAxisUnsigned::Z => { 
+                match sign { 
+                    POSI => return VoxelAxis::PosiZ,
+                    NEGA => return VoxelAxis::NegaZ,
+                }
+            },
+        }
+    }
 }
 
 impl <T> VoxelPos<T> where T : Copy + Integer {
-   pub fn get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
+    /// Returns the cell adjacent to this one in the direction passed
+    pub fn get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
         match direction {
             VoxelAxis::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
             VoxelAxis::NegaX => return VoxelPos{x : self.x - T::one(), y : self.y, z : self.z },
@@ -305,27 +408,24 @@ impl <T> VoxelPos<T> where T : Copy + Integer {
             VoxelAxis::NegaZ => return VoxelPos{x : self.x, y : self.y, z : self.z - T::one() },
         }
     }
-   pub fn coord_for_axis(&self, direction : VoxelAxis) -> T {
+    /// Along the provided axis, what is our coordinate?
+    pub fn coord_for_axis(&self, direction : VoxelAxisUnsigned) -> T {
         match direction {
-            VoxelAxis::PosiX => return self.x,
-            VoxelAxis::NegaX => return self.x,
-            VoxelAxis::PosiY => return self.y,
-            VoxelAxis::NegaY => return self.y,
-            VoxelAxis::PosiZ => return self.z,
-            VoxelAxis::NegaZ => return self.z,
+            VoxelAxisUnsigned::X => return self.x,
+            VoxelAxisUnsigned::Y => return self.y,
+            VoxelAxisUnsigned::Z => return self.z,
         }
     }
-   pub fn set_coord_for_axis(&mut self, direction : VoxelAxis, value: T) {
+    /// Set our coordinate along the axis you pass.
+    pub fn set_coord_for_axis(&mut self, direction : VoxelAxisUnsigned, value: T) {
         match direction {
-            VoxelAxis::PosiX => self.x = value,
-            VoxelAxis::NegaX => self.x = value,
-            VoxelAxis::PosiY => self.y = value,
-            VoxelAxis::NegaY => self.y = value,
-            VoxelAxis::PosiZ => self.z = value,
-            VoxelAxis::NegaZ => self.z = value,
+            VoxelAxisUnsigned::X => self.x = value,
+            VoxelAxisUnsigned::Y => self.y = value,
+            VoxelAxisUnsigned::Z => self.z = value,
         }
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct VoxelRaycast {
 	pub pos : VoxelPos<i32>,
