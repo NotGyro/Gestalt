@@ -1,160 +1,221 @@
-//#![feature(collections)]
-pub mod util;
-pub mod voxel;
+#![allow(dead_code)]
 
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate string_cache;
+extern crate cgmath;
+extern crate fine_grained;
+extern crate fnv;
+extern crate noise;
+extern crate rand;
+extern crate smallvec;
+extern crate winit;
 #[macro_use] extern crate lazy_static;
-#[macro_use] extern crate crossbeam;
-//#[macro_use] extern crate gluon;
-extern crate num;
-extern crate serde;
-extern crate parking_lot;
-
-#[macro_use] extern crate cgmath;
-
-extern crate time;
-extern crate image;
-
 #[macro_use] extern crate log;
-extern crate chrono;
+extern crate string_cache;
+extern crate linear_map;
+extern crate crossbeam;
+extern crate serde;
+extern crate serde_json;
+extern crate rgb;
+extern crate hashbrown;
+extern crate swsurface;
 
-extern crate mint;
-extern crate three;
+//#[macro_use] extern crate vulkano;
+//#[macro_use] extern crate vulkano_shader_derive;
+//extern crate image;
 
-use util::logger;
-use util::logger::*;
+#[macro_use] mod voxel;
 
-use std::vec::Vec;
+mod util;
+mod world;
+mod network;
+mod entity;
+mod software_raycaster;
 
-use std::{io, cmp};
-use num::Zero;
-use std::thread;
-
-//use gluon::vm::api::IO;
-
-use voxel::voxelstorage::*;
-use voxel::voxelarray::*;
+extern crate clap;
+use clap::{Arg, App};
 
 use voxel::voxelmath::*;
+use voxel::subdivmath::*;
+use voxel::subdivstorage::*;
+use world::tile::*;
 
-use voxel::voxelevent::*;
-use util::event::EventBus;
+use swsurface::{Format, SwWindow};
+use winit::{
+    event::{Event, WindowEvent, ElementState, KeyboardInput},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
+use winit::dpi::LogicalSize;
+use winit::platform::desktop::EventLoopExtDesktop;
+use software_raycaster::*;
 
-use voxel::block::BlockID;
+use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Deg, Rad, ApproxEq, BaseFloat, BaseNum};
+use std::ops::Neg;
+use self::string_cache::DefaultAtom as Atom;
+use rgb::*;
+use std::time::{Duration, Instant};
 
-use cgmath::prelude::*;
-use three::Object;
-
-const COLOR_BACKGROUND: three::Color = 0xf0e0b6;
-
-/*
-//Just a test here. Not for use in production.
-fn voxel_raycast_first(space : &VoxelSpace, air_id : MaterialID, raycast : &mut VoxelRaycast) -> Option<VoxelPos<i32>> {
-    let mut count = 0;
-    const MAX_COUNT : usize = 4096; //TODO: Don't use a magic number.
-    loop {
-        let result = space.getv(raycast.pos);
-        match result {
-            Some(val) => { 
-                if val != air_id {
-                    return Some(raycast.pos)
-                }
-            },
-            None => return None,
-        }
-        count = count + 1;
-        if(count > MAX_COUNT) {
-            return None;
-        }
-        raycast.step();
-    }
-}
-*/
-use std::time::Instant;
+use std::fs::File;
 
 fn main() {
-    //This MUST be the first thing we call. 
-    init_logger();
-    println!("{:?}", std::env::current_exe());
-    //Messing around with logging a bit.
-    trace!("Hello, world!");
-    info!("I have a logger now!");
-    error!("Oh no! This is an error");
-    let gls = GAME_LOGGER_STATE.lock();
-    let receiver = gls.console_receiver.clone();
-    drop(gls);
-    /*
-    let receiver_move = receiver.clone();
-    
-    let log_thread = thread::spawn(move || {
-        loop {
-            let msg = receiver_move.recv();
-        }
-    });
-    */
-    let mut win = three::Window::new("Gestalt");
-    win.scene.background = three::Background::Color(COLOR_BACKGROUND);
-    let cam = win.factory.perspective_camera(75.0, 1.0 .. 50.0);
-    cam.set_position([0.0, 0.0, 10.0]);
+    let matches = App::new("Gestalt Engine").arg(Arg::with_name("server")
+                                .short("s")
+                                .long("server")
+                                .value_name("IP")
+                                .help("Starts a server version of this engine. No graphics. Hosts from selected IP address and socket."))
+                                .arg(Arg::with_name("join")
+                                .short("j")
+                                .long("join")
+                                .value_name("IP")
+                                .help("Joins a server at the selected IP address and socket.")
+                                .takes_value(true))
+                                .get_matches();
 
-    let mbox = {
-        let geometry = three::Geometry::cuboid(3.0, 2.0, 1.0);
-        let material = three::material::Wireframe { color: 0x00FF00 };
-        win.factory.mesh(geometry, material)
-    };
+    let server_mode : bool = matches.is_present("server");
 
-        mbox.set_position([-3.0, -3.0, 0.0]);
-    win.scene.add(&mbox);
+    let server_ip = matches.value_of("server");
 
-    let mcyl = {
-        let geometry = three::Geometry::cylinder(1.0, 2.0, 2.0, 5);
-        let material = three::material::Wireframe { color: 0xFF0000 };
-        win.factory.mesh(geometry, material)
-    };
-    mcyl.set_position([3.0, -3.0, 0.0]);
-    win.scene.add(&mcyl);
-
-    let msphere = {
-        let geometry = three::Geometry::uv_sphere(2.0, 5, 5);
-        let material = three::material::Wireframe { color: 0xFF0000 };
-        win.factory.mesh(geometry, material)
-    };
-    msphere.set_position([-3.0, 3.0, 0.0]);
-    win.scene.add(&msphere);
-
-    // test removal from scene
-    win.scene.remove(&mcyl);
-    win.scene.remove(&mbox);
-    win.scene.add(&mcyl);
-    win.scene.add(&mbox);
-
-    let mline = {
-        let geometry = three::Geometry::with_vertices(vec![
-            [-2.0, -1.0, 0.0].into(),
-            [0.0, 1.0, 0.0].into(),
-            [2.0, -1.0, 0.0].into(),
-        ]);
-        let material = three::material::Line { color: 0x0000FF };
-        win.factory.mesh(geometry, material)
-    };
-    mline.set_position([3.0, 3.0, 0.0]);
-    win.scene.add(&mline);
-
-    let mut angle = cgmath::Rad::zero();
-    while win.update() && !win.input.hit(three::KEY_ESCAPE) {
-        if let Some(diff) = win.input.timed(three::AXIS_LEFT_RIGHT) {
-            angle += cgmath::Rad(1.5 * diff);
-            let q = cgmath::Quaternion::from_angle_y(angle);
-            mbox.set_orientation(q);
-            mcyl.set_orientation(q);
-            msphere.set_orientation(q);
-            mline.set_orientation(q);
-        }
-        win.render(&cam);
+    let join_ip = matches.value_of("join");
+    if join_ip.is_some() && server_mode {
+        println!("Cannot host a server that also joins a server.");
+        return;
     }
 
-    let v : Vec<String> = receiver.try_iter().collect();
-    trace!("So far we have logged {} messages.", v.len()); 
-    info!("Quitting application.");
+    //let mut mode = game::GameMode::Singleplayer;
+    if let Some(ip) = server_ip {
+        //mode = game::GameMode::Server(ip.parse().unwrap());
+    } else if join_ip.is_some() {
+        println!("Launching to join a server at {}", join_ip.unwrap());
+        //mode = game::GameMode::JoinServer(join_ip.unwrap().parse().unwrap());
+    }
+
+    match util::logger::init_logger() {
+        Ok(_) => {},
+        Err(error) => { println!("Unable to initialize logger. Reason: {}. Closing application.", error); return; }
+    }
+
+    if !server_mode { 
+        
+        // Set up our display properties.
+        let window_width : u32 = 800;
+        let window_height : u32 = 600;
+        let fov : cgmath::Rad<f64> = cgmath::Rad::from(cgmath::Deg(90.0 as f64));
+
+        //Open a Winit window.
+        let mut event_loop = EventLoop::new();
+        let window = WindowBuilder::new()
+            .with_title("gestalt")
+            .with_inner_size(LogicalSize::from((window_width, window_height)))
+            .with_resizable(false)
+            .build(&event_loop)
+            .unwrap();
+        let event_loop_proxy = event_loop.create_proxy();
+        let sw_context = swsurface::ContextBuilder::new(&event_loop)
+            .with_ready_cb(move |_| {
+                let _ = event_loop_proxy.send_event(());
+            })
+            .build();
+        let sw_window = SwWindow::new(window, &sw_context, &Default::default());
+        let format = [Format::Argb8888]
+            .iter()
+            .cloned()
+            .find(|&fmt1| sw_window.supported_formats().any(|fmt2| fmt1 == fmt2))
+            .unwrap();
+            
+        sw_window.update_surface_to_fit(format);
+
+        // Set up our player and where we're looking
+        let player_pos : Point3<f64> = Point3::new(10.0, -10.0, 24.0);
+        
+        let yaw = Rad::from(Deg(60.0 as f64));
+        let pitch = Rad::from(Deg(-80.0 as f64));
+        let yaw_quat : Quaternion<f64> = Quaternion::from_angle_y( yaw );
+        let pitch_quat : Quaternion<f64> = Quaternion::from_angle_x( pitch );
+        let rotation = (yaw_quat * pitch_quat).normalize();
+        let mut forward : Vector3<f64> = Vector3::new(0.0, 0.0, -1.0);
+        let mut right : Vector3<f64> = Vector3::new(0.0, 1.0, 0.0);
+        
+        forward = rotation.rotate_vector(forward);
+        right = rotation.rotate_vector(right);
+
+        let up = forward.cross( right ).neg();
+
+        // Create our raycaster. 
+        let mut renderer = SoftwareRenderer::new(window_width, window_height, fov);
+
+        // Create a test / example world. 
+
+        // Describe some tiles. 
+        let air_id = TILE_REGISTRY.lock().register_tile(&Atom::from("air"));
+        TILE_TO_ART.write().insert(air_id, TileArt{color: RGB{r:255,g:255,b:255}, air:true });
+        let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
+        TILE_TO_ART.write().insert(stone_id, TileArt{color: RGB{r:134,g:139,b:142}, air:false });
+        let lava_id = TILE_REGISTRY.lock().register_tile(&Atom::from("lava"));
+        TILE_TO_ART.write().insert(lava_id, TileArt{color: RGB{r:255,g:140,b:44}, air:false });
+
+        // Scale 6: a 64 meter x 64 meter x 64 meter chunk
+        let mut world : NaiveVoxelOctree<TileID, SimpleLOD> = 
+            NaiveVoxelOctree{scale : 4 , root: NaiveOctreeNode::new_leaf(stone_id)};
+        world.set(opos!((1,0,1) @ 3), air_id).unwrap();
+        world.set(opos!((0,0,1) @ 3), air_id).unwrap();
+        world.set(opos!((1,0,0) @ 3), air_id).unwrap();
+        let lava_pos = opos!((2,1,2) @ 2);
+        world.set(lava_pos, lava_id).unwrap();
+        let mut chop_pos = lava_pos.scale_to(1); 
+        chop_pos.pos.x += 1;
+        //chop_pos.pos.y += 1;
+        chop_pos.pos.z += 1;
+        world.set(chop_pos, air_id).unwrap();
+        //world.set(opos!((0,1,0) @ 3), lava_id).unwrap();
+        world.root.rebuild_lod();
+        
+        let game_start = Instant::now();
+        // Here goes a mainloop.
+        event_loop.run_return(move |event, window, control_flow| {
+            //*control_flow = ControlFlow::Wait; 
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    state: ElementState::Released,
+                                    virtual_keycode: Some(key),
+                                    modifiers,
+                                    ..
+                                },
+                            ..
+                    } => {
+                        use winit::event::VirtualKeyCode::*;
+                        match key {
+                            Escape => *control_flow = ControlFlow::Exit,
+                            _ => *control_flow = ControlFlow::Wait,
+                        }
+                    },
+                    _ => *control_flow = ControlFlow::Wait,
+                },
+                _ => *control_flow = ControlFlow::Wait,
+            }
+            if game_start.elapsed().as_secs_f32() > 6.0 {
+                *control_flow = ControlFlow::Exit;
+            }
+            if *control_flow != ControlFlow::Exit {
+                if let Some(image_index) = sw_window.poll_next_image() {
+                    let frame_begin = Instant::now();
+                    info!("Starting a frame raycast draw...");
+                    match renderer.draw_frame(player_pos, yaw, pitch, &world, &mut sw_window.lock_image(image_index), sw_window.image_info()) {
+                        Err(err) => {
+                            error!("Error encountered while attempting to draw a frame in software rendering: {}", err);
+                            *control_flow = ControlFlow::Exit; 
+                            },
+                        _ => info!("Drew a frame in {} milliseconds.", frame_begin.elapsed().as_millis()),
+                    }
+                    sw_window.present_image(image_index);
+                };
+            }
+            else {
+                //If we don't do THIS then the loop is fully immortal.
+                panic!();
+            }
+        });
+    }
 }

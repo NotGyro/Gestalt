@@ -5,11 +5,11 @@ extern crate chrono;
 extern crate crossbeam;
 extern crate parking_lot;
 
-use log::{SetLoggerError, Level, LevelFilter, Record, Metadata};
+use self::log::{SetLoggerError, Level, LevelFilter, Record, Metadata};
 //use std::collections::vec_deque::VecDeque;
-use parking_lot::Mutex;
+use self::parking_lot::Mutex;
 
-use crossbeam::crossbeam_channel::{unbounded, Sender, Receiver}; //iSendError, RecvError, TryRecvError};
+use self::crossbeam::{unbounded, Sender, Receiver};
 
 pub struct GameLoggerState {
     pub filter_print : LevelFilter,
@@ -19,6 +19,7 @@ pub struct GameLoggerState {
     pub console_receiver : Receiver<String>, 
     /// Used to print current game logic tick, which makes things much more informative.
     pub current_tick : u64,
+    pub enable_console_push : bool,
 }
 
 impl GameLoggerState { 
@@ -26,7 +27,16 @@ impl GameLoggerState {
     /// For example, you probably don't want to log the result of the command
     /// you just typed, however, you probably do want to see it in the console.
     fn push_to_console(&mut self, message : String) {
-        self.console_sender.send(message.clone());
+        if self.enable_console_push {
+            match self.console_sender.send(message.clone()) {
+                Err(error) => {
+                    self.enable_console_push = false; // Prevent a very nasty loop.
+                    error!("Failed to send a message \"{}\" to the game console, reason: {:?}", message, error);
+                    self.enable_console_push = true;
+                },
+                _ => {},
+            }
+        }
     }
 }
 
@@ -34,12 +44,13 @@ lazy_static! {
     pub static ref GAME_LOGGER_STATE : Mutex<GameLoggerState> = {
         let (s, r) = unbounded();
         Mutex::new(GameLoggerState { 
-            filter_print : LevelFilter::max(),  
-            filter_to_file : LevelFilter::max(),
-            filter_game_console : LevelFilter::max(),
+            filter_print : LevelFilter::Debug,  
+            filter_to_file : LevelFilter::Debug,
+            filter_game_console : LevelFilter::Debug,
             console_sender : s, 
             console_receiver : r,
             current_tick : 0,
+            enable_console_push : true,
         })
     };
 }
@@ -58,7 +69,7 @@ impl GameLogger {
 }
 impl log::Log for GameLogger {
     // Always enabled - handles multiple levels.
-    fn enabled(&self, metadata: &Metadata) -> bool { true }
+    fn enabled(&self, _metadata: &Metadata) -> bool { true }
     fn log(&self, record: &Record) {
         let mut gls = GAME_LOGGER_STATE.lock(); //.expect("Unable to acquire game logger state mutex while logging a message!");
         let message = GameLogger::make_log_entry(&gls, &record); 

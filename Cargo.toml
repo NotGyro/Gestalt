@@ -1,49 +1,40 @@
 [package]
-
 name = "gestalt"
 version = "0.0.1"
-authors = [ "Sam Cutlip <gyro@zettabyte.ws>" ]
-
-[profile.dev]
-opt-level = 0      # controls the `--opt-level` the compiler builds with
-debug = true       # controls whether the compiler passes `-g`
-rpath = false      # controls whether the compiler passes `-C rpath`
-lto = false        # controls `-C lto` for binaries and staticlibs
-debug-assertions = true # controls whether debug assertions are enabled
-codegen-units = 1  # controls whether the compiler passes `-C codegen-units`
-                   # `codegen-units` is ignored when `lto = true`
-panic = 'unwind'   # panic strategy (`-C panic=...`), can also be 'abort'
+authors = ["gyro"]
 
 [dependencies]
-num = "0.1.37"
-time = "*"
-cgmath = { version = "0.16", features = ["mint"] }
-mint = "0.5"
-three = "0.4.0"
+cgmath = { version = "0.16.1", features = [ "swizzle" ] }
 
-serde = { version = "1.0.2", features = ["std"] }
-serde_yaml = "0.7.0"
-serde_derive = "1.0.2"
+time = "0.1.42"
+rand = "0.7.2"
+noise = "0.6.0"
+fine_grained = "0.1.2"
+smallvec = "0.6.10"
+fnv = "1.0.6"
 
-lazy_static = "0.2.8"
-string_cache = "0.5.0"
-linear-map = { git = "https://github.com/contain-rs/linear-map" }
+parking_lot = "0.9.0"
+crossbeam = "0.7.2"
+log = "0.4.8"
+chrono = "0.4.9"
+lazy_static = "1.4.0"
+num = "0.2.0"
+string_cache = "0.8.0"
+clap = "2.33.0"
+linear-map = "1.2.0"
 
-image = "0.10.0"
+serde = { version = "1.0.101", features = ["derive"] }
+serde_json = "1.0.41"
 
-parking_lot = "0.7.1"
-crossbeam = "0.7.1"
+winit = "0.20.0-alpha4"
+swsurface = "0.1.2"
+rgb = "0.8.14"
+hashbrown = "0.6.2"
 
-log = "0.4.6" # Note: I'm going to roll my own implementation, but still use the facade to work with it.
-chrono = "0.4.6"
+#TODO: Rewrite VoxelArray to use compile-time size.
+#typenum = "1.10.0"
+#generic-array = "0.13.2"
 
-# gluon = "0.8.1"
-
-# Vulkano things.
-# vulkano = "*"
-# vulkano-shaders = "*"
-# winit = "*"
-# vulkano-win = "*"
-
-[workspace]
-exclude = ["gamedata"]	# Probably not necessary, but just in case - don't treat game data as a Rust crate.
+#vulkano = "0.10.0"
+#vulkano-shader-derive = "0.10.0"
+#image = "0.19.0"

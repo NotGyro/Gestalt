@@ -3,17 +3,35 @@ extern crate linear_map;
 extern crate std;
 extern crate crossbeam;
 
+use std::fmt;
 use std::fmt::Debug;
 //use serde::{Serialize, Deserialize};
-use serde::Serialize;
-use crossbeam::crossbeam_channel::{unbounded, Sender, Receiver, SendError}; // RecvError, TryRecvError};
+use self::crossbeam::crossbeam_channel::{unbounded, Sender, Receiver}; // RecvError, TryRecvError};
 use self::linear_map::LinearMap;
 use std::result::Result;
+use std::error::Error;
 
 type RevisionNumber = usize;
 
-pub trait Event : Clone + Serialize + Send + Sync + Debug {}
-impl<T> Event for T where T : Clone + Serialize + Send + Sync + Debug {}
+#[derive(Debug)]
+struct SimpleError {
+    value: String,
+}
+impl fmt::Display for SimpleError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.value.as_str())
+    }
+}
+impl Error for SimpleError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        // Generic error, underlying cause isn't tracked.
+        None
+    }
+}
+
+
+pub trait Event : Clone + Send + Sync + Debug {}
+impl<T> Event for T where T : Clone + Send + Sync + Debug {}
 
 /// An event bus is any type that sends and receives events of type T asynchronously 
 pub trait EventBus <T> where T : Event {
@@ -25,7 +43,7 @@ pub trait EventBus <T> where T : Event {
     /// Drops our Sender to the specified channel, stops trying to send events there.
     fn unsubscribe(&mut self, id : usize);
     /// Pushes an event directly onto this Event Bus if you're the one who owns it.
-    fn push(&mut self, ev : T) -> Result<(), SendError<T>>;
+    fn push(&mut self, ev : T) -> Result<(), Box<dyn Error>>;
 }
 
 
@@ -58,17 +76,22 @@ impl <T> EventBus<T> for SimpleEventBus<T> where T : Event {
     /// Drops our Sender to the specified channel, stops trying to send events there.
     fn unsubscribe(&mut self, id : usize) { self.consumers.remove(&id); }
     /// Pushes an event directly onto this Event Bus if you're the one who owns it.
-    fn push(&mut self, ev : T) -> Result<(), SendError<T>> { self.sender_template.send(ev) }
+    fn push(&mut self, ev : T) -> Result<(), Box<dyn Error>> { 
+        match self.sender_template.send(ev) {
+            Ok(()) => Ok(()),
+            Err(error) => Err(Box::new(SimpleError { value: format!("{:?}", error)})),
+        }
+    }
 }
 
 impl <T> SimpleEventBus<T> where T : Event {
-    fn new() -> SimpleEventBus<T> { 
+    pub fn new() -> SimpleEventBus<T> { 
         let (s_in, r_in) = unbounded();
         SimpleEventBus { our_receiver : r_in, sender_template : s_in, consumers : LinearMap::new(), consumer_count : 0 }
     }
     /// Take received events in, multicast to consumers.
     /// Never used when it;s an inner type in EventJournalBus
-    fn process(&mut self) { 
+    pub fn process(&mut self) { 
         for ev in self.our_receiver.try_iter() {
             for (_, consumer) in self.consumers.iter_mut() { 
                 consumer.send(ev.clone()).expect( format!("A SimpleEventBus failed to send an event! Event contents: {:?}", ev.clone()).as_str() );
@@ -93,13 +116,13 @@ pub struct EventJournal<T> where T : Event {
 
 impl <T> EventJournal<T> where T : Event { 
     /// Constructs a new EventJournal containing events of type T.
-    fn new() -> EventJournal<T> {
+    pub fn new() -> EventJournal<T> {
         EventJournal { events : Vec::with_capacity(128), revision_offset : 0 }
     }
-    fn revision(&self) -> RevisionNumber {
+    pub fn revision(&self) -> RevisionNumber {
         self.events.len() + self.revision_offset
     }
-    fn push(&mut self, ev : T) { self.events.push(ev) }
+    pub fn push(&mut self, ev : T) { self.events.push(ev) }
 }
 
 /// An EventBus that Journals everything that goes through it.
@@ -116,7 +139,7 @@ impl <T> EventBus<T> for EventJournalBus<T> where T : Event {
     /// Drops our Sender to the specified channel, stops trying to send events there.
     fn unsubscribe(&mut self, id : usize) { self.bus.unsubscribe(id) }
     /// Pushes an event directly onto this Event Bus if you're the one who owns it.
-    fn push(&mut self, ev : T) -> Result<(), SendError<T>> { self.bus.push(ev); return Ok(()) }
+    fn push(&mut self, ev : T) -> Result<(), Box<dyn Error>> { self.bus.push(ev)?; Ok(()) }
 }
 impl <T> EventJournalBus<T> where T : Event { 
     fn new() -> EventJournalBus<T> { 
@@ -135,16 +158,16 @@ impl <T> EventJournalBus<T> where T : Event {
 }
 
 
-#[derive(Clone, Serialize, Debug)]
+#[derive(Clone, Debug)]
 struct TestEvent {
     name : String,
     apples : i32,
 }
 
 #[test]
-fn TryEventJournalBus() { 
+fn try_event_journal_bus() { 
     let mut bus : EventJournalBus<TestEvent> = EventJournalBus::new();
-    let (mut subscriber1, _) = bus.subscribe();
+    let (subscriber1, _) = bus.subscribe();
     let mut subscribers : Vec<Receiver<TestEvent>> = Vec::new(); 
 
     let ev1 = TestEvent{ name : "Voksa".to_string(), apples : 14 };
@@ -152,7 +175,7 @@ fn TryEventJournalBus() {
     let ev3 = TestEvent{ name : "byte".to_string(), apples: 7 };
 
     for _ in 0..10 {
-        let (mut s, subid) = bus.subscribe();
+        let (s, _) = bus.subscribe();
         subscribers.push(s);
     }
     let snd = bus.get_sender();
