@@ -557,13 +557,13 @@ pub enum VoxelAxisSign {
 pub struct VoxelAxisIter {
     axis : Option<VoxelAxis>,
 }
-impl VoxelAxisIter { 
+impl VoxelAxisIter {
     pub fn new() -> Self { VoxelAxisIter { axis: None } }
 }
-impl Iterator for VoxelAxisIter { 
+impl Iterator for VoxelAxisIter {
     type Item = VoxelAxis;
     #[inline(always)]
-    fn next(&mut self) -> Option<VoxelAxis> { 
+    fn next(&mut self) -> Option<VoxelAxis> {
         let mut result = Some(VoxelAxis::PosiX);
         match self.axis {
             None => (), //result = Some(VoxelAxis::PosiX,
