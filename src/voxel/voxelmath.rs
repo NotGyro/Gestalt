@@ -562,7 +562,7 @@ impl VoxelAxisIter {
 }
 impl Iterator for VoxelAxisIter { 
     type Item = VoxelAxis;
-    #[inline]
+    #[inline(always)]
     fn next(&mut self) -> Option<VoxelAxis> { 
         let mut result = Some(VoxelAxis::PosiX);
         match self.axis {
@@ -579,21 +579,120 @@ impl Iterator for VoxelAxisIter {
     }
 }
 
+//VoxelAxis::PosiX => 0,
+//VoxelAxis::PosiY => 1,
+//VoxelAxis::PosiZ => 2,
+//VoxelAxis::NegaX => 3,
+//VoxelAxis::NegaY => 4,
+//VoxelAxis::NegaZ => 5,
+
+macro_rules! posi_x_index {
+    () => { 0 }
+}
+macro_rules! posi_y_index {
+    () => { 1 }
+}
+macro_rules! posi_z_index {
+    () => { 2 }
+}
+macro_rules! nega_x_index {
+    () => { 3 }
+}
+macro_rules! nega_y_index {
+    () => { 4 }
+}
+macro_rules! nega_z_index {
+    () => { 5 }
+}
 
 macro_rules! voxel_sides_unroll {
     ($side:ident, $b:block)=> { 
-        let $side = VoxelAxis::PosiX;
-        $b
-        let $side = VoxelAxis::NegaX;
-        $b
-        let $side = VoxelAxis::PosiY;
-        $b
-        let $side = VoxelAxis::NegaY;
-        $b
-        let $side = VoxelAxis::PosiZ;
-        $b
-        let $side = VoxelAxis::NegaZ;
-        $b
+        {
+            const $side : VoxelAxis = VoxelAxis::PosiX;
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::NegaX;
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::PosiY;
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::NegaY;
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::PosiZ;
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::NegaZ;
+            $b
+        }
+    };
+}
+macro_rules! voxel_side_indicies_unroll {
+    ($idx:ident, $b:block)=> { 
+        {
+            const $idx : usize = posi_x_index!();
+            $b
+        }
+        {
+            const $idx : usize = nega_x_index!();
+            $b
+        }
+        {
+            const $idx : usize = posi_y_index!();
+            $b
+        }
+        {
+            const $idx : usize = nega_y_index!();
+            $b
+        }
+        {
+            const $idx : usize = posi_z_index!();
+            $b
+        }
+        {
+            const $idx : usize = nega_z_index!();
+            $b
+        }
+    };
+}
+macro_rules! enumerated_voxel_side_unroll {
+    ($idx:ident, $side:ident, $b:block)=> { 
+        {
+            const $side : VoxelAxis = VoxelAxis::PosiX;
+            const $idx : usize = posi_x_index!();
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::NegaX;
+            const $idx : usize = nega_x_index!();
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::PosiY;
+            const $idx : usize = posi_y_index!();
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::NegaY;
+            const $idx : usize = nega_y_index!();
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::PosiZ;
+            const $idx : usize = posi_z_index!();
+            $b
+        }
+        {
+            const $side : VoxelAxis = VoxelAxis::NegaZ;
+            const $idx : usize = nega_z_index!();
+            $b
+        }
     };
 }
 
@@ -644,6 +743,52 @@ impl VoxelAxis {
             },
         }
     }
+    #[inline(always)]
+    pub fn to_id(&self) -> usize {
+        match self {
+            VoxelAxis::PosiX => 0,
+            VoxelAxis::PosiY => 1,
+            VoxelAxis::PosiZ => 2,
+            VoxelAxis::NegaX => 3,
+            VoxelAxis::NegaY => 4,
+            VoxelAxis::NegaZ => 5,
+        }
+    }
+    #[inline(always)]
+    pub fn from_id(val : usize) -> Self { 
+        match val { 
+            0 => VoxelAxis::PosiX,
+            1 => VoxelAxis::PosiY,
+            2 => VoxelAxis::PosiZ,
+            3 => VoxelAxis::NegaX,
+            4 => VoxelAxis::NegaY,
+            5 => VoxelAxis::NegaZ,
+            _ => VoxelAxis::PosiX,
+        }
+    }
+    
+    /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-X direction?
+    pub fn get_2d_x(&self) -> VoxelAxis {
+        match self { 
+            VoxelAxis::PosiX => VoxelAxis::PosiZ,
+            VoxelAxis::NegaX => VoxelAxis::PosiZ,
+            VoxelAxis::PosiY => VoxelAxis::PosiX,
+            VoxelAxis::NegaY => VoxelAxis::PosiX,
+            VoxelAxis::PosiZ => VoxelAxis::PosiX,
+            VoxelAxis::NegaZ => VoxelAxis::PosiX,
+        }
+    }
+    /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-Y direction?
+    pub fn get_2d_y(&self) -> VoxelAxis {
+        match self { 
+            VoxelAxis::PosiX => VoxelAxis::PosiY,
+            VoxelAxis::NegaX => VoxelAxis::PosiY,
+            VoxelAxis::PosiY => VoxelAxis::PosiZ,
+            VoxelAxis::NegaY => VoxelAxis::PosiZ,
+            VoxelAxis::PosiZ => VoxelAxis::PosiY,
+            VoxelAxis::NegaZ => VoxelAxis::PosiY,
+        }
+    }
 }
 
 impl <T> VoxelPos<T> where T : VoxelCoord {
@@ -671,7 +816,7 @@ impl <T> VoxelPos<T> where T : VoxelCoord {
 /// Signed, we can subtract.
 impl <T> VoxelPos<T> where T : VoxelCoord {
     /// Returns the cell adjacent to this one in the direction passed
-    #[inline]
+    #[inline(always)]
     pub fn get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
         match direction {
             VoxelAxis::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
@@ -683,7 +828,7 @@ impl <T> VoxelPos<T> where T : VoxelCoord {
         }
     }
     /// Sets this cell to be the cell adjacent to this one in the direction passed
-    #[inline]
+    #[inline(always)]
     pub fn go_neighbor(&mut self, direction : VoxelAxis) {
         match direction {
             VoxelAxis::PosiX => self.x = self.x + T::one(),
@@ -761,27 +906,36 @@ Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "
 */
 impl VoxelRaycast {
     #[inline]
+    fn step_x(&mut self) {
+        self.pos.x = self.pos.x + self.step_dir.x;
+        self.t_max.x= self.t_max.x + self.t_delta.x;
+        self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
+    }
+    #[inline]
+    fn step_y(&mut self) {
+        self.pos.y = self.pos.y + self.step_dir.y;
+        self.t_max.y = self.t_max.y + self.t_delta.y;
+        self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
+    }
+    #[inline]
+    fn step_z(&mut self) {
+        self.pos.z = self.pos.z + self.step_dir.z;
+        self.t_max.z= self.t_max.z + self.t_delta.z;
+        self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.  
+    }
+    #[inline]
     pub fn step(&mut self) {
-        if self.t_max.x < self.t_max.y {
-            if self.t_max.x < self.t_max.z {
-                self.pos.x = self.pos.x + self.step_dir.x;
-                self.t_max.x= self.t_max.x + self.t_delta.x;
-                self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
-            } else  {
-                self.pos.z = self.pos.z + self.step_dir.z;
-                self.t_max.z= self.t_max.z + self.t_delta.z;
-                self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
-            }
-        } else  {
-            if self.t_max.y < self.t_max.z {
-                self.pos.y = self.pos.y + self.step_dir.y;
-                self.t_max.y = self.t_max.y + self.t_delta.y;
-                self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
-            } else  {
-                self.pos.z = self.pos.z + self.step_dir.z;
-                self.t_max.z= self.t_max.z + self.t_delta.z;
-                self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.
-            }
+        if (self.t_max.x < self.t_max.y) && (self.t_max.x < self.t_max.z) {
+            self.step_x();
+            return;
+        } 
+        else if (self.t_max.y < self.t_max.x) && (self.t_max.y < self.t_max.z) {
+            self.step_y();
+            return;
+        }
+        else if (self.t_max.z < self.t_max.x) && (self.t_max.z < self.t_max.y) {
+            self.step_z();
+            return;
         }
     }
     #[inline]
@@ -837,6 +991,23 @@ impl VoxelRaycast {
         }
 
         let mut voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
+        
+        //Resolve some weird sign bugs.
+        let mut negative : bool =false;
+        let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
+        if direction.x<0.0 {
+            step_negative.x = -1; negative=true;
+        }
+        if direction.y<0.0 {
+            step_negative.y = -1; negative=true;
+        }
+        if direction.z<0.0 {
+            step_negative.z = -1; negative=true;
+        }
+        if negative {
+            voxel_origin = voxel_origin + step_negative;
+        }
+
         //Distance along the ray to the next voxel from our origin
         let next_voxel_boundary = voxel_origin + step_dir;
 
@@ -883,21 +1054,6 @@ impl VoxelRaycast {
             t_delta.z = f64::MAX; //Undefined in this direction
         }
 
-        //Resolve some weird sign bugs.
-        let mut negative : bool =false;
-        let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
-        if direction.x<0.0 {
-            step_negative.x = -1; negative=true;
-        }
-        if direction.y<0.0 {
-            step_negative.y = -1; negative=true;
-        }
-        if direction.z<0.0 {
-            step_negative.z = -1; negative=true;
-        }
-        if negative {
-            voxel_origin = voxel_origin + step_negative;
-        }
         VoxelRaycast { pos : voxel_origin,
             t_max : t_max,
             t_delta : t_delta,

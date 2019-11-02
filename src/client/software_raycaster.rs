@@ -48,7 +48,7 @@ pub struct SimpleLOD {
 pub type World = NaiveVoxelOctree<TileID, SimpleLOD>;
 
 impl LODData<TileID> for SimpleLOD  {
-    
+    #[inline(always)]
     fn represent(voxel: &TileID) -> Self {
         let artmap_lock = TILE_TO_ART.read();
         let art = artmap_lock.get(voxel).unwrap();
@@ -56,6 +56,7 @@ impl LODData<TileID> for SimpleLOD  {
         if art.air == true { filled = 0 };
         SimpleLOD{ color: art.color.clone(), filled:filled  }
     }
+    #[inline(always)]
     fn downsample_from(&mut self, child_values: &[Self; 8]){
         self.color.r = 0;
         self.color.g = 0;
@@ -79,7 +80,7 @@ pub struct PixelRay {
     //pub result: Option<Color>, //This is what we encountered. This will be a "Some" once we have something to render.
 }
 impl PixelRay { 
-    fn new(ray: VoxelRaycast, starting_scale : Scale) -> Self {
+    fn new(ray: VoxelRaycast) -> Self {
         PixelRay {
             ray: ray,
             done: false, 
@@ -87,12 +88,11 @@ impl PixelRay {
     }
 }
 
-fn construct_ray_normals(fov : Rad<f64>, resolution_x : u32, resolution_y : u32, aspect_ratio: f64) -> Vec<Vec<Vector3<f64>>> {
-    let mut result : Vec<Vec<Vector3<f64>>> = Vec::new();
+fn construct_ray_normals(fov : Rad<f64>, resolution_x : u32, resolution_y : u32, aspect_ratio: f64) -> Vec<Vector3<f64>> {
+    let mut result : Vec<Vector3<f64>> = Vec::new();
     let angle_per_pixel_x = fov / (resolution_x as f64); 
     let angle_per_pixel_y = (fov/aspect_ratio) / (resolution_y as f64); 
     for screen_y in 0..resolution_y {
-        result.push(Vec::new());
         for screen_x in 0..resolution_x {
             // Furthest edge counter-clockwise 
             let x_ccw_bound = -fov / 2.0;
@@ -109,29 +109,27 @@ fn construct_ray_normals(fov : Rad<f64>, resolution_x : u32, resolution_y : u32,
 
             forward = rotation.rotate_vector(forward);
 
-            result[screen_y as usize].push(forward);
+            result.push(forward);
         }
     }
     result
 }
 
-fn create_rays(origin : Point3<f64>, yaw: Rad<f64>, pitch: Rad<f64>, normals: &Vec<Vec<Vector3<f64>>>, starting_scale: Scale) -> Vec<PixelRay> {
+fn create_rays(origin : Point3<f64>, yaw: Rad<f64>, pitch: Rad<f64>, normals: &Vec<Vector3<f64>>) -> Vec<PixelRay> {
     let yaw_quat : Quaternion<f64> = Quaternion::from_angle_z(yaw);
     let pitch_quat : Quaternion<f64> = Quaternion::from_angle_y(pitch);
     let rotation = (yaw_quat * pitch_quat).normalize();
     
     let mut result : Vec<PixelRay> = Vec::new();
-    for row in normals {
-        for normal in row {
-            result.push( PixelRay::new(VoxelRaycast::new(origin, rotation.rotate_vector(*normal)), starting_scale));
-        }
+    for normal in normals {
+        result.push( PixelRay::new(VoxelRaycast::new(origin, rotation.rotate_vector(*normal))));
     }
     result
 }
 
 pub struct SoftwareRenderer {
     // Reusable struct of where the ray for each pixel on your raster should be pointing. 
-    pub ray_normals: Vec<Vec<Vector3<f64>>>,
+    pub ray_normals: Vec<Vector3<f64>>,
     pub rays: Vec<PixelRay>,
     pub resolution_x : u32,
     pub resolution_y : u32,
@@ -168,11 +166,11 @@ impl SoftwareRenderer {
         //let falloff_counter = 0;
         //Number of tiles each ray will have gone through.
         let mut step : usize = 0;
-        self.rays = create_rays(origin, yaw, pitch, &self.ray_normals, current_scale);
+        self.rays = create_rays(origin, yaw, pitch, &self.ray_normals);
         let total_rays = self.resolution_x * self.resolution_y;
         let mut finished_count = 0; 
         //Start drawing a frame. 
-        while step < max_steps {
+        for step in 0..max_steps {
             /*if falloff_counter >= falloff_period {
                 current_scale += 1; 
             }
@@ -185,9 +183,7 @@ impl SoftwareRenderer {
             //let mut i = 0;
             for (i, ref mut ray) in self.rays.iter_mut().enumerate() {
                 if !ray.done {
-                    let oct_pos = opos!( (ray.ray.pos.x as u32, ray.ray.pos.y as u32, ray.ray.pos.z as u32) @ current_scale); 
-                    
-                    let voxel_result = world.get(oct_pos);
+                    let voxel_result = world.get(opos!( (ray.ray.pos.x as u32, ray.ray.pos.y as u32, ray.ray.pos.z as u32) @ current_scale));
                     match voxel_result {
                         Ok(cell) => {
                             let to_draw = match cell { 
@@ -224,25 +220,21 @@ impl SoftwareRenderer {
                                 surface[(y*surface_ty.stride + x*4+2) as usize] = color.r;
                                 surface[(y*surface_ty.stride + x*4+3) as usize] = 255u8;
                                 ray.done = true;
+                                finished_count += 1;
+                            }
+                            else {
+                                ray.ray.step();
                             }
                         },
                         //This is not within bounds - skip it for this test,
                         //the player is most likely flying out of our test chunk.
-                        Err(SubdivError::OutOfBounds) => {},
+                        Err(SubdivError::OutOfBounds) => ray.ray.step(),
                         Err(other_error) => return Err(Box::new(other_error)),
-                    }
-                    //If we didn't hit a valid voxel just now...
-                    if !ray.done {
-                        //Step our voxel raycast.
-                        ray.ray.step();
-                    }
-                    else {
-                        finished_count += 1;
                     }
                 }
                 //i += 1;
             }
-            step += 1;
+            //step += 1;
         }
         //Clean up whichever didn't hit a voxel.
         for (i, ref mut ray) in self.rays.iter_mut().enumerate() {

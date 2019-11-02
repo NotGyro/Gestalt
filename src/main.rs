@@ -14,9 +14,15 @@ extern crate linear_map;
 extern crate crossbeam;
 extern crate serde;
 extern crate serde_json;
-extern crate rgb;
+extern crate toml;
 extern crate hashbrown;
+extern crate parking_lot;
+
+extern crate image;
+extern crate rgb;
 extern crate swsurface;
+extern crate euc;
+extern crate vek;
 
 //#[macro_use] extern crate vulkano;
 //#[macro_use] extern crate vulkano_shader_derive;
@@ -28,7 +34,7 @@ mod util;
 mod world;
 mod network;
 mod entity;
-mod software_raycaster;
+mod client;
 
 extern crate clap;
 use clap::{Arg, App};
@@ -46,9 +52,8 @@ use winit::{
 };
 use winit::dpi::LogicalSize;
 use winit::platform::desktop::EventLoopExtDesktop;
-use software_raycaster::*;
 
-use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Deg, Rad, ApproxEq, BaseFloat, BaseNum};
+use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Deg, Rad, BaseFloat, BaseNum};
 use std::ops::Neg;
 use self::string_cache::DefaultAtom as Atom;
 use rgb::*;
@@ -98,7 +103,7 @@ fn main() {
         // Set up our display properties.
         let window_width : u32 = 800;
         let window_height : u32 = 600;
-        let fov : cgmath::Rad<f64> = cgmath::Rad::from(cgmath::Deg(90.0 as f64));
+        let fov : cgmath::Rad<f64> = cgmath::Rad::from(cgmath::Deg(100.0 as f64));
 
         //Open a Winit window.
         let mut event_loop = EventLoop::new();
@@ -110,9 +115,9 @@ fn main() {
             .unwrap();
         let event_loop_proxy = event_loop.create_proxy();
         let sw_context = swsurface::ContextBuilder::new(&event_loop)
-            .with_ready_cb(move |_| {
-                let _ = event_loop_proxy.send_event(());
-            })
+            //.with_ready_cb(move |_| {
+            //    let _ = event_loop_proxy.send_event(());
+            //})
             .build();
         let sw_window = SwWindow::new(window, &sw_context, &Default::default());
         let format = [Format::Argb8888]
@@ -139,21 +144,18 @@ fn main() {
 
         let up = forward.cross( right ).neg();
 
-        // Create our raycaster. 
-        let mut renderer = SoftwareRenderer::new(window_width, window_height, fov);
-
         // Create a test / example world. 
 
         // Describe some tiles. 
         let air_id = TILE_REGISTRY.lock().register_tile(&Atom::from("air"));
-        TILE_TO_ART.write().insert(air_id, TileArt{color: RGB{r:255,g:255,b:255}, air:true });
+        //TILE_TO_ART.write().insert(air_id, TileArt{color: RGB{r:255,g:255,b:255}, air:true });
         let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
-        TILE_TO_ART.write().insert(stone_id, TileArt{color: RGB{r:134,g:139,b:142}, air:false });
+        //TILE_TO_ART.write().insert(stone_id, TileArt{color: RGB{r:134,g:139,b:142}, air:false });
         let lava_id = TILE_REGISTRY.lock().register_tile(&Atom::from("lava"));
-        TILE_TO_ART.write().insert(lava_id, TileArt{color: RGB{r:255,g:140,b:44}, air:false });
+        //TILE_TO_ART.write().insert(lava_id, TileArt{color: RGB{r:255,g:140,b:44}, air:false });
 
         // Scale 6: a 64 meter x 64 meter x 64 meter chunk
-        let mut world : NaiveVoxelOctree<TileID, SimpleLOD> = 
+        let mut world : NaiveVoxelOctree<TileID, ()> = 
             NaiveVoxelOctree{scale : 4 , root: NaiveOctreeNode::new_leaf(stone_id)};
         world.set(opos!((1,0,1) @ 3), air_id).unwrap();
         world.set(opos!((0,0,1) @ 3), air_id).unwrap();
@@ -171,7 +173,8 @@ fn main() {
         let game_start = Instant::now();
         // Here goes a mainloop.
         event_loop.run_return(move |event, window, control_flow| {
-            //*control_flow = ControlFlow::Wait; 
+            let mut quit_game : bool = false;
+            //*control_flow = ControlFlow::Poll; 
             match event {
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
@@ -187,18 +190,19 @@ fn main() {
                     } => {
                         use winit::event::VirtualKeyCode::*;
                         match key {
-                            Escape => *control_flow = ControlFlow::Exit,
-                            _ => *control_flow = ControlFlow::Wait,
+                            Escape => quit_game = true,
+                            _ => *control_flow = ControlFlow::Poll,
                         }
                     },
-                    _ => *control_flow = ControlFlow::Wait,
+                    _ => *control_flow = ControlFlow::Poll,
                 },
-                _ => *control_flow = ControlFlow::Wait,
+                _ => *control_flow = ControlFlow::Poll,
             }
             if game_start.elapsed().as_secs_f32() > 6.0 {
-                *control_flow = ControlFlow::Exit;
+                quit_game = true;
             }
             if *control_flow != ControlFlow::Exit {
+                /*
                 if let Some(image_index) = sw_window.poll_next_image() {
                     let frame_begin = Instant::now();
                     info!("Starting a frame raycast draw...");
@@ -210,12 +214,19 @@ fn main() {
                         _ => info!("Drew a frame in {} milliseconds.", frame_begin.elapsed().as_millis()),
                     }
                     sw_window.present_image(image_index);
-                };
+                };*/
             }
+            if quit_game {
+                *control_flow = ControlFlow::Exit;
+            }
+            if *control_flow == ControlFlow::Exit { 
+                panic!();
+            }
+            /*
             else {
                 //If we don't do THIS then the loop is fully immortal.
                 panic!();
-            }
+            }*/
         });
     }
 }

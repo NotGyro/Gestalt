@@ -47,7 +47,8 @@ impl <T> fmt::Display for OctPos<T> where T : VoxelCoord + fmt::Display {
 }
 
 // The scale argument here taken is "distance" of scale. 
-// I.e. converting from 2 to 8 gives you a delta_scale of +6. 
+// I.e. converting from 2 to 8 gives you a delta_scale of +6.
+#[inline]
 pub fn scale_coord<T>(x: T, delta_scale: Scale) -> T 
         where T : VoxelCoord {
     if delta_scale == 0 {
@@ -63,6 +64,7 @@ pub fn scale_coord<T>(x: T, delta_scale: Scale) -> T
 }
 
 impl<T> OctPos <T> where T : VoxelCoord {
+    #[inline(always)]
     pub fn scale_to(&self, scl: Scale) -> Self {
         let delta_scale = scl - self.scale;
         OctPos {
@@ -73,12 +75,14 @@ impl<T> OctPos <T> where T : VoxelCoord {
                             },
         }
     }
+    #[inline(always)]
     pub fn scale_into(&mut self, scl: Scale) {
         let delta_scale = scl - self.scale;
         self.pos.x = scale_coord(self.pos.x, delta_scale);
         self.pos.y = scale_coord(self.pos.y, delta_scale);
         self.pos.z = scale_coord(self.pos.z, delta_scale);
     }
+    #[inline(always)]
     pub fn from_four(x : T, y : T, z : T, scl : Scale) -> OctPos <T> {
         OctPos {
             scale: scl,
@@ -97,6 +101,7 @@ macro_rules! opos {
 /// Does your OctPos pos at its given scale fit in a root node of scale scl?
 /// It is assumed this is normalized so the root node's origin is at 0,0,0
 /// and pos is describing an offset from this origin.
+#[inline(always)]
 pub fn pos_within_node<T>(pos: OctPos<T>, root_scl : Scale) -> bool where T: VoxelCoord {
     //Check low edge
     if (pos.pos.x < T::zero()) || (pos.pos.y < T::zero()) || (pos.pos.z < T::zero()) {

@@ -16,7 +16,6 @@ use voxel::voxelstorage::Voxel;
 pub enum SubdivError {
     OutOfBounds,
     OutOfScale,
-    CannotDigUp,
     DetailNotPresent,
     SplittingBranch,
     ReqLeafGotBranch,
@@ -32,8 +31,6 @@ impl Display for SubdivError {
             SubdivError::OutOfBounds => write!(f, "Attempted to access a voxel from a storage, outside of that voxel storage's bounds."),
             SubdivError::OutOfScale => 
                 write!(f, "Attempted to access a voxel an invalid scale"),
-            SubdivError::CannotDigUp => 
-                write!(f, "Attempted count down from a lower scale to higher scaleinternally"),
             SubdivError::DetailNotPresent => 
                 write!(f, "Attempted to access a voxel at a level of detail doesn't exist at the provided position."),
             SubdivError::SplittingBranch => write!(f, "Attempted to split a leaf into a branch with child leaves, but this voxel is already a branch."),
@@ -323,62 +320,6 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
             //We are a leaf node, no LOD to rebuild.
         //}
     }
-    #[inline]
-    pub fn get_details<P : VoxelCoord>(&self, coord: OctPos<P>, current_scale: Scale) -> Result<(SubNode<L, D>, Scale), SubdivError> {
-        if current_scale < coord.scale {
-            //Must drill DOWN to target, not up. 
-            return Err(SubdivError::CannotDigUp);
-        } 
-        else {
-            //Have we hit our target?
-            if current_scale == coord.scale {
-                match self { 
-                    SubNode::Leaf(leaf_dat) => return Ok( (SubNode::Leaf(leaf_dat.clone()), current_scale)  ),
-                    SubNode::Branch(branch_dat) => return Ok( (SubNode::Branch(branch_dat.lod_data.clone()), current_scale) ),
-                }
-            }
-            else {
-                // We have not yet gotten to target.
-                match self { 
-                    //Target is below our scale but we are a leaf. That space partition is part of this one.
-                    SubNode::Leaf(leaf_dat) => return Ok(  (SubNode::Leaf(leaf_dat.clone()), current_scale)  ),
-                    SubNode::Branch(branch_dat) => {
-                        //Not found and this is a branch. Time for recursion.
-                        //Our child nodes are implicitly at our scale -1.
-                        return branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)].get_details(coord, current_scale-1);
-                    }
-                }
-            }
-        }
-    }
-    pub fn set<P:VoxelCoord>(&mut self, coord: OctPos<P>, value: L, current_scale : Scale) -> Result<(), SubdivError> { 
-        if current_scale < coord.scale {
-            //Must drill DOWN to target, not up. 
-            return Err(SubdivError::CannotDigUp);
-        }
-        else {
-            //Have we hit our target?
-            if current_scale == coord.scale {
-                *self = SubNode::Leaf(value);
-                return Ok(());
-            }
-            else {
-                // We have not yet gotten to target.
-                if let SubNode::Leaf(_leaf_dat) = self {
-                    //Target is below our scale. We will need to create a child node, and recurse on it.
-                    self.split_into_branch();
-                }
-                match self { 
-                    SubNode::Branch(branch_dat) => {
-                        //Not found and this is a branch. Time for recursion.
-                        //Our child nodes are implicitly at our scale -1.
-                        return branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)].set(coord, value, current_scale-1);
-                    }
-                    _ => unreachable!(), // We just split this into a branch if it's a leaf.
-                }
-            }
-        }
-    }
 }
 
 impl<L, D, P> SubOctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
@@ -392,7 +333,33 @@ impl<L, D, P> SubOctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel
             //Selected node cannot possibly exist in our octree.
             return Err( SubdivError::OutOfBounds);
         }
-        self.root.get_details(coord, self.scale)
+        unsafe {
+            let mut current_node = &self.root as *const NaiveOctreeNode<L,D>;
+            let mut current_scale = self.scale;
+            while current_scale >= coord.scale {
+                //Have we hit our target?
+                if current_scale == coord.scale {
+                    match &*current_node { 
+                        SubNode::Leaf(leaf_dat) => return Ok( (SubNode::Leaf(leaf_dat.clone()), current_scale)  ),
+                        SubNode::Branch(branch_dat) => return Ok( (SubNode::Branch(branch_dat.lod_data.clone()), current_scale) ),
+                    }
+                }
+                else {
+                    // We have not yet gotten to target.
+                    match &*current_node { 
+                        //Target is below our scale but we are a leaf. That space partition is part of this one.
+                        SubNode::Leaf(leaf_dat) => return Ok(  (SubNode::Leaf(leaf_dat.clone()), current_scale)  ),
+                        SubNode::Branch(branch_dat) => {
+                            //Not found and this is a branch. Time for recursion.
+                            //Our child nodes are implicitly at our scale -1.
+                            current_node = &branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)] as *const NaiveOctreeNode<L,D>;
+                        }
+                    }
+                }
+                current_scale -= 1;
+            }
+            Err(SubdivError::DetailNotPresent)
+        }
     }
 }
 
@@ -407,6 +374,7 @@ impl<L, D, P> SubVoxelSource<SubNode<L, D>, P> for NaiveVoxelOctree<L, D> where 
 }
 
 impl<L, D, P> SubVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
+    
     fn set(&mut self, coord: OctPos<P>, value: L) -> Result<(), SubdivError> {
         if coord.scale > self.scale {
             //Trying to set a voxel larger than our root node.
@@ -415,7 +383,34 @@ impl<L, D, P> SubVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: 
             //Selected node cannot possibly exist in our octree.
             return Err( SubdivError::OutOfBounds);
         }
-        self.root.set(coord, value, self.scale)
+        unsafe { 
+            let mut current_node = &mut self.root as *mut NaiveOctreeNode<L,D>;
+            let mut current_scale = self.scale;
+            while current_scale >= coord.scale {
+                        //Have we hit our target?
+                if current_scale == coord.scale {
+                    *current_node = SubNode::Leaf(value);
+                    return Ok(());
+                }
+                else {
+                    // We have not yet gotten to target.
+                    if let SubNode::Leaf(_) = &mut *current_node {
+                        //Target is below our scale. We will need to create a child node, and recurse on it.
+                        (*current_node).split_into_branch();
+                    }
+                    match *current_node { 
+                        SubNode::Branch(ref mut branch_dat) => {
+                            //Not found and this is a branch. Time for recursion.
+                            //Our child nodes are implicitly at our scale -1.
+                            current_node = &mut branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)] as *mut NaiveOctreeNode<L,D>;
+                        }
+                        _ => unreachable!(), // We just split this into a branch if it's a leaf.
+                    }
+                }
+                current_scale -= 1;
+            }
+        }
+        Err(SubdivError::DetailNotPresent)
     }
 }
 
