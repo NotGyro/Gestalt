@@ -1,10 +1,6 @@
-extern crate std;
-extern crate num;
-//extern crate serde;
-
 use std::iter::{Iterator, IntoIterator};
 
-use self::num::{Integer, Signed, Unsigned};
+use num::{Integer, Signed, Unsigned};
  
 use std::marker::Copy;
 use std::fmt;
@@ -254,14 +250,17 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
     }
     /// Construct a voxel range from origin + size.
     #[inline]
+    #[allow(dead_code)]
     pub fn new_origin_size(origin : VoxelPos<T>, size : VoxelSize<T>) -> Self {
         let mut range = VoxelRange{lower: origin, upper: origin+size};
         range.validate();
         range
     }
     /// Shift / move our position by offset
+    #[allow(dead_code)]
     pub fn get_shifted(&self, offset : VoxelPos<T>) -> VoxelRange<T> { VoxelRange{ lower: self.lower + offset, upper: self.upper + offset } }
     /// Shift / move our position by offset
+    #[allow(dead_code)]
     pub fn shift(&mut self, offset: VoxelPos<T>) {
         let shifted = self.get_shifted(offset);
         self.lower = shifted.lower;
@@ -273,6 +272,7 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
     }
     /// Get an iterator which will visit every voxel laying along the selected side of your cuboid.
     /// For example, VoxelAxis::NegaZ will visit all of the voxels in this range where z = self.lower.z
+    #[allow(dead_code)]
     pub fn get_side_iterator(&self, side : VoxelAxis) -> VoxelSideIter<T> {
         match side {
             VoxelAxis::PosiX => { 
@@ -329,6 +329,7 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
     /// Take a position in "world" space and return an offset from self.lower, telling you how far the point is from our origin.
     /// Returns None if this is not a local point.
     #[inline]
+    #[allow(dead_code)]
     pub fn get_local(&self, point : VoxelPos<T>) -> Option<VoxelPos<T>> {
         if ! self.contains(point) { return None; }
         let validated_lower = self.get_validated_lower();
@@ -349,6 +350,7 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
 
     /// Returns the size_x, size_y, and size_z of this range.
     #[inline]
+    #[allow(dead_code)]
     pub fn get_size(&self) -> VoxelSize<T> {
         let new_upper = vpos!(cmp::max(self.upper.x, self.lower.x), cmp::max(self.upper.y, self.lower.y), cmp::max(self.upper.z, self.lower.z));
         let new_lower = vpos!(cmp::min(self.upper.x, self.lower.x), cmp::min(self.upper.y, self.lower.y), cmp::min(self.upper.z, self.lower.z));
@@ -358,7 +360,8 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
 
     /// Does the voxel you gave lie along the selected side of this rectangle?
     #[inline]
-    pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelAxis) -> bool { 
+    #[allow(dead_code)]
+    pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelAxis) -> bool {
         let mut edge = self.get_bound(side);
         //Don't trip over off-by-one errors - the positive bounds are one past the valid coordinates. 
         if side.get_sign() == VoxelAxisSign::POSI {
@@ -547,6 +550,7 @@ impl From<VoxelAxis> for VoxelAxisUnsigned {
 
 /// Represents the sign of a VoxelAxis.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum VoxelAxisSign {
     POSI,
     NEGA,
@@ -557,7 +561,8 @@ pub enum VoxelAxisSign {
 pub struct VoxelAxisIter {
     axis : Option<VoxelAxis>,
 }
-impl VoxelAxisIter { 
+impl VoxelAxisIter {
+    #[allow(dead_code)]
     pub fn new() -> Self { VoxelAxisIter { axis: None } }
 }
 impl Iterator for VoxelAxisIter { 
@@ -605,6 +610,7 @@ macro_rules! nega_z_index {
     () => { 5 }
 }
 
+#[allow(unused_macros)]
 macro_rules! voxel_sides_unroll {
     ($side:ident, $b:block)=> { 
         {
@@ -633,6 +639,8 @@ macro_rules! voxel_sides_unroll {
         }
     };
 }
+
+#[allow(unused_macros)]
 macro_rules! voxel_side_indicies_unroll {
     ($idx:ident, $b:block)=> { 
         {
@@ -661,6 +669,8 @@ macro_rules! voxel_side_indicies_unroll {
         }
     };
 }
+
+#[allow(unused_macros)]
 macro_rules! enumerated_voxel_side_unroll {
     ($idx:ident, $side:ident, $b:block)=> { 
         {
@@ -698,7 +708,9 @@ macro_rules! enumerated_voxel_side_unroll {
 
 impl VoxelAxis {
     /// Gives you an iterator over each of the 6 cardinal directions in voxel space.
+    #[allow(dead_code)]
     pub fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
+
     #[inline]
     pub fn opposite(&self) -> Self {
         match *self {
@@ -710,7 +722,9 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => return VoxelAxis::PosiZ,
         }
     }
-    pub fn get_sign(&self) -> VoxelAxisSign { 
+
+    #[allow(dead_code)]
+    pub fn get_sign(&self) -> VoxelAxisSign {
         match *self {
             VoxelAxis::PosiX => return VoxelAxisSign::POSI,
             VoxelAxis::NegaX => return VoxelAxisSign::NEGA,
@@ -720,7 +734,10 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => return VoxelAxisSign::NEGA,
         }
     }
+    #[allow(dead_code)]
     pub fn split(&self) -> (VoxelAxisSign, VoxelAxisUnsigned) { (self.get_sign(), self.clone().into())}
+
+    #[allow(dead_code)]
     pub fn from_parts(sign : VoxelAxisSign, axis : VoxelAxisUnsigned) -> Self {
         match axis {
             VoxelAxisUnsigned::X => { 
@@ -743,7 +760,9 @@ impl VoxelAxis {
             },
         }
     }
+
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn to_id(&self) -> usize {
         match self {
             VoxelAxis::PosiX => 0,
@@ -754,7 +773,9 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => 5,
         }
     }
+
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn from_id(val : usize) -> Self { 
         match val { 
             0 => VoxelAxis::PosiX,
@@ -768,6 +789,7 @@ impl VoxelAxis {
     }
     
     /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-X direction?
+    #[allow(dead_code)]
     pub fn get_2d_x(&self) -> VoxelAxis {
         match self { 
             VoxelAxis::PosiX => VoxelAxis::PosiZ,
@@ -778,7 +800,9 @@ impl VoxelAxis {
             VoxelAxis::NegaZ => VoxelAxis::PosiX,
         }
     }
+
     /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-Y direction?
+    #[allow(dead_code)]
     pub fn get_2d_y(&self) -> VoxelAxis {
         match self { 
             VoxelAxis::PosiX => VoxelAxis::PosiY,
@@ -829,6 +853,7 @@ impl <T> VoxelPos<T> where T : VoxelCoord {
     }
     /// Sets this cell to be the cell adjacent to this one in the direction passed
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn go_neighbor(&mut self, direction : VoxelAxis) {
         match direction {
             VoxelAxis::PosiX => self.x = self.x + T::one(),
@@ -864,6 +889,7 @@ impl Error for UnsignedUnderflowError {
 impl <T> VoxelPos<T> where T : VoxelCoord + Unsigned {
     /// Returns the cell adjacent to this one in the direction passed
     #[inline]
+    #[allow(dead_code)]
     pub fn get_neighbor_unsigned(&self, direction : VoxelAxis) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
         match direction {
             VoxelAxis::PosiX => return Ok(VoxelPos{x : self.x + T::one(), y : self.y, z : self.z }),
@@ -906,24 +932,28 @@ Many thanks to John Amanatides and Andrew Woo for this algorithm, described in "
 */
 impl VoxelRaycast {
     #[inline]
+    #[allow(dead_code)]
     fn step_x(&mut self) {
         self.pos.x = self.pos.x + self.step_dir.x;
         self.t_max.x= self.t_max.x + self.t_delta.x;
         self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
     }
     #[inline]
+    #[allow(dead_code)]
     fn step_y(&mut self) {
         self.pos.y = self.pos.y + self.step_dir.y;
         self.t_max.y = self.t_max.y + self.t_delta.y;
         self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
     }
     #[inline]
+    #[allow(dead_code)]
     fn step_z(&mut self) {
         self.pos.z = self.pos.z + self.step_dir.z;
         self.t_max.z= self.t_max.z + self.t_delta.z;
         self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.  
     }
     #[inline]
+    #[allow(dead_code)]
     pub fn step(&mut self) {
         if (self.t_max.x < self.t_max.y) && (self.t_max.x < self.t_max.z) {
             self.step_x();
@@ -939,6 +969,7 @@ impl VoxelRaycast {
         }
     }
     #[inline]
+    #[allow(dead_code)]
     pub fn get_last_direction(&self) -> VoxelAxis {
         match self.last_direction {
             VoxelAxisUnsigned::X => {
@@ -967,6 +998,7 @@ impl VoxelRaycast {
             },
         }
     }
+    #[allow(dead_code)]
     pub fn new(origin : Point3<f64>, direction : Vector3<f64>) -> VoxelRaycast {
         //Voxel is assumed to be 1x1x1 in this situation.
         //Set up our step sign variable.

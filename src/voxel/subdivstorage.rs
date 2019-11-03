@@ -5,7 +5,6 @@ use voxel::voxelmath::*;
 use voxel::subdivmath::*;
 use std::fmt::{Display, Debug};
 use std::fmt;
-use voxel::voxelevent::{VoxelEvent, VoxelEventInner};
 use std::error;
 use std::error::Error;
 use std::result::Result;
@@ -13,6 +12,7 @@ use voxel::voxelstorage::Voxel;
 
 /// An error reported upon trying to get or set a voxel outside of our range.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum SubdivError {
     OutOfBounds,
     OutOfScale,
@@ -56,12 +56,14 @@ pub enum SubNode<L: Voxel, B: Voxel> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum SubNodeKind {
     Leaf,
     Branch,
 }
 
-impl<L: Voxel, B: Voxel> SubNode<L,B> { 
+impl<L: Voxel, B: Voxel> SubNode<L,B> {
+    #[allow(dead_code)]
     pub fn kind(&self) -> SubNodeKind {
         match self { 
             SubNode::Leaf(_) => SubNodeKind::Leaf,
@@ -71,6 +73,7 @@ impl<L: Voxel, B: Voxel> SubNode<L,B> {
     pub fn new_leaf(val: L) -> SubNode<L, B> { SubNode::Leaf(val) }
 }
 
+#[allow(dead_code)]
 pub type NodeNoLOD<T> = SubNode<(), T>;
 
 impl <L, B> Default for SubNode<L, B> where L : Voxel, B : Voxel {
@@ -78,6 +81,7 @@ impl <L, B> Default for SubNode<L, B> where L : Voxel, B : Voxel {
     fn default() -> Self { SubNode::Leaf(L::default()) }
 }
 
+#[allow(dead_code)]
 pub enum NodeChildIndex { 
     ZeroXZeroYZeroZ, 
     ZeroXZeroYOneZ, 
@@ -90,7 +94,8 @@ pub enum NodeChildIndex {
 }
 
 // Bitwise encoding, last three bits of a u8. It goes x, y, then z. (z changes first) Each is 0 if closer to origin, 1 if further.
-impl NodeChildIndex { 
+impl NodeChildIndex {
+    #[allow(dead_code)]
     fn num_representation(&self) -> usize {
         match self { 
             NodeChildIndex::ZeroXZeroYZeroZ => 0, 
@@ -103,6 +108,7 @@ impl NodeChildIndex {
             NodeChildIndex::OneXOneYOneZ => 7,
         }
     }
+    #[allow(dead_code)]
     fn from_num_representation(val : usize) -> Self {
         match val {
             0 => NodeChildIndex::ZeroXZeroYZeroZ,
@@ -189,8 +195,8 @@ pub trait LODData<T: Voxel> : Voxel {
 }
 
 impl<T> LODData<T> for () where T: Voxel { 
-    fn represent(voxel: &T) -> Self { () }
-    fn downsample_from(&mut self, child_values: &[Self; 8]) {}
+    fn represent(_voxel: &T) -> Self { () }
+    fn downsample_from(&mut self, _child_values: &[Self; 8]) {}
 }
 
 /// A basic trait for any 3d grid data structure with level-of-detail / grid data.
@@ -263,6 +269,7 @@ pub struct NaiveOctreeBranch<L: Voxel, D: Voxel + LODData<L>> {
 }
 
 impl<L, D> NaiveOctreeBranch<L, D> where L: Voxel, D: Voxel + LODData<L> {
+    #[allow(dead_code)]
     fn rebuild_lod(&mut self) {
         let mut lod_info : [D; 8] = [D::default(),
                                     D::default(),
@@ -312,6 +319,7 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
         //else {
         //}
     }
+    #[allow(dead_code)]
     pub fn rebuild_lod(&mut self) {
         if let SubNode::Branch(ref mut branch_self) = self {
             branch_self.rebuild_lod();

@@ -13,6 +13,7 @@ use std::result::Result;
 pub trait Voxel : Clone + Debug + Default + Eq {}
 impl<T> Voxel for T where T : Clone + Debug + Default + Eq {}
 
+#[allow(dead_code)]
 pub enum VoxelErrorKind {
     OutOfBounds,
     NotYetLoaded,
@@ -22,6 +23,7 @@ pub enum VoxelErrorKind {
 }
 /// An error reported upon trying to get or set a voxel outside of our range. 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum VoxelError {
     OutOfBounds(String, String),
     NotYetLoaded(String),
@@ -30,7 +32,8 @@ pub enum VoxelError {
     Other(Box<dyn error::Error + 'static>),
 }
 
-impl VoxelError { 
+impl VoxelError {
+    #[allow(dead_code)]
     fn kind(&self) -> VoxelErrorKind {
         match self { 
             VoxelError::OutOfBounds(_,_) => VoxelErrorKind::OutOfBounds,
@@ -82,6 +85,7 @@ pub struct VoxelNeighborhoodFull<T: Voxel> {
 }
 impl<T> VoxelNeighborhoodFull<T> where T : Voxel{
     #[inline]
+    #[allow(dead_code)]
     pub fn get_neighbor(&self, index: VoxelAxis) -> T {
         match index {
             VoxelAxis::PosiX => self.posi_x.clone(),
@@ -93,6 +97,7 @@ impl<T> VoxelNeighborhoodFull<T> where T : Voxel{
         }
     }
     #[inline]
+    #[allow(dead_code)]
     pub fn set_neighbor(&mut self, index: VoxelAxis, value: T) {
         match index {
             VoxelAxis::PosiX => self.posi_x = value,
@@ -118,6 +123,7 @@ pub struct VoxelNeighborhood<T: Voxel> {
 
 impl<T> VoxelNeighborhood<T> where T : Voxel{
     #[inline]
+    #[allow(dead_code)]
     pub fn get_neighbor(&self, index: VoxelAxis) -> Option<T> {
         match index {
             VoxelAxis::PosiX => self.posi_x.clone(),
@@ -129,6 +135,7 @@ impl<T> VoxelNeighborhood<T> where T : Voxel{
         }
     }
     #[inline]
+    #[allow(dead_code)]
     pub fn set_neighbor(&mut self, index: VoxelAxis, value: Option<T>) {
         match index {
             VoxelAxis::PosiX => self.posi_x = value,
@@ -141,6 +148,7 @@ impl<T> VoxelNeighborhood<T> where T : Voxel{
     }
     ///Count how many cells are filled in this neighborhood.
     #[inline]
+    #[allow(dead_code)]
     pub fn count(&self) -> usize { 
         let mut num = 1; //Start with 1 because center has to be a valid voxel.
         if self.posi_x.is_some() {num += 1};
@@ -218,6 +226,7 @@ pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
     fn get_neighborhood(&self, coord: VoxelPos<P>) -> Result<VoxelNeighborhood<T>, VoxelError> {
         // Get an Ok(None) if our position is out of bounds, Ok(Some(T)) if we have a voxel, Err(error) if we have a non-bounds / non-loading error.
         #[inline(always)]
+        #[allow(dead_code)]
         fn filter_error<V>(r: Result<V, VoxelError>) -> Result<Option<V>, VoxelError> {
             match r { 
                 Ok(vxl) => Ok(Some(vxl)),
@@ -246,8 +255,9 @@ pub trait VoxelStorageBounded<T: Voxel, P: VoxelCoord> : VoxelStorage<T, P> {
     fn get_bounds(&self) -> VoxelRange<P>;
 }
 
-/// Copy voxels from one storage to another. 
-pub fn voxel_blit<T: Voxel, P: VoxelCoord>(source_range : VoxelRange<P>, source: &dyn VoxelStorage<T, P>, 
+/// Copy voxels from one storage to another.
+#[allow(dead_code)]
+pub fn voxel_blit<T: Voxel, P: VoxelCoord>(source_range : VoxelRange<P>, source: &dyn VoxelStorage<T, P>,
                                                 dest_origin: VoxelPos<P>, dest: &mut dyn VoxelStorage<T,P>)  -> Result<(), VoxelError> {
     for pos in source_range {
         let voxel = source.get(pos)?;

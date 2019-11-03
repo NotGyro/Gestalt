@@ -19,16 +19,19 @@ pub fn xyz_to_i<P: 'static + VoxelCoord + USizeAble>(x : P, y : P, z : P, size_x
 }
 
 impl <T:Voxel, P: 'static + VoxelCoord + USizeAble> VoxelArray<T, P> {
+    #[allow(dead_code)]
     pub fn load_new(szx: P, szy: P, szz: P, dat: Vec<T>) -> VoxelArray<T, P> {
         VoxelArray{size_x: szx, size_y: szy, size_z: szz, data: dat}
     }
 
     /// Make a new VoxelArray wherein every value is set to val
+    #[allow(dead_code)]
     pub fn new_solid(szx: P, szy: P, szz: P, val:T) -> VoxelArray<T, P> {
         VoxelArray{size_x: szx, size_y: szy, size_z: szz, data: vec![ val; (szx*szy*szz).as_usize()] }
     }
 
     /// Replaces the data inside a chunk all at once. This drops the old self.data.
+    #[allow(dead_code)]
     pub fn replace_data(&mut self, data: Vec<T>) {
         // TODO: Better error handling here 
         // Make sure these are the same size and not going to invalidate our size fields.
@@ -39,6 +42,7 @@ impl <T:Voxel, P: 'static + VoxelCoord + USizeAble> VoxelArray<T, P> {
 
 impl <T:Voxel + Default, P: 'static + VoxelCoord + USizeAble> VoxelArray<T, P> {
     /// Make a new VoxelArray wherein every value is set to T::Default
+    #[allow(dead_code)]
     pub fn new_empty(szx: P, szy: P, szz: P) -> VoxelArray<T, P> { VoxelArray::new_solid(szx, szy, szz,T::default()) }
 }
 
