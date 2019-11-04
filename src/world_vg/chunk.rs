@@ -71,7 +71,7 @@ impl Chunk {
     pub fn generate_mesh(&mut self, device: Arc<Device>, memory_pool: AutoMemoryPool) {
         let quad_lists = MeshSimplifier::generate_mesh(self);
 
-        // get all unique ids and seperate
+        // get all unique ids and separate
         let mut unique_ids = HashSet::new();
         for (_, _, list) in quad_lists.iter() {
             for quad in list.iter() {

@@ -90,7 +90,8 @@ unsafe impl MemoryPool for AutoMemoryPool {
             // existing pool and allocator
             Entry::Occupied(mut entry) => {
                 let pool_allocator = entry.get_mut();
-                Ok(pool_allocator.alloc(size, alignment, &self.0))
+                let res = pool_allocator.alloc(size, alignment, &self.0);
+                Ok(res)
             },
             // create new pool and allocator
             Entry::Vacant(entry) => {

@@ -1,10 +1,7 @@
-extern crate string_cache;
-extern crate parking_lot;
-
-use self::string_cache::DefaultAtom as Atom;
+use string_cache::DefaultAtom as Atom;
 use std::collections::HashMap;
 
-use self::parking_lot::Mutex;
+use parking_lot::Mutex;
 use voxel::voxelarray::VoxelArray;
 
 pub type TileID = u64;
