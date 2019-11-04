@@ -53,7 +53,7 @@ pub fn scale_coord<T>(x: T, delta_scale: Scale) -> T
         return x.div_floor( &(T::one() + T::one() /* 2 */ ).pow(delta_scale as u32));
     }
     else /* Implied delta_scale < 0 */ {
-        return x.mul((T::one() + T::one() /* 2 */ ).pow(delta_scale.abs() as u32) );
+        return x.mul( (T::one() + T::one() /* 2 */ ).pow(delta_scale.abs() as u32) );
     }
 }
 

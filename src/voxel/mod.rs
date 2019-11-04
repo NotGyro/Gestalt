@@ -1,6 +1,7 @@
 #[macro_use] pub mod voxelmath;
+#[macro_use] pub mod subdivmath;
 pub mod voxelstorage;
 pub mod voxelarray;
 pub mod voxelevent;
-#[macro_use] pub mod subdivmath;
 pub mod subdivstorage;
+pub mod subdivspace;
