@@ -85,12 +85,14 @@ impl <T> EventBus<T> for SimpleEventBus<T> where T : Event {
 }
 
 impl <T> SimpleEventBus<T> where T : Event {
+    #[allow(dead_code)]
     pub fn new() -> SimpleEventBus<T> { 
         let (s_in, r_in) = unbounded();
         SimpleEventBus { our_receiver : r_in, sender_template : s_in, consumers : LinearMap::new(), consumer_count : 0 }
     }
     /// Take received events in, multicast to consumers.
     /// Never used when it;s an inner type in EventJournalBus
+    #[allow(dead_code)]
     pub fn process(&mut self) { 
         for ev in self.our_receiver.try_iter() {
             for (_, consumer) in self.consumers.iter_mut() { 
@@ -108,12 +110,14 @@ impl <T> SimpleEventBus<T> where T : Event {
 /// number, since the revision number here is just an index into the event
 /// vector. TODO: Paging.
 /// revision_offset isn't really used much yet, it's basically a stub
-/// of to-be-implemented paging functionality. 
+/// of to-be-implemented paging functionality.
+#[allow(dead_code)]
 pub struct EventJournal<T> where T : Event { 
     pub events : Vec<T>,
     revision_offset : RevisionNumber,
 }
 
+#[allow(dead_code)]
 impl <T> EventJournal<T> where T : Event { 
     /// Constructs a new EventJournal containing events of type T.
     pub fn new() -> EventJournal<T> {
@@ -141,6 +145,8 @@ impl <T> EventBus<T> for EventJournalBus<T> where T : Event {
     /// Pushes an event directly onto this Event Bus if you're the one who owns it.
     fn push(&mut self, ev : T) -> Result<(), Box<dyn Error>> { self.bus.push(ev)?; Ok(()) }
 }
+
+#[allow(dead_code)]
 impl <T> EventJournalBus<T> where T : Event { 
     fn new() -> EventJournalBus<T> { 
         EventJournalBus{ journal : EventJournal::new(), bus : SimpleEventBus::new() }

@@ -3,7 +3,6 @@ extern crate std;
 extern crate num;
 extern crate serde;
 
-use std::error::Error;
 use std::fmt::Debug;
 use std::result::Result;
 use serde::{Serialize, Deserialize};
@@ -13,6 +12,7 @@ use voxel::voxelstorage::{VoxelStorage, Voxel, VoxelError};
 #[cfg(test)]
 use voxel::voxelarray::VoxelArray;
 
+#[allow(dead_code)]
 pub type EventTypeID = u8;
 
 pub trait VoxelEventBounds : Clone + Debug + Default {}
@@ -115,10 +115,10 @@ impl <T, P> VoxelEvent<T, P> for SetVoxelRange<T, P> where T : Clone + Debug + S
 // ----------------------- Tests -----------------------
 
 // Used for tests
-const CHUNK_X_LENGTH : u32 = 16;
-const CHUNK_Y_LENGTH : u32 = 16;
-const CHUNK_Z_LENGTH : u32 = 16;
-const OURSIZE : usize = (CHUNK_X_LENGTH * CHUNK_Y_LENGTH * CHUNK_Z_LENGTH) as usize;
+#[allow(dead_code)] const CHUNK_X_LENGTH : u32 = 16;
+#[allow(dead_code)] const CHUNK_Y_LENGTH : u32 = 16;
+#[allow(dead_code)] const CHUNK_Z_LENGTH : u32 = 16;
+#[allow(dead_code)] const OURSIZE : usize = (CHUNK_X_LENGTH * CHUNK_Y_LENGTH * CHUNK_Z_LENGTH) as usize;
 
 #[test]
 fn test_apply_voxel_event() { 

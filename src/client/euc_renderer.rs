@@ -10,37 +10,28 @@ extern crate lazy_static;
 use voxel::voxelmath::*;
 use voxel::subdivstorage::*;
 use voxel::subdivmath::*;
-use util::ConfigString;
+use util::config::ConfigString;
 use super::render_traits::*;
 use world::tile::TileID;
-use world::CHUNK_SCALE;
 
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
 use hashbrown::HashMap;
 use std::boxed::Box;
 use std::result::Result;
 use std::error::Error;
-use std::fs::File;
 use std::path::Path;
 
 use std::sync::Arc;
 use parking_lot::RwLock;
 
-use euc::{
-    Pipeline,
-    rasterizer,
-    buffer::Buffer2d,
-    Target,
-};
-use vek::{Mat4, Vec2, Vec3, Vec4};
+use vek::{Mat4, Vec3};
 use image::RgbaImage;
-use rgb::*;
 
 
 // -------------------------------- Tile Art  --------------------------------
 
-pub type RenderPassID = u8;
-pub type Pixel = rgb::RGBA8;
+#[allow(dead_code)] pub type RenderPassID = u8;
+#[allow(dead_code)] pub type Pixel = rgb::RGBA8;
 
 /* macro_rules! top_axis {
     () => { VoxelAxis::PosiY }
@@ -62,7 +53,7 @@ macro_rules! left_axis {
 }*/
 
 macro_rules! top_index {
-    () => { posi_y_index!() }
+    () => {  posi_y_index!() }
 }
 macro_rules! bottom_index {
     () => { nega_y_index!() }
@@ -156,6 +147,7 @@ struct TextureManager {
     pub textures : Vec<Arc<RwLock<RgbaImage>>>,
 }
 impl TextureManager {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         TextureManager {
             tex_mapping : HashMap::new(),
@@ -164,7 +156,9 @@ impl TextureManager {
     }
     #[inline(always)]
     pub fn index_for_tex(&self, name : &String) -> Option<&usize> { self.tex_mapping.get(name) }
+
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn get_tex(&self, idx: usize) -> Option<Arc<RwLock<RgbaImage>>> { self.textures.get(idx).map(#[inline(always)] |arc| {arc.clone()}) }
 
     pub fn process_art(&mut self, art: ArtBlockConfig) -> Result<ArtBlock, Box<dyn Error>> {
@@ -219,79 +213,84 @@ impl TextureManager {
 
 type TileVertexPos = Vec3<f32>;
 
-const ONE : f32 = 1.0;
-const ZER : f32 = 0.0;
+#[allow(dead_code)] const ONE : f32 = 1.0;
+#[allow(dead_code)] const ZER : f32 = 0.0;
 
-const POSX_POSY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ONE, z: ONE };
-const POSX_POSY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ONE, z: ZER };
-const POSX_NEGY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ZER, z: ZER };
-const POSX_NEGY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ZER, z: ZER };
-const NEGX_POSY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ZER, z: ONE };
-const NEGX_POSY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ZER, y: ONE, z: ONE };
-const NEGX_NEGY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ZER, y: ZER, z: ONE };
-const NEGX_NEGY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ZER, y: ZER, z: ZER };
+#[allow(dead_code)] const POSX_POSY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ONE, z: ONE };
+#[allow(dead_code)] const POSX_POSY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ONE, z: ZER };
+#[allow(dead_code)] const POSX_NEGY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ZER, z: ZER };
+#[allow(dead_code)] const POSX_NEGY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ZER, z: ZER };
+#[allow(dead_code)] const NEGX_POSY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ONE, y: ZER, z: ONE };
+#[allow(dead_code)] const NEGX_POSY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ZER, y: ONE, z: ONE };
+#[allow(dead_code)] const NEGX_NEGY_POSZ_VERT : TileVertexPos  = TileVertexPos{ x: ZER, y: ZER, z: ONE };
+#[allow(dead_code)] const NEGX_NEGY_NEGZ_VERT : TileVertexPos  = TileVertexPos{ x: ZER, y: ZER, z: ZER };
 
+#[allow(dead_code)]
 const POSITIVE_X_FACE : [TileVertexPos; 6] = [
-		POSX_POSY_NEGZ_VERT,
-		POSX_POSY_POSZ_VERT,
-		POSX_NEGY_POSZ_VERT,
-		//-Second triangle:
-		POSX_NEGY_POSZ_VERT,
-		POSX_NEGY_NEGZ_VERT,
-		POSX_POSY_NEGZ_VERT ];
+        POSX_POSY_NEGZ_VERT,
+        POSX_POSY_POSZ_VERT,
+        POSX_NEGY_POSZ_VERT,
+        //-Second triangle:
+        POSX_NEGY_POSZ_VERT,
+        POSX_NEGY_NEGZ_VERT,
+        POSX_POSY_NEGZ_VERT ];
 
+#[allow(dead_code)]
 const NEGATIVE_X_FACE : [TileVertexPos; 6] = [
-		//-First triangle:
-		NEGX_POSY_POSZ_VERT,
-		NEGX_POSY_NEGZ_VERT,
-		NEGX_NEGY_NEGZ_VERT,
-		//-Second triangle
-		NEGX_NEGY_NEGZ_VERT,
-		NEGX_NEGY_POSZ_VERT,
-		NEGX_POSY_POSZ_VERT ];
+        //-First triangle:
+        NEGX_POSY_POSZ_VERT,
+        NEGX_POSY_NEGZ_VERT,
+        NEGX_NEGY_NEGZ_VERT,
+        //-Second triangle
+        NEGX_NEGY_NEGZ_VERT,
+        NEGX_NEGY_POSZ_VERT,
+        NEGX_POSY_POSZ_VERT ];
 
+#[allow(dead_code)]
 const POSITIVE_Y_FACE : [TileVertexPos; 6] = [
-		//-First triangle:
-		NEGX_POSY_NEGZ_VERT,
-		NEGX_POSY_POSZ_VERT,
-		POSX_POSY_POSZ_VERT,
-		//-Second triangle
-		POSX_POSY_POSZ_VERT,
-		POSX_POSY_NEGZ_VERT,
-		NEGX_POSY_NEGZ_VERT ];
-		
-const NEGATIVE_Y_FACE : [TileVertexPos; 6] = [
-		//-First triangle:
-		POSX_NEGY_NEGZ_VERT,
-		POSX_NEGY_POSZ_VERT,
-		NEGX_NEGY_POSZ_VERT,
-		//-Second triangle
-		NEGX_NEGY_POSZ_VERT,
-		NEGX_NEGY_NEGZ_VERT,
-		POSX_NEGY_NEGZ_VERT ];
+        //-First triangle:
+        NEGX_POSY_NEGZ_VERT,
+        NEGX_POSY_POSZ_VERT,
+        POSX_POSY_POSZ_VERT,
+        //-Second triangle
+        POSX_POSY_POSZ_VERT,
+        POSX_POSY_NEGZ_VERT,
+        NEGX_POSY_NEGZ_VERT ];
 
+#[allow(dead_code)]
+const NEGATIVE_Y_FACE : [TileVertexPos; 6] = [
+        //-First triangle:
+        POSX_NEGY_NEGZ_VERT,
+        POSX_NEGY_POSZ_VERT,
+        NEGX_NEGY_POSZ_VERT,
+        //-Second triangle
+        NEGX_NEGY_POSZ_VERT,
+        NEGX_NEGY_NEGZ_VERT,
+        POSX_NEGY_NEGZ_VERT ];
+
+#[allow(dead_code)]
 const POSITIVE_Z_FACE : [TileVertexPos; 6] = [
-		//-First triangle:
-		POSX_POSY_POSZ_VERT,
-		NEGX_POSY_POSZ_VERT,
-		NEGX_NEGY_POSZ_VERT,
-		//-Second triangle
-		NEGX_NEGY_POSZ_VERT,
-		POSX_NEGY_POSZ_VERT,
+        //-First triangle:
+        POSX_POSY_POSZ_VERT,
+        NEGX_POSY_POSZ_VERT,
+        NEGX_NEGY_POSZ_VERT,
+        //-Second triangle
+        NEGX_NEGY_POSZ_VERT,
+        POSX_NEGY_POSZ_VERT,
         POSX_POSY_POSZ_VERT ];
 
+#[allow(dead_code)]
 const NEGATIVE_Z_FACE : [TileVertexPos; 6] = [
-		//-First triangle:
-		NEGX_POSY_NEGZ_VERT,
-		POSX_POSY_NEGZ_VERT,
-		POSX_NEGY_NEGZ_VERT,
-		//-Second triangle
-		POSX_NEGY_NEGZ_VERT,
-		NEGX_NEGY_NEGZ_VERT,
-		NEGX_POSY_NEGZ_VERT ];
+        //-First triangle:
+        NEGX_POSY_NEGZ_VERT,
+        POSX_POSY_NEGZ_VERT,
+        POSX_NEGY_NEGZ_VERT,
+        //-Second triangle
+        POSX_NEGY_NEGZ_VERT,
+        NEGX_NEGY_NEGZ_VERT,
+        NEGX_POSY_NEGZ_VERT ];
 
-
-        
+#[allow(dead_code)]
 const FULL_CUBE : [[TileVertexPos; 6]; 6] = [
     POSITIVE_X_FACE,
     NEGATIVE_X_FACE,
@@ -301,6 +300,7 @@ const FULL_CUBE : [[TileVertexPos; 6]; 6] = [
     NEGATIVE_Z_FACE
 ];
 
+#[allow(dead_code)]
 fn get_face_verts(side: VoxelAxis) -> [TileVertexPos; 6] {
     match side {
         VoxelAxis::PosiX => return POSITIVE_X_FACE,
@@ -327,22 +327,29 @@ struct TileVertex {
 /// but it also means you can shape which chunks have
 /// which levels of detail around the player as they move
 /// through the world, without needing to rebuild any meshes to do so.
+#[allow(dead_code)]
 struct ChunkCubesMesh {
     data: Vec<TileVertex>,
 }
+
 impl ChunkCubesMesh {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         ChunkCubesMesh {
             data: Vec::new(),
         }
     }
+
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.data.clear();
     }
+
+    #[allow(dead_code)]
     pub fn rebuild<T> (&mut self, 
-                    art_mapping: &HashMap<TileID, ArtTexturedBlock>, texture_manager: &TextureManager,
-                    chunk: &T,
-                    source_range: VoxelRange<i32>, scale: Scale)
+                    _art_mapping: &HashMap<TileID, ArtTexturedBlock>, _texture_manager: &TextureManager,
+                    _chunk: &T,
+                    _source_range: VoxelRange<i32>, _scale: Scale)
                             -> Result<(), Box<dyn Error>>
                             where T : SubOctreeSource<TileID, (), i32> {
         Ok(())
@@ -350,6 +357,7 @@ impl ChunkCubesMesh {
 }
 
 // -------------------------------- Renderer proper --------------------------------
+#[allow(dead_code)]
 pub struct EucRenderer {
     texture_manager: TextureManager,
     art_mapping: HashMap<TileID, ArtBlock>,
@@ -364,6 +372,7 @@ pub struct EucRenderer {
     pub view_matrix: Mat4<f32>,
 }
 impl EucRenderer {
+    #[allow(dead_code)]
     pub fn new(lod_coarse: Scale, lod_fine : Scale, projection_matrix: &Mat4<f32>,) -> Self {
         EucRenderer {
             texture_manager : TextureManager::new(),
@@ -376,10 +385,14 @@ impl EucRenderer {
             view_matrix: Mat4::zero(),
         }
     }
+    
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn update_view_matrix(&mut self, player_matrix: &Mat4<f32>) { 
         self.view_matrix = player_matrix.clone();
     }
+
+    #[allow(dead_code)]
     pub fn update_projection_matrix(&mut self, projection: &Mat4<f32>) { 
         self.projection_matrix = projection.clone();
     }

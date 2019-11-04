@@ -1,21 +1,21 @@
-extern crate string_cache;
-extern crate parking_lot;
-
-use self::string_cache::DefaultAtom as Atom;
+use string_cache::DefaultAtom as Atom;
 use std::collections::HashMap;
 
-use self::parking_lot::Mutex;
+use parking_lot::Mutex;
 use voxel::voxelarray::VoxelArray;
 
 pub type TileID = u64;
 pub type TileName = Atom;
+#[allow(dead_code)]
 pub type Chunk = VoxelArray<TileID, u8>;
 
+#[allow(dead_code)]
 pub struct TileRegistry {
     id_to_name : Vec<TileName>,
     name_to_id : HashMap<TileName,TileID>,
 }
 
+#[allow(dead_code)]
 impl TileRegistry {
     pub fn id_for_name(&self, id : &TileID) -> TileName{
         self.id_to_name.get(*id as usize).unwrap().clone()

@@ -29,6 +29,7 @@ use voxel::voxelevent::*;
 use world::TileID;
 
 //Latest major version / breaking change revision number of our network protocol.
+#[allow(dead_code)]
 pub const PROTOCOL_VERSION: u32 = 0;
 
 /// A unique identifier for a player or a server. Currently this is just a dummy - eventually this will be a public key.
@@ -47,7 +48,8 @@ impl Display for Identity {
 pub struct NoClientError {
     id : Identity,
 }
-impl NoClientError { 
+impl NoClientError {
+    #[allow(dead_code)]
     fn new(id : Identity) -> Self { NoClientError{ id: id } }
 }
 impl Display for NoClientError {
@@ -66,7 +68,8 @@ impl Error for NoClientError {
 pub struct DidNotIdentifyError {
     ip : SocketAddr,
 }
-impl DidNotIdentifyError { 
+impl DidNotIdentifyError {
+    #[allow(dead_code)]
     fn new(ip : SocketAddr) -> Self { DidNotIdentifyError{ ip: ip } }
 }
 impl Display for DidNotIdentifyError {
@@ -147,6 +150,7 @@ impl Hash for ClientInfo {
     }
 }
 
+#[allow(dead_code)]
 pub struct Server { 
     listener : TcpListener,
     clients : HashMap<Identity, (ClientInfo, TcpStream)>,
@@ -157,6 +161,7 @@ pub struct Server {
     messages_received : Vec<QualifiedToServerPacket>,
 }
 
+#[allow(dead_code)]
 impl Server {
     pub fn new(addr: SocketAddr) -> Result<Server, Box<dyn Error>> {
         //Bind our listener.
@@ -321,6 +326,7 @@ struct _ClientInner {
     stream : TcpStream,
 }
 
+#[allow(dead_code)]
 pub struct Client {
     inner: Option<_ClientInner>,
     name: String,
@@ -328,6 +334,7 @@ pub struct Client {
     messages_received : Vec<ToClientPacket>,
 
 }
+#[allow(dead_code)]
 impl Client {
     pub fn new() -> Self {
         Client {inner: None, name: "Player".to_owned(), ident: Identity{_id: rand::random()}, messages_received: Vec::new() }

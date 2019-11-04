@@ -13,15 +13,9 @@
 //! Over-all it seems like the most intuitive and consistent way to go about it, despite
 //! that potential cause of confusion.
 
-extern crate std;
-extern crate num;
-
 use voxel::voxelmath::*;
 use serde::{Serialize, Deserialize};
-use std::convert::{TryFrom, TryInto};
 
-use self::num::{Integer, Signed, Unsigned};
-use self::num::traits::pow;
 use std::fmt;
 
 // Scale gets away with just being a signed byte forever because it's exponential.
@@ -76,6 +70,7 @@ impl<T> OctPos <T> where T : VoxelCoord {
         }
     }
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn scale_into(&mut self, scl: Scale) {
         let delta_scale = scl - self.scale;
         self.pos.x = scale_coord(self.pos.x, delta_scale);

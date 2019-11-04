@@ -1,69 +1,63 @@
-extern crate serde;
-extern crate toml;
-extern crate serde_json;
-use serde::{Deserialize, Serialize};
-use std::result::Result;
-use std::error;
-use std::fmt;
-use serde_json::Error as JSONError;
-use toml::de::Error as TOMLError;
+//! Various utility types.
 
+
+mod aabb;
+pub use self::aabb::AABB;
+mod transform;
+pub use self::transform::Transform;
 pub mod logger;
 pub mod event;
+pub mod config;
 
-#[derive(Debug)]
-pub enum ConfigStringDeError{
-    JSON(JSONError),
-    TOML(TOMLError),
+
+use cgmath::Deg;
+
+
+pub struct Camera {
+    /// Field of fiew.
+    pub fov: Deg<f32>
 }
 
-impl fmt::Display for ConfigStringDeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ConfigStringDeError::JSON(err) => err.fmt(f),
-            ConfigStringDeError::TOML(err) => err.fmt(f),
+
+impl Camera {
+    /// Creates a new Camera.
+    pub fn new() -> Camera {
+        Camera {
+            fov: Deg(45.0)
         }
     }
 }
 
-impl error::Error for ConfigStringDeError {
-    fn description(&self) -> &str {
-        match self {
-            ConfigStringDeError::JSON(err) => err.description(),
-            ConfigStringDeError::TOML(err) => err.description(),
-        }
+
+pub mod cube {
+    use ::geometry::VertexPositionColorAlpha;
+
+
+    pub fn generate_chunk_debug_line_vertices(x: i32, y: i32, z: i32, a: f32) -> [VertexPositionColorAlpha; 8] {
+        let x = x as f32 * 16f32;
+        let y = y as f32 * 16f32;
+        let z = z as f32 * 16f32;
+        [
+            // top
+            VertexPositionColorAlpha { position: [ x,      y+16.0, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+16.0, y+16.0, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+16.0, y+16.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,      y+16.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            // bottom
+            VertexPositionColorAlpha { position: [ x,      y, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+16.0, y, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+16.0, y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,      y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+        ]
     }
 
-    fn cause(&self) -> Option<&dyn error::Error> {
-        match self {
-            ConfigStringDeError::JSON(err) => Some(err),
-            ConfigStringDeError::TOML(err) => Some(err),
-        }
-    }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigString {
-    JSON(String),
-    TOML(String),
-}
-
-impl Into<String> for ConfigString {
-    fn into(self) -> String {
-        match self { 
-            ConfigString::JSON(json_string) => json_string,
-            ConfigString::TOML(toml_string) => toml_string,
-        } 
-    }
-}
-
-impl ConfigString { 
-    pub fn deserialize<'a, 'de, T> (&'a self) -> Result<T, ConfigStringDeError> where T: Deserialize<'de>, 'a : 'de {
-        match self { 
-            ConfigString::JSON(json_string)
-                            => serde_json::from_str(json_string.as_str()).map_err(|err| { ConfigStringDeError::JSON(err) }),
-            ConfigString::TOML(toml_string) 
-                            => toml::from_str(toml_string.as_str()).map_err(|err| { ConfigStringDeError::TOML(err) }),
-        }
+    pub fn generate_chunk_debug_line_indices(offset: u32) -> [u32; 24] {
+        let o = offset * 8;
+        [
+            0+o,  1+o,  1+o,  2+o,  2+o,  3+o, 3+o, 0+o, // top
+            0+o,  4+o,  1+o,  5+o,  2+o,  6+o, 3+o, 7+o, // middle
+            4+o,  5+o,  5+o,  6+o,  6+o,  7+o, 7+o, 4+o, // bottom
+        ]
     }
 }

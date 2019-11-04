@@ -1,9 +1,8 @@
 use std::error::Error;
 use std::result::Result;
 
-use voxel::subdivstorage::*;
 use world::tile::TileID;
-use util::ConfigString;
+use util::config::ConfigString;
 
 pub trait OctreeRenderer {
     /// Arguments: 
