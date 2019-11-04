@@ -111,6 +111,7 @@ pub fn pos_within_node<T>(pos: OctPos<T>, root_scl : Scale) -> bool where T: Vox
 
 #[test]
 fn test_scale() {
+    use num::Integer;
     let mut position : OctPos<i32> = OctPos { 
         scale: 2,
         pos: VoxelPos{ x: 16, y: 35, z: -5},

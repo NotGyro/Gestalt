@@ -64,7 +64,7 @@ pub fn chunkpos_to_block(point: OctPos<i32>, block_scale: Scale) -> OctPos<i32> 
 pub fn chunkpos_to_center(point: OctPos<i32>, result_scale: Scale) -> Point3<f32> {
     let block_pos = chunkpos_to_block(point, result_scale);
     //How many blocks of "result_scale" make up our chunk?
-    let chunk_size : i32 = scale_coord(1, result_scale-point.scale) - 1;
+    let chunk_size : i32 = scale_coord(1, result_scale-point.scale);
 
     Point3::new(block_pos.pos.x as f32 + (chunk_size as f32 * 0.5), 
         block_pos.pos.y as f32 + (chunk_size as f32 * 0.5), 
@@ -85,15 +85,17 @@ impl<L,D,C> SubVoxelSource<SubNode<L, D>, i32> for SubSpace<C>
 impl<L,D,C> SubOctreeSource<L, D, i32> for SubSpace<C>
         where L : Voxel,  D : Voxel + LODData<L>, C : SubOctreeSource<L,D,i32> {
     fn get_details(&self, coord: OctPos<i32>) -> Result<(SubNode<L, D>, Scale), SubdivError> {
-                let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
+        let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
         // Do we have a chunk that would contain this block position?
         match self.chunks.get(&chunkpos.pos) {
             Some(chunk_entry_arc) => {
                 let chunk_entry = chunk_entry_arc.clone();
-
-                let chunk_size = self.get_chunk_size();
-                let bounds : VoxelRange<i32> = VoxelRange{ lower: VoxelPos{x:0,y:0,z:0}, 
-                                upper: VoxelPos{ x: chunk_size, y: chunk_size, z: chunk_size } };
+                let chunk_start_scaled = chunkpos.scale_to(coord.scale);
+                let chunk_size = self.get_chunk_size(coord.scale);
+                let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos, 
+                                upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size, 
+                                                y: chunk_start_scaled.pos.y + chunk_size, 
+                                                z: chunk_start_scaled.pos.z + chunk_size } };
                 match bounds.get_local_unsigned(coord.pos) {
                     Some(pos) => {
                         // Block until we can get a valid voxel.
@@ -113,12 +115,16 @@ impl<L, C> SubVoxelDrain<L, i32> for SubSpace<C>
         where L : Voxel, C : SubVoxelDrain<L, i32> {
     fn set(&mut self, coord: OctPos<i32>, value: L) -> Result<(), SubdivError> {
         let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
-        let chunk_size = self.get_chunk_size();
+        let chunk_size = self.get_chunk_size(coord.scale);
         // Do we have a chunk that would contain this block position?
         match self.chunks.get_mut(&chunkpos.pos) {
             Some(chunk_entry_arc) => {
-                let bounds : VoxelRange<i32> = VoxelRange{ lower: VoxelPos{x:0,y:0,z:0}, 
-                                upper: VoxelPos{ x: chunk_size, y: chunk_size, z: chunk_size } };
+                let chunk_entry = chunk_entry_arc.clone();
+                let chunk_start_scaled = chunkpos.scale_to(coord.scale);
+                let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos, 
+                                upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size, 
+                                                y: chunk_start_scaled.pos.y + chunk_size, 
+                                                z: chunk_start_scaled.pos.z + chunk_size } };
                 match bounds.get_local_unsigned(coord.pos) {
                     Some(pos) => {
                         // Block until we can get a valid voxel.
@@ -160,16 +166,48 @@ impl<C> SubSpace<C> {
         // This does not return a bool - it just looks that way because of the closure signature.
     } 
 
-    /// Returns chunk size in scale 0 voxels. 
-    pub fn get_chunk_size(&self) -> i32 {
-        ( scale_coord(1, -self.chunk_scale) - 1 )
+    /// Returns chunk size in scale block_scl voxels. 
+    pub fn get_chunk_size(&self, block_scl: Scale) -> i32 {
+        scale_coord(1, block_scl-self.chunk_scale)
     }
     pub fn load_new_chunk(&mut self, chunk_pos : VoxelPos<i32>, chunk: C) {
         self.chunks.insert(chunk_pos, Arc::new( RwLock::new(chunk) ));
     }
 }
-/*
+
 #[test]
 fn test_subdiv_space() {
-    let mut world : SubSpace<NaiveVoxelOctree<String, ()>> = SubSpace::new(6);
-}*/
+    use world::TileID;
+    use string_cache::DefaultAtom as Atom; 
+    use world::tile::*;
+    let air_id = TILE_REGISTRY.lock().register_tile(&Atom::from("air"));
+    let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
+    let lava_id = TILE_REGISTRY.lock().register_tile(&Atom::from("lava"));
+
+    let mut world : SubSpace<NaiveVoxelOctree<TileID, ()>> = SubSpace::new();
+
+    assert_eq!(world.get_chunk_size(0), 64);
+
+    let mut chunk : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(stone_id)};
+    chunk.set(opos!((1,0,1) @ 3), air_id).unwrap();
+    chunk.set(opos!((0,0,1) @ 3), air_id).unwrap();
+    chunk.set(opos!((3,0,0) @ 2), air_id).unwrap();
+
+    chunk.root.rebuild_lod();
+    
+    let mut chunk2 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE, root: NaiveOctreeNode::new_leaf(air_id)};
+    chunk2.set(opos!((0,0,0) @ CHUNK_SCALE), lava_id ).unwrap();
+    
+    let mut chunk3 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE, root: NaiveOctreeNode::new_leaf(air_id)};
+
+    let chunk_1_pos = vpos!(0,0,0);
+    let chunk_2_pos = vpos!(1,0,0);
+    let chunk_3_pos = vpos!(2,0,0);
+    world.load_new_chunk(chunk_1_pos, chunk);
+    world.load_new_chunk(chunk_2_pos, chunk2);
+    world.load_new_chunk(chunk_3_pos, chunk3);
+    assert_eq!(world.get(opos!((72,0,0) @ 0)).unwrap(), SubNode::Leaf(lava_id) );
+    assert_eq!(world.get(opos!((129,0,0) @ 0)).unwrap(), SubNode::Leaf(air_id) );
+    assert_eq!(world.get(opos!((9,0,9) @ 0)).unwrap(), SubNode::Leaf(air_id) );
+    assert_eq!(world.get(opos!((3,3,3) @ 0)).unwrap(), SubNode::Leaf(stone_id) );
+}
