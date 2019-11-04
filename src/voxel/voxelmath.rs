@@ -562,10 +562,7 @@ pub struct VoxelAxisIter {
     axis : Option<VoxelAxis>,
 }
 impl VoxelAxisIter {
-<<<<<<< HEAD
     #[allow(dead_code)]
-=======
->>>>>>> multi-chunk
     pub fn new() -> Self { VoxelAxisIter { axis: None } }
 }
 impl Iterator for VoxelAxisIter {
