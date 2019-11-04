@@ -41,7 +41,7 @@ impl<T, S> Error for ChunkedSubdivError<T, S> where T : VoxelCoord, S : VoxelCoo
 
 /// A space is a "world"-like paged space for subdivided voxels (octrees and octree-like things)
 /// C is our chunk type.
-pub struct SubSpace<C> {
+pub struct SubdivSpace<C> {
     pub chunks: HashMap<VoxelPos<i32>, 
                         Arc<RwLock<
                             C
@@ -55,7 +55,7 @@ pub fn blockpos_to_chunk(point: OctPos<i32>, chunk_scale: Scale) -> OctPos<i32> 
     point.scale_to(chunk_scale)
 }
 
-///The "Point" argument here must have a scale equal to the chunk's scale. 
+/// The "Point" argument here must have a scale equal to the chunk's scale.
 pub fn chunkpos_to_block(point: OctPos<i32>, block_scale: Scale) -> OctPos<i32> {
     point.scale_to(block_scale)
 }
@@ -71,10 +71,10 @@ pub fn chunkpos_to_center(point: OctPos<i32>, result_scale: Scale) -> Point3<f32
         block_pos.pos.z as f32 + (chunk_size as f32 * 0.5))
 }
 
-impl<L,D,C> SubVoxelSource<SubNode<L, D>, i32> for SubSpace<C>
-        where L : Voxel,  D : Voxel + LODData<L>, C : SubOctreeSource<L,D,i32> {
+impl<L,D,C> SubdivVoxelSource<SubdivNode<L, D>, i32> for SubdivSpace<C>
+        where L : Voxel,  D : Voxel + LODData<L>, C : OctreeSource<L,D,i32> {
 
-    fn get(&self, coord: OctPos<i32>) -> Result<SubNode<L, D>, SubdivError> {
+    fn get(&self, coord: OctPos<i32>) -> Result<SubdivNode<L, D>, SubdivError> {
         Ok(self.get_details(coord)?.0)
     }
 
@@ -82,9 +82,9 @@ impl<L,D,C> SubVoxelSource<SubNode<L, D>, i32> for SubSpace<C>
     fn get_min_scale(&self) -> Scale { -128 }
 }
 
-impl<L,D,C> SubOctreeSource<L, D, i32> for SubSpace<C>
-        where L : Voxel,  D : Voxel + LODData<L>, C : SubOctreeSource<L,D,i32> {
-    fn get_details(&self, coord: OctPos<i32>) -> Result<(SubNode<L, D>, Scale), SubdivError> {
+impl<L,D,C> OctreeSource<L, D, i32> for SubdivSpace<C>
+        where L : Voxel,  D : Voxel + LODData<L>, C : OctreeSource<L,D,i32> {
+    fn get_details(&self, coord: OctPos<i32>) -> Result<(SubdivNode<L, D>, Scale), SubdivError> {
         let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
         // Do we have a chunk that would contain this block position?
         match self.chunks.get(&chunkpos.pos) {
@@ -111,15 +111,14 @@ impl<L,D,C> SubOctreeSource<L, D, i32> for SubSpace<C>
         }
     }
 }
-impl<L, C> SubVoxelDrain<L, i32> for SubSpace<C>
-        where L : Voxel, C : SubVoxelDrain<L, i32> {
+impl<L, C> SubdivVoxelDrain<L, i32> for SubdivSpace<C>
+        where L : Voxel, C : SubdivVoxelDrain<L, i32> {
     fn set(&mut self, coord: OctPos<i32>, value: L) -> Result<(), SubdivError> {
         let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
         let chunk_size = self.get_chunk_size(coord.scale);
         // Do we have a chunk that would contain this block position?
         match self.chunks.get_mut(&chunkpos.pos) {
             Some(chunk_entry_arc) => {
-                let chunk_entry = chunk_entry_arc.clone();
                 let chunk_start_scaled = chunkpos.scale_to(coord.scale);
                 let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos, 
                                 upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size, 
@@ -141,9 +140,9 @@ impl<L, C> SubVoxelDrain<L, i32> for SubSpace<C>
     }
 }
 
-impl<C> SubSpace<C> {
+impl<C> SubdivSpace<C> {
     pub fn new() -> Self {
-        SubSpace {
+        SubdivSpace {
             chunks: HashMap::new(),
             chunk_scale: CHUNK_SCALE,
         }
@@ -184,7 +183,7 @@ fn test_subdiv_space() {
     let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
     let lava_id = TILE_REGISTRY.lock().register_tile(&Atom::from("lava"));
 
-    let mut world : SubSpace<NaiveVoxelOctree<TileID, ()>> = SubSpace::new();
+    let mut world : SubdivSpace<NaiveVoxelOctree<TileID, ()>> = SubdivSpace::new();
 
     assert_eq!(world.get_chunk_size(0), 64);
 
@@ -206,8 +205,8 @@ fn test_subdiv_space() {
     world.load_new_chunk(chunk_1_pos, chunk);
     world.load_new_chunk(chunk_2_pos, chunk2);
     world.load_new_chunk(chunk_3_pos, chunk3);
-    assert_eq!(world.get(opos!((72,0,0) @ 0)).unwrap(), SubNode::Leaf(lava_id) );
-    assert_eq!(world.get(opos!((129,0,0) @ 0)).unwrap(), SubNode::Leaf(air_id) );
-    assert_eq!(world.get(opos!((9,0,9) @ 0)).unwrap(), SubNode::Leaf(air_id) );
-    assert_eq!(world.get(opos!((3,3,3) @ 0)).unwrap(), SubNode::Leaf(stone_id) );
+    assert_eq!(world.get(opos!((72,0,0) @ 0)).unwrap(), SubdivNode::Leaf(lava_id) );
+    assert_eq!(world.get(opos!((129,0,0) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
+    assert_eq!(world.get(opos!((9,0,9) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
+    assert_eq!(world.get(opos!((3,3,3) @ 0)).unwrap(), SubdivNode::Leaf(stone_id) );
 }

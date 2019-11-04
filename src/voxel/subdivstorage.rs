@@ -50,35 +50,35 @@ impl Error for SubdivError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SubNode<L: Voxel, B: Voxel> {
+pub enum SubdivNode<L: Voxel, B: Voxel> {
     Leaf(L),
     Branch(B),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
-pub enum SubNodeKind {
+pub enum SubdivNodeKind {
     Leaf,
     Branch,
 }
 
-impl<L: Voxel, B: Voxel> SubNode<L,B> {
+impl<L: Voxel, B: Voxel> SubdivNode<L,B> {
     #[allow(dead_code)]
-    pub fn kind(&self) -> SubNodeKind {
+    pub fn kind(&self) -> SubdivNodeKind {
         match self { 
-            SubNode::Leaf(_) => SubNodeKind::Leaf,
-            SubNode::Branch(_) => SubNodeKind::Leaf,
+            SubdivNode::Leaf(_) => SubdivNodeKind::Leaf,
+            SubdivNode::Branch(_) => SubdivNodeKind::Leaf,
         }
     }
-    pub fn new_leaf(val: L) -> SubNode<L, B> { SubNode::Leaf(val) }
+    pub fn new_leaf(val: L) -> SubdivNode<L, B> { SubdivNode::Leaf(val) }
 }
 
 #[allow(dead_code)]
-pub type NodeNoLOD<T> = SubNode<(), T>;
+pub type NodeNoLOD<T> = SubdivNode<(), T>;
 
-impl <L, B> Default for SubNode<L, B> where L : Voxel, B : Voxel {
+impl <L, B> Default for SubdivNode<L, B> where L : Voxel, B : Voxel {
     #[inline]
-    fn default() -> Self { SubNode::Leaf(L::default()) }
+    fn default() -> Self { SubdivNode::Leaf(L::default()) }
 }
 
 #[allow(dead_code)]
@@ -161,7 +161,7 @@ pub fn index_for_scale_at_pos<T: VoxelCoord>(pos : VoxelPos<T>, scl : Scale) -> 
 /// any bit length of integer, or even a bigint implementation).
 /// 
 /// This is for any voxel data source that does LOD - you could be sampling perlin noise, for example.
-pub trait SubVoxelSource<T: Voxel, P: VoxelCoord> {
+pub trait SubdivVoxelSource<T: Voxel, P: VoxelCoord> {
     fn get(&self, coord: OctPos<P>) -> Result<T, SubdivError>;
 
     fn get_max_scale(&self) -> Scale { 127 }
@@ -176,15 +176,15 @@ pub trait SubVoxelSource<T: Voxel, P: VoxelCoord> {
 /// any bit length of integer, or even a bigint implementation).
 /// 
 /// This is for any voxel data source that does LOD - you could be sampling perlin noise, for example.
-pub trait SubVoxelDrain<T: Voxel, P: VoxelCoord> {
+pub trait SubdivVoxelDrain<T: Voxel, P: VoxelCoord> {
     fn set(&mut self, coord: OctPos<P>, value: T) -> Result<(), SubdivError>;
 }
 
-/// Any SubVoxelStorage which has defined, finite bounds.
+/// Any SubdivVoxelStorage which has defined, finite bounds.
 /// Must be able to store a valid voxel for any position within
 /// the range provided by get_bounds().
-/// Usually, this implies that the SubVoxelStorage is not paged.
-pub trait SubVoxelStorageBounded<P: VoxelCoord> { 
+/// Usually, this implies that the SubdivVoxelStorage is not paged.
+pub trait SubdivVoxelStorageBounded<P: VoxelCoord> { 
     fn get_bounds(&self) -> VoxelRange<P>;
 }
 
@@ -212,19 +212,19 @@ impl<T> LODData<T> for () where T: Voxel {
 /// This is for anything that acts like an Octree but it doesn't have to *be* an Octree.
 /// What this means is: This Voxel Storage must have a concept of "Branches", which themselves
 /// are not where the data lives but point to "Leaves" at smaller scale / higher detail.
-pub trait SubOctreeSource<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord> : SubVoxelSource<SubNode<L, D>, P> {
+pub trait OctreeSource<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord> : SubdivVoxelSource<SubdivNode<L, D>, P> {
 
     /// Gets you the value of the node as well as information about the scale at which you found this value -
     /// e.g. if you find an 8x8x8 leaf (scale 3) that contains your position at the 2x2x2 scale (scale 1),
     /// it'll let you know that this is a leaf at scale 3.
-    fn get_details(&self, coord: OctPos<P>) -> Result<(SubNode<L, D>, Scale), SubdivError>;
+    fn get_details(&self, coord: OctPos<P>) -> Result<(SubdivNode<L, D>, Scale), SubdivError>;
 
     /// Get information on all 8 of the smaller nodes that live inside the selected larger node.
     /// This is not a deep copy - hence, returns LOD information for branch nodes.
-    fn get_children(&self, coord: OctPos<P>) -> Result<[SubNode<L, D>; 8], SubdivError> { 
+    fn get_children(&self, coord: OctPos<P>) -> Result<[SubdivNode<L, D>; 8], SubdivError> { 
         let small_pos = coord.scale_to(coord.scale - 1);
         // If this is a leaf it by definition does not have children.
-        if let SubNodeKind::Leaf = self.get(coord)?.kind() {
+        if let SubdivNodeKind::Leaf = self.get(coord)?.kind() {
             return Err(SubdivError::DetailNotPresent);
         }
         if small_pos.scale < self.get_min_scale() {
@@ -248,10 +248,10 @@ pub trait SubOctreeSource<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord> : SubV
         self.get(onex_oney_zeroz)?, 
         self.get(onex_oney_onez)?])
     }
-    fn node_kind(&self, pos: OctPos<P>) -> Result<SubNodeKind, SubdivError> { Ok(self.get(pos)?.kind()) }
+    fn node_kind(&self, pos: OctPos<P>) -> Result<SubdivNodeKind, SubdivError> { Ok(self.get(pos)?.kind()) }
 }
 /*
-pub trait SubOctreeDrain<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord> : SubOctreeSource<L, D, P> {
+pub trait OctreeDrain<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord> : OctreeSource<L, D, P> {
     /// You cannot set something directly *to* a branch.
     fn set(&self, coord: OctPos<P>, leaf_val: L) -> Result<(), SubdivError>;
 
@@ -263,7 +263,7 @@ pub trait SubOctreeDrain<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord> : SubOc
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NaiveOctreeBranch<L: Voxel, D: Voxel + LODData<L>> {
-    pub children : [SubNode<L, Box<NaiveOctreeBranch<L, D>> >; 8],
+    pub children : [SubdivNode<L, Box<NaiveOctreeBranch<L, D>> >; 8],
     // Any data that lives at the branch level.
     pub lod_data : D,
 }
@@ -281,8 +281,8 @@ impl<L, D> NaiveOctreeBranch<L, D> where L: Voxel, D: Voxel + LODData<L> {
                                     D::default()];
         for i in 0..8 {
             match &mut self.children[i] { 
-                SubNode::Leaf(leaf_child) => lod_info[i] = D::represent(&leaf_child),
-                SubNode::Branch(ref mut branch_child) => { 
+                SubdivNode::Leaf(leaf_child) => lod_info[i] = D::represent(&leaf_child),
+                SubdivNode::Branch(ref mut branch_child) => { 
                     branch_child.rebuild_lod(); 
                     lod_info[i] = branch_child.lod_data.clone();
                 },
@@ -292,7 +292,7 @@ impl<L, D> NaiveOctreeBranch<L, D> where L: Voxel, D: Voxel + LODData<L> {
     }
 }
 
-pub type NaiveOctreeNode<L, D> = SubNode<L, Box<NaiveOctreeBranch<L, D>> >;
+pub type NaiveOctreeNode<L, D> = SubdivNode<L, Box<NaiveOctreeBranch<L, D>> >;
 
 #[derive(Clone, Debug)]
 pub struct NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L> {
@@ -302,15 +302,15 @@ pub struct NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L> {
 
 impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
     pub fn split_into_branch(&mut self) { 
-        if let SubNode::Leaf(leaf_value) = self {
-            let children : [NaiveOctreeNode<L, D>; 8] = [SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),
-                                                    SubNode::new_leaf(leaf_value.clone()),];
+        if let SubdivNode::Leaf(leaf_value) = self {
+            let children : [NaiveOctreeNode<L, D>; 8] = [SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),
+                                                    SubdivNode::new_leaf(leaf_value.clone()),];
             *self = NaiveOctreeNode::Branch(Box::new(NaiveOctreeBranch {
                     children: children,
                     lod_data: D::represent(&leaf_value),
@@ -321,7 +321,7 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
     }
     #[allow(dead_code)]
     pub fn rebuild_lod(&mut self) {
-        if let SubNode::Branch(ref mut branch_self) = self {
+        if let SubdivNode::Branch(ref mut branch_self) = self {
             branch_self.rebuild_lod();
         } 
         //else {
@@ -330,10 +330,10 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
     }
 }
 
-impl<L, D, P> SubOctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
+impl<L, D, P> OctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
     
     #[inline]
-    fn get_details(&self, coord: OctPos<P>) -> Result<(SubNode<L, D>, Scale), SubdivError> {
+    fn get_details(&self, coord: OctPos<P>) -> Result<(SubdivNode<L, D>, Scale), SubdivError> {
         if coord.scale > self.scale {
             //Trying to set a voxel larger than our root node.
             return Err(SubdivError::OutOfScale);
@@ -348,16 +348,16 @@ impl<L, D, P> SubOctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel
                 //Have we hit our target?
                 if current_scale == coord.scale {
                     match &*current_node { 
-                        SubNode::Leaf(leaf_dat) => return Ok( (SubNode::Leaf(leaf_dat.clone()), current_scale)  ),
-                        SubNode::Branch(branch_dat) => return Ok( (SubNode::Branch(branch_dat.lod_data.clone()), current_scale) ),
+                        SubdivNode::Leaf(leaf_dat) => return Ok( (SubdivNode::Leaf(leaf_dat.clone()), current_scale)  ),
+                        SubdivNode::Branch(branch_dat) => return Ok( (SubdivNode::Branch(branch_dat.lod_data.clone()), current_scale) ),
                     }
                 }
                 else {
                     // We have not yet gotten to target.
                     match &*current_node { 
                         //Target is below our scale but we are a leaf. That space partition is part of this one.
-                        SubNode::Leaf(leaf_dat) => return Ok(  (SubNode::Leaf(leaf_dat.clone()), current_scale)  ),
-                        SubNode::Branch(branch_dat) => {
+                        SubdivNode::Leaf(leaf_dat) => return Ok(  (SubdivNode::Leaf(leaf_dat.clone()), current_scale)  ),
+                        SubdivNode::Branch(branch_dat) => {
                             //Not found and this is a branch. Time for recursion.
                             //Our child nodes are implicitly at our scale -1.
                             current_node = &branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)] as *const NaiveOctreeNode<L,D>;
@@ -371,17 +371,17 @@ impl<L, D, P> SubOctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel
     }
 }
 
-impl<L, D, P> SubVoxelSource<SubNode<L, D>, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
+impl<L, D, P> SubdivVoxelSource<SubdivNode<L, D>, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
     
     #[inline]
-    fn get(&self, coord: OctPos<P>) -> Result<SubNode<L, D>, SubdivError> {
+    fn get(&self, coord: OctPos<P>) -> Result<SubdivNode<L, D>, SubdivError> {
         Ok(self.get_details(coord)?.0)
     }
     //Cannot get a node bigger than our root node.
     fn get_max_scale(&self) -> Scale { self.scale }
 }
 
-impl<L, D, P> SubVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
+impl<L, D, P> SubdivVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
     
     fn set(&mut self, coord: OctPos<P>, value: L) -> Result<(), SubdivError> {
         if coord.scale > self.scale {
@@ -397,17 +397,17 @@ impl<L, D, P> SubVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: 
             while current_scale >= coord.scale {
                         //Have we hit our target?
                 if current_scale == coord.scale {
-                    *current_node = SubNode::Leaf(value);
+                    *current_node = SubdivNode::Leaf(value);
                     return Ok(());
                 }
                 else {
                     // We have not yet gotten to target.
-                    if let SubNode::Leaf(_) = &mut *current_node {
+                    if let SubdivNode::Leaf(_) = &mut *current_node {
                         //Target is below our scale. We will need to create a child node, and recurse on it.
                         (*current_node).split_into_branch();
                     }
                     match *current_node { 
-                        SubNode::Branch(ref mut branch_dat) => {
+                        SubdivNode::Branch(ref mut branch_dat) => {
                             //Not found and this is a branch. Time for recursion.
                             //Our child nodes are implicitly at our scale -1.
                             current_node = &mut branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)] as *mut NaiveOctreeNode<L,D>;
@@ -457,12 +457,12 @@ fn test_octree() {
     
     tree.root.rebuild_lod();
 
-    assert_eq!(tree.get(first_pos).unwrap(), SubNode::Leaf("First!".to_owned()) );
-    assert_eq!(tree.get(second_pos).unwrap(), SubNode::Leaf("Second!".to_owned()) );
-    assert_eq!(tree.get(third_pos).unwrap(), SubNode::Leaf("Third!".to_owned()) );
-    assert_eq!(tree.get(opos!((33, 2, 8)@ 0)).unwrap(), SubNode::Leaf("First!".to_owned()) );
+    assert_eq!(tree.get(first_pos).unwrap(), SubdivNode::Leaf("First!".to_owned()) );
+    assert_eq!(tree.get(second_pos).unwrap(), SubdivNode::Leaf("Second!".to_owned()) );
+    assert_eq!(tree.get(third_pos).unwrap(), SubdivNode::Leaf("Third!".to_owned()) );
+    assert_eq!(tree.get(opos!((33, 2, 8)@ 0)).unwrap(), SubdivNode::Leaf("First!".to_owned()) );
 
-    if let SubNode::Branch(ref tree_root) = tree.root {
+    if let SubdivNode::Branch(ref tree_root) = tree.root {
         assert!(tree_root.lod_data.contains(&"First!".to_owned()));
         assert!(tree_root.lod_data.contains(&"Second!".to_owned()));
         assert!(tree_root.lod_data.contains(&"Third!".to_owned()));
@@ -477,7 +477,7 @@ fn test_octree() {
     //We are looking at a 16x16x16 node.
     let big_node : OctPos <u32> = opos!((0, 0, 0) @ 4);
     
-    if let SubNode::Branch(ref lod) = tree.get(big_node).unwrap() {
+    if let SubdivNode::Branch(ref lod) = tree.get(big_node).unwrap() {
         assert!(lod.contains(&"Third!".to_owned()));
         assert!(lod.contains(&"Fourth!".to_owned()));
         assert!(!lod.contains(&"First!".to_owned()));
@@ -488,5 +488,5 @@ fn test_octree() {
     }
     
     println!("We have: {:?}", tree);
-    //if let SubNode::Branch(ref branch_dat) = tree.get()
+    //if let SubdivNode::Branch(ref branch_dat) = tree.get()
 }

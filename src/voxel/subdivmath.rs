@@ -21,13 +21,15 @@ use std::fmt;
 // Scale gets away with just being a signed byte forever because it's exponential.
 // You will NEVER need LOD cubes tinier than 2.9387359e-39 meters (2^-128) to a side, 
 // and 1.7014118e+38 meters (2^127) puts Earth's distance from the sun to shame.
-
+/// Scale refers to the scale of voxel you're working with. In Scale 0, the voxels are 1 meter x 1 meter x 1 meter. 
+/// Each voxel you're looking at is 2 to the power of Scale, so a scale 3 voxel is 8 meters by 8 meters by 8 meters across.
 pub type Scale = i8;
 
 /// A point in progressive-detail Voxel space. (A cell.)
 /// The concept of node or leaf doesn't come into it yet here -
 /// this is just a coordinate.
 /// Our "pos" value is measured in number of cells at "scale"'s grid from the origin of 0,0,0.
+/// So, an  octpos with pos (1,0,0) and with scale 8 is 256 meters away from the origin along the x axis.
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct OctPos<T : VoxelCoord> {
 	pub scale : Scale,
