@@ -8,6 +8,12 @@ pub use self::tile::{TileID, TileName};
 
 pub mod generators;
 
+pub mod chunk;
+pub use self::chunk::Chunk;
+
+pub mod dimension;
+pub use self::dimension::Dimension;
+
 /// Scale 0 is equal to a one meter cubed (one meter along each axis) cube. 
 /// So, the length along each axis of our chunk is then 2^(CHUNK_SCALE) meters.
 /// This also corresponds to the height of the root node on an octree: 

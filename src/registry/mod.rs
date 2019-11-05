@@ -9,7 +9,7 @@ use vulkano::format::R8G8B8A8Srgb;
 use vulkano::image::immutable::ImmutableImage;
 use vulkano::device::Queue;
 
-use world_vg::Dimension;
+use world::Dimension;
 
 
 /// Global texture registry.

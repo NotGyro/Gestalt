@@ -34,19 +34,19 @@ pub mod cube {
 
 
     pub fn generate_chunk_debug_line_vertices(x: i32, y: i32, z: i32, a: f32) -> [VertexPositionColorAlpha; 8] {
-        let x = x as f32 * 16f32;
-        let y = y as f32 * 16f32;
-        let z = z as f32 * 16f32;
+        let x = x as f32 * 64f32;
+        let y = y as f32 * 64f32;
+        let z = z as f32 * 64f32;
         [
             // top
-            VertexPositionColorAlpha { position: [ x,      y+16.0, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+16.0, y+16.0, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+16.0, y+16.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x,      y+16.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,      y+64.0, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+64.0, y+64.0, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+64.0, y+64.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,      y+64.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
             // bottom
-            VertexPositionColorAlpha { position: [ x,      y, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+16.0, y, z+16.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+16.0, y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,      y, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+64.0, y, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+64.0, y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
             VertexPositionColorAlpha { position: [ x,      y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
         ]
     }

@@ -55,7 +55,6 @@ mod network;
 mod util;
 mod vulkano_win;
 mod world;
-mod world_vg;
 
 // imports
 
