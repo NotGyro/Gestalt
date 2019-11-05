@@ -1,9 +1,9 @@
 //! Main type for the game. `Game::new().run()` runs the game.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
-use std::thread;
 use std::time::Instant;
+//use std::sync::atomic::Ordering;
+//use std::thread;
 
 use cgmath::Point3;
 use vulkano::buffer::BufferUsage;
@@ -19,10 +19,10 @@ use input::InputState;
 use world_vg::Dimension;
 use registry::DimensionRegistry;
 use player::Player;
-use world_vg::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
+//use world_vg::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
 
 
-const MAX_CHUNK_THREADS: u32 = 1;
+//const MAX_CHUNK_THREADS: u32 = 1;
 
 
 /// Main type for the game. `Game::new().run()` runs the game.
@@ -34,7 +34,7 @@ pub struct Game {
     input_state: InputState,
     player: Player,
     dimension_registry: DimensionRegistry,
-    chunk_threads: Arc<std::sync::atomic::AtomicU32>,
+    //chunk_threads: Arc<std::sync::atomic::AtomicU32>,
 }
 
 
@@ -65,7 +65,7 @@ impl Game {
             input_state,
             player,
             dimension_registry,
-            chunk_threads: Arc::new(std::sync::atomic::AtomicU32::new(0))
+            //chunk_threads: Arc::new(std::sync::atomic::AtomicU32::new(0))
         }
     }
 
@@ -165,38 +165,38 @@ impl Game {
             }
         }
 
-        self.renderer.render_queue.chunk_meshes.clear();
-        for (_, (ref mut chunk, ref mut state)) in self.dimension_registry.get(0).unwrap().chunks.iter_mut() {
-            if self.chunk_threads.load(Ordering::Relaxed) >= MAX_CHUNK_THREADS {
-                break;
-            }
-            let is_dirty = state.load(Ordering::Relaxed) == CHUNK_STATE_DIRTY;
-            if is_dirty {
-                self.chunk_threads.fetch_add(1, Ordering::Relaxed);
-                state.store(CHUNK_STATE_WRITING, Ordering::Relaxed);
-                let chunk_arc = chunk.clone();
-                let device_arc = self.renderer.device.clone();
-                let memory_pool_arc = self.renderer.memory_pool.clone();
-                let state_arc = state.clone();
-                let thread_count_clone = self.chunk_threads.clone();
-                thread::spawn(move || {
-                    let mut chunk_lock = chunk_arc.write().unwrap();
-                    chunk_lock.generate_mesh(device_arc, memory_pool_arc);
-                    state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
-                    thread_count_clone.fetch_sub(1, Ordering::Relaxed);
-                });
-                break;
-            }
-        }
+//        self.renderer.render_queue.chunk_meshes.clear();
+//        for (_, (ref mut chunk, ref mut state)) in self.dimension_registry.get(0).unwrap().chunks.iter_mut() {
+//            if self.chunk_threads.load(Ordering::Relaxed) >= MAX_CHUNK_THREADS {
+//                break;
+//            }
+//            let is_dirty = state.load(Ordering::Relaxed) == CHUNK_STATE_DIRTY;
+//            if is_dirty {
+//                self.chunk_threads.fetch_add(1, Ordering::Relaxed);
+//                state.store(CHUNK_STATE_WRITING, Ordering::Relaxed);
+//                let chunk_arc = chunk.clone();
+//                let device_arc = self.renderer.device.clone();
+//                let memory_pool_arc = self.renderer.memory_pool.clone();
+//                let state_arc = state.clone();
+//                let thread_count_clone = self.chunk_threads.clone();
+//                thread::spawn(move || {
+//                    let mut chunk_lock = chunk_arc.write().unwrap();
+//                    chunk_lock.generate_mesh(device_arc, memory_pool_arc);
+//                    state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
+//                    thread_count_clone.fetch_sub(1, Ordering::Relaxed);
+//                });
+//                break;
+//            }
+//        }
 
         // queueing chunks and drawing
-        for (_, (chunk, state)) in self.dimension_registry.get(0).unwrap().chunks.iter() {
-            let is_ready = state.load(Ordering::Relaxed) == CHUNK_STATE_CLEAN;
-            if is_ready {
-                let chunk_lock = chunk.read().unwrap();
-                self.renderer.render_queue.chunk_meshes.append(&mut chunk_lock.mesh.queue());
-            }
-        }
+//        for (_, (chunk, state)) in self.dimension_registry.get(0).unwrap().chunks.iter() {
+//            let is_ready = state.load(Ordering::Relaxed) == CHUNK_STATE_CLEAN;
+//            if is_ready {
+//                let chunk_lock = chunk.read().unwrap();
+//                self.renderer.render_queue.chunk_meshes.append(&mut chunk_lock.mesh.queue());
+//            }
+//        }
 
         self.renderer.draw(&self.player.camera, self.player.get_transform());
 

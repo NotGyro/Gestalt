@@ -4,7 +4,6 @@ extern crate parking_lot;
 
 use self::parking_lot::RwLock;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::error::Error;
 use std::fmt;
 
@@ -17,10 +16,9 @@ use voxel::subdivstorage::*;
 
 use world::CHUNK_SCALE;
 
-use world::TileID;
-
 /// An error reported upon trying to get or set a voxel which is not currently loaded. 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ChunkedSubdivError<T, S> where T : VoxelCoord, S : VoxelCoord {
     NotLoaded(OctPos<T>, VoxelPos<S>),
     SubdivError(SubdivError),
@@ -56,11 +54,13 @@ pub fn blockpos_to_chunk(point: OctPos<i32>, chunk_scale: Scale) -> OctPos<i32> 
 }
 
 /// The "Point" argument here must have a scale equal to the chunk's scale.
+#[allow(dead_code)]
 pub fn chunkpos_to_block(point: OctPos<i32>, block_scale: Scale) -> OctPos<i32> {
     point.scale_to(block_scale)
 }
 
-/// The "Point" argument here must have a scale equal to the chunk's scale. 
+/// The "Point" argument here must have a scale equal to the chunk's scale.
+#[allow(dead_code)]
 pub fn chunkpos_to_center(point: OctPos<i32>, result_scale: Scale) -> Point3<f32> {
     let block_pos = chunkpos_to_block(point, result_scale);
     //How many blocks of "result_scale" make up our chunk?
@@ -140,7 +140,9 @@ impl<L, C> SubdivVoxelDrain<L, i32> for SubdivSpace<C>
     }
 }
 
+#[allow(dead_code)]
 impl<C> SubdivSpace<C> {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         SubdivSpace {
             chunks: HashMap::new(),

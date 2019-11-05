@@ -23,6 +23,7 @@ use pipeline::{RenderPipelineAbstract, SkyboxRenderPipeline, ChunkRenderPipeline
 
 use buffer::CpuAccessibleBufferAutoPool;
 use geometry::VertexPositionColorAlpha;
+use world::generators::{ChunkGenerator, SphereGenerator};
 
 
 /// Matrix to correct vulkan clipping planes and flip y axis.
@@ -143,6 +144,9 @@ impl Renderer {
         let chunk_lines_vertex_buffer = CpuAccessibleBufferAutoPool::<[VertexPositionColorAlpha]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
         let chunk_lines_index_buffer = CpuAccessibleBufferAutoPool::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
 
+        let test_octree = SphereGenerator::generate((0, 0, 0), 0);
+        let mesh = ::octree_mesher::OctreeMesher::generate_mesh(&test_octree, device.clone(), memory_pool.clone());
+
         Renderer {
             device,
             memory_pool,
@@ -155,13 +159,13 @@ impl Renderer {
             tex_registry,
             pipelines,
             render_queue: RenderQueue {
-                chunk_meshes: Vec::new(),
+                chunk_meshes: mesh.queue(),
                 lines: LineRenderQueue {
                     chunk_lines_vertex_buffer,
                     chunk_lines_index_buffer,
                     chunks_changed: false
                 }
-            }
+            },
         }
     }
 

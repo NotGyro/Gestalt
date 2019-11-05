@@ -1,6 +1,5 @@
 //! A single chunk of blocks.
 
-
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -45,16 +44,13 @@ impl Chunk {
 
 
     /// Converts a flat index to (x, y, z) coordinates.
-    #[allow(dead_code)]
     pub fn i_to_xyz(i: usize) -> (i32, i32, i32) { (i as i32/(16*16), (i as i32/16) % 16, i as i32 % 16) }
 
 
     /// Converts (x, y, z) coordinates to a flat index.
-    #[allow(dead_code)]
     pub fn xyz_to_i(x: i32, y: i32, z: i32) -> usize { ((x * 16*16) + (y * 16) + z) as usize }
 
 
-    #[allow(dead_code)]
     /// Sets a block at the given index.
     pub fn set_at(&mut self, i: usize, id: u8) {
         self.ids[i] = id;

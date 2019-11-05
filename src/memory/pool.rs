@@ -28,7 +28,7 @@ use super::allocator::{PoolAllocator, BlockAllocator, BlockId};
 
 
 /// Chunk size for [AutoMemoryPool] in bytes
-pub const AUTO_POOL_CHUNK_SIZE: usize = 1024 * 1024 * 64;
+pub const AUTO_POOL_CHUNK_SIZE: usize = 1024 * 1024 * 128;
 
 
 /// Inner type for [AutoMemoryPool]. Necessary to implement vulkano's `MemoryPool` on an `Arc<T>`.

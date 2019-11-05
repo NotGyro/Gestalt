@@ -44,6 +44,7 @@ mod geometry;
 mod input;
 mod memory;
 mod mesh_simplifier;
+mod octree_mesher;
 mod player;
 mod pipeline;
 mod registry;

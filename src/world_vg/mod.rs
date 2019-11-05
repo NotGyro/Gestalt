@@ -2,6 +2,7 @@
 
 pub mod generators;
 
+#[allow(dead_code)]
 pub mod chunk;
 pub mod dimension;
 
