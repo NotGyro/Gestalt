@@ -28,7 +28,7 @@ impl TextureRegistry {
 
     /// Loads the textures from disk, and onto the GPU.
     pub fn load(&mut self, queue: Arc<Queue>) {
-        let tex_names = [ String::from("stone"), String::from("dirt"), String::from("grass") ];
+        let tex_names = [ String::from("stone"), String::from("dirt"), String::from("grass"), String::from("test") ];
 
         for name in tex_names.iter().clone() {
             let (texture, _future) = {

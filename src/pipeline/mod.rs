@@ -8,7 +8,7 @@ pub use self::lines_pipeline::LinesRenderPipeline;
 pub use self::skybox_pipeline::SkyboxRenderPipeline;
 
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use cgmath::Matrix4;
 use vulkano::command_buffer::AutoCommandBuffer;
@@ -40,7 +40,7 @@ pub trait RenderPipelineAbstract {
 
     fn get_framebuffers_mut(&mut self) -> &mut Option<Vec<Arc<dyn FramebufferAbstract + Send + Sync>>>;
     fn get_renderpass(&self) -> Arc<dyn RenderPassAbstract + Send + Sync>;
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: &RenderQueue) -> AutoCommandBuffer;
+    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer;
 
 
     // Provided methods

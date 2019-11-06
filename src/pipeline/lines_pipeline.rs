@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use cgmath::Matrix4;
 use vulkano::buffer::BufferUsage;
@@ -73,7 +73,7 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
     }
 
 
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: &RenderQueue) -> AutoCommandBuffer {
+    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let descriptor_set;
         let subbuffer = self.uniform_buffer_pool.next(LinesShaders::vertex::ty::Data {
             world: Matrix4::from_scale(1.0).into(),
@@ -84,6 +84,7 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
             .add_buffer(subbuffer).unwrap()
             .build().unwrap()
         );
+        let lock = render_queue.read().unwrap();
         AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), info.queue.family())
             .unwrap()
             .begin_render_pass(
@@ -98,8 +99,8 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
                 }]),
                 scissors: None,
             },
-                          vec![render_queue.lines.chunk_lines_vertex_buffer.clone()],
-                          render_queue.lines.chunk_lines_index_buffer.clone(),
+                          vec![lock.lines.chunk_lines_vertex_buffer.clone()],
+                          lock.lines.chunk_lines_index_buffer.clone(),
                           descriptor_set.clone(), ()).unwrap()
             .end_render_pass().unwrap()
             .build().unwrap()

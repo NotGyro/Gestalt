@@ -77,7 +77,7 @@ impl ChunkGenerator for PerlinGenerator {
         for x in 0..64 {
             for z in 0..64 {
                 let height_norm = self.perlin.get([((pos.0*64 + x) as f64 + self.offset) * self.scale, ((pos.2*64 + z) as f64 + self.offset) * self.scale]) / 2.0 + 0.5;
-                let height_abs = height_norm as f32 * 64.0;
+                let height_abs = height_norm as f32 * 32.0;
 
                 for y in 0..64 {
 

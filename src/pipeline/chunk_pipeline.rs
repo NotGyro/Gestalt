@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::cpu_pool::CpuBufferPool;
@@ -78,9 +78,10 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
     }
 
 
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: &RenderQueue) -> AutoCommandBuffer {
+    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let mut descriptor_sets = Vec::new();
-        for entry in render_queue.chunk_meshes.iter() {
+        let lock = render_queue.read().unwrap();
+        for entry in lock.chunk_meshes.iter() {
             let uniform_data = ChunksShaders::vertex::ty::Data {
                 world: entry.transform.clone().into(),
                 view: info.view_mat.into(),
@@ -103,7 +104,7 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
             .begin_render_pass(
                 self.framebuffers.as_ref().unwrap()[info.image_num].clone(), false,
                 vec![::vulkano::format::ClearValue::None, ::vulkano::format::ClearValue::None]).unwrap();
-        for (i, entry) in render_queue.chunk_meshes.iter().enumerate() {
+        for (i, entry) in lock.chunk_meshes.iter().enumerate() {
             cb = cb.draw_indexed(self.vulkan_pipeline.clone(), &DynamicState {
                 line_width: None,
                 viewports: Some(vec![Viewport {

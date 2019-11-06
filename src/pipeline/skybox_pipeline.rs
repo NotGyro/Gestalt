@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::path::Path;
 
 use vulkano::buffer::BufferUsage;
@@ -145,7 +145,7 @@ impl RenderPipelineAbstract for SkyboxRenderPipeline {
     }
 
 
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, _rq: &RenderQueue) -> AutoCommandBuffer {
+    fn build_command_buffer(&self, info: PipelineCbCreateInfo, _rq: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let descriptor_set;
         let subbuffer = self.uniform_buffer_pool.next(SkyboxShaders::vertex::ty::Data {
             projection: info.proj_mat.into(),

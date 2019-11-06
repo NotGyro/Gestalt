@@ -1,6 +1,6 @@
 //! Main renderer.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::collections::VecDeque;
 
 use cgmath::{EuclideanSpace, Matrix4, Vector4};
@@ -81,7 +81,7 @@ pub struct Renderer {
     /// List of render pipelines.
     pipelines: Vec<Box<dyn RenderPipelineAbstract>>,
     /// Render queue.
-    pub render_queue: RenderQueue
+    pub render_queue: Arc<RwLock<RenderQueue>>
 }
 
 
@@ -154,14 +154,14 @@ impl Renderer {
             recreate_swapchain: false,
             tex_registry,
             pipelines,
-            render_queue: RenderQueue {
+            render_queue: Arc::new(RwLock::new(RenderQueue {
                 chunk_meshes: Vec::new(),
                 lines: LineRenderQueue {
                     chunk_lines_vertex_buffer,
                     chunk_lines_index_buffer,
-                    chunks_changed: false
+                    chunks_changed: false,
                 }
-            },
+            })),
         }
     }
 
@@ -222,7 +222,7 @@ impl Renderer {
                 image_num, dimensions, queue: self.queue.clone(), camera_transform: transform.clone(),
                 view_mat: view_mat.clone(), proj_mat: proj_mat.clone(), tex_registry: self.tex_registry.clone()
             };
-            cbs.push_back(pipeline.build_command_buffer(info, &self.render_queue));
+            cbs.push_back(pipeline.build_command_buffer(info, self.render_queue.clone()));
         }
 
         let mut future_box: Box<dyn GpuFuture> = Box::new(future);
