@@ -31,23 +31,24 @@ impl Camera {
 
 pub mod cube {
     use ::geometry::VertexPositionColorAlpha;
+    use world::CHUNK_SIZE_F32;
 
 
     pub fn generate_chunk_debug_line_vertices(x: i32, y: i32, z: i32, a: f32) -> [VertexPositionColorAlpha; 8] {
-        let x = x as f32 * 64f32;
-        let y = y as f32 * 64f32;
-        let z = z as f32 * 64f32;
+        let x = x as f32 * CHUNK_SIZE_F32;
+        let y = y as f32 * CHUNK_SIZE_F32;
+        let z = z as f32 * CHUNK_SIZE_F32;
         [
             // top
-            VertexPositionColorAlpha { position: [ x,      y+64.0, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+64.0, y+64.0, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+64.0, y+64.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x,      y+64.0, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,                y+CHUNK_SIZE_F32, z+CHUNK_SIZE_F32 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+CHUNK_SIZE_F32, y+CHUNK_SIZE_F32, z+CHUNK_SIZE_F32 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+CHUNK_SIZE_F32, y+CHUNK_SIZE_F32, z                ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,                y+CHUNK_SIZE_F32, z                ], color: [ 1.0, 1.0, 1.0, a ] },
             // bottom
-            VertexPositionColorAlpha { position: [ x,      y, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+64.0, y, z+64.0 ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x+64.0, y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
-            VertexPositionColorAlpha { position: [ x,      y, z      ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,                y, z+CHUNK_SIZE_F32 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+CHUNK_SIZE_F32, y, z+CHUNK_SIZE_F32 ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x+CHUNK_SIZE_F32, y, z                ], color: [ 1.0, 1.0, 1.0, a ] },
+            VertexPositionColorAlpha { position: [ x,                y, z                ], color: [ 1.0, 1.0, 1.0, a ] },
         ]
     }
 

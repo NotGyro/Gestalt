@@ -187,7 +187,7 @@ fn test_subdiv_space() {
 
     let mut world : SubdivSpace<NaiveVoxelOctree<TileID, ()>> = SubdivSpace::new();
 
-    assert_eq!(world.get_chunk_size(0), 64);
+    assert_eq!(world.get_chunk_size(0), 32);
 
     let mut chunk : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(stone_id)};
     chunk.set(opos!((1,0,1) @ 3), air_id).unwrap();

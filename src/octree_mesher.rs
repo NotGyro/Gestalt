@@ -7,6 +7,8 @@ use voxel::subdivmath::OctPos;
 use cgmath::Point3;
 use world::Chunk;
 use hashbrown::HashSet;
+use world::{CHUNK_SIZE, CHUNK_SIZE_F32};
+use voxel::subdivstorage::{SubdivVoxelSource, SubdivNode};
 
 /// Struct used internally to represent unoptimized quads.
 #[derive(Debug, Clone)]
@@ -21,28 +23,25 @@ pub enum QuadFacing {
     Left, Right, Bottom, Top, Front, Back,
 }
 
-//fn idx_to_xyz(idx: usize) -> (usize, usize, usize) {
-//    ((idx / (64*64)), (idx / 64) % 64, idx % (64*64))
-//}
-
 fn xyz_to_idx(x: usize, y: usize, z: usize) -> usize {
-    (x*64*64) + (y*64) + z
+    (x * CHUNK_SIZE * CHUNK_SIZE) + (y * CHUNK_SIZE) + z
 }
 
-fn generate_slice(ids: &[u8; 64*64*64], facing: QuadFacing, layer: usize) -> Vec<OutputQuad> {
+fn generate_slice(ids: &[u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE], facing: QuadFacing, layer: usize) -> Vec<OutputQuad> {
     // used to mark quads that overlap quads on other layers as not visible to cull them
+    const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
     let adjacent_index_offset: i32 = match facing {
-        QuadFacing::Left   => -64*64,
-        QuadFacing::Right  =>  64*64,
-        QuadFacing::Bottom => -64,
-        QuadFacing::Top    =>  64,
+        QuadFacing::Left   => -CHUNK_SIZE_I32*CHUNK_SIZE_I32,
+        QuadFacing::Right  =>  CHUNK_SIZE_I32*CHUNK_SIZE_I32,
+        QuadFacing::Bottom => -CHUNK_SIZE_I32,
+        QuadFacing::Top    =>  CHUNK_SIZE_I32,
         QuadFacing::Front  => -1,
         QuadFacing::Back   =>  1
     };
 
     let mut input_quads = Vec::new();
-    for y in 0..64 {
-        for x in 0..64 {
+    for y in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
             match facing {
                 QuadFacing::Left | QuadFacing::Right => {
                     // iterate across a slice where the first coord is fixed as the layer number and
@@ -51,22 +50,22 @@ fn generate_slice(ids: &[u8; 64*64*64], facing: QuadFacing, layer: usize) -> Vec
                     // index of adjacent block
                     let adj_index: i32 = index as i32 + adjacent_index_offset;
                     // face isn't visible if it's air (0) or has a valid non-air block in front of it
-                    let mut face_visible = ids[index] != 0 && !(adj_index >= 0 && adj_index < 64*64*64 && ids[adj_index as usize] != 0);
-                    if adj_index / (64*64) == 0 { face_visible = true; }
+                    let mut face_visible = ids[index] != 0 && !(adj_index >= 0 && adj_index < (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as i32 && ids[adj_index as usize] != 0);
+                    if adj_index / (CHUNK_SIZE_I32*CHUNK_SIZE_I32) == 0 { face_visible = true; }
                     input_quads.push(InputQuad { x, y, face_visible, done: false, block_id: ids[index] });
                 },
                 QuadFacing::Top | QuadFacing::Bottom => {
                     let index = xyz_to_idx(x, layer, y);
                     let adj_index: i32 = index as i32 + adjacent_index_offset;
-                    let mut face_visible = ids[index] != 0 && !(adj_index >= 0 && adj_index < 64*64*64 && ids[adj_index as usize] != 0);
-                    if (adj_index / 64) % 64 == 0 { face_visible = true; }
+                    let mut face_visible = ids[index] != 0 && !(adj_index >= 0 && adj_index < (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as i32 && ids[adj_index as usize] != 0);
+                    if (adj_index / CHUNK_SIZE_I32) % CHUNK_SIZE_I32 == 0 { face_visible = true; }
                     input_quads.push(InputQuad { x, y, face_visible, done: false, block_id: ids[index] });
                 },
                 QuadFacing::Front | QuadFacing::Back => {
                     let index = xyz_to_idx(x, y, layer);
                     let adj_index: i32 = index as i32 + adjacent_index_offset;
-                    let mut face_visible = ids[index] != 0 && !(adj_index >= 0 && adj_index < 64*64*64 && ids[adj_index as usize] != 0);
-                    if adj_index % 64 == 0 { face_visible = true; }
+                    let mut face_visible = ids[index] != 0 && !(adj_index >= 0 && adj_index < (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as i32 && ids[adj_index as usize] != 0);
+                    if adj_index % CHUNK_SIZE_I32 == 0 { face_visible = true; }
                     input_quads.push(InputQuad { x, y, face_visible, done: false, block_id: ids[index] });
                 }
             }
@@ -76,7 +75,7 @@ fn generate_slice(ids: &[u8; 64*64*64], facing: QuadFacing, layer: usize) -> Vec
     let mut output_quads = Vec::new();
     let mut current_quad: Option<OutputQuad> = None;
     let mut i = 0;
-    while i < 64*64 {
+    while i < CHUNK_SIZE*CHUNK_SIZE {
         let mut q = input_quads.get_mut(i).unwrap().clone();
         if current_quad.is_none() {
             if q.face_visible && !q.done {
@@ -107,24 +106,24 @@ fn generate_slice(ids: &[u8; 64*64*64], facing: QuadFacing, layer: usize) -> Vec
         }
         if current.width_done {
             let mut y = current.y + 1;
-            if y < 64 {
+            if y < CHUNK_SIZE {
                 loop {
                     let x_min = current.x;
                     let x_max = current.x + current.w;
                     let mut ok = true;
                     for x in x_min..x_max {
-                        if !input_quads[y*64+x].face_visible || input_quads[y*64+x].done || input_quads[y*64+x].block_id != current.block_id {
+                        if !input_quads[y*CHUNK_SIZE+x].face_visible || input_quads[y*CHUNK_SIZE+x].done || input_quads[y*CHUNK_SIZE+x].block_id != current.block_id {
                             ok = false;
                             break;
                         }
                     }
                     if ok {
                         for x in x_min..x_max {
-                            input_quads[y*64+x].done = true;
+                            input_quads[y*CHUNK_SIZE+x].done = true;
                         }
                         current.h += 1;
                         y += 1;
-                        if y >= 64 { break; }
+                        if y >= CHUNK_SIZE { break; }
                     }
                     else { break; }
                 }
@@ -135,7 +134,7 @@ fn generate_slice(ids: &[u8; 64*64*64], facing: QuadFacing, layer: usize) -> Vec
         }
         i += 1;
         // when i == 16*16, loop would end without adding quad
-        if i == 64*64 {
+        if i == CHUNK_SIZE*CHUNK_SIZE {
             output_quads.push(current.clone());
             break;
         }
@@ -151,33 +150,29 @@ impl OctreeMesher {
     pub fn generate_mesh(chunk: &mut Chunk, device: Arc<Device>, memory_pool: AutoMemoryPool) {
         let mut mesh = Mesh::new();
 
-        let mut ids = [0u8; 64*64*64];
+        let mut ids = [0u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
         let mut unique_ids = HashSet::new();
 
         // collect block info in flat array
-        chunk.data.root.traverse(OctPos::from_four(0, 0, 0, 6), &mut |pos: OctPos<u32>, block_id: u8| {
-            let x = pos.pos.x as u32;
-            let y = pos.pos.y as u32;
-            let z = pos.pos.z as u32;
-            let size = 2u32.pow(pos.scale as u32);
-            for xo in 0..size {
-                for yo in 0..size {
-                    for zo in 0..size {
-                        let idx = (
-                            ((x + xo) * 64 * 64)  +  ((y + yo) * 64)  +  (z + zo)
-                        ) as usize;
-                        ids[idx] = block_id;
-                        if block_id != 0 {
-                            unique_ids.insert(block_id);
-                        }
+        for x in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    let idx = (x * CHUNK_SIZE * CHUNK_SIZE)  +  (y * CHUNK_SIZE )  +  z;
+                    let block_id: u8 = match chunk.data.get(opos!((x, y, z) @ 0)).unwrap() {
+                        SubdivNode::Leaf(l) => l,
+                        SubdivNode::Branch(_) => { panic!(); },
+                    };
+                    ids[idx] = block_id;
+                    if block_id != 0 {
+                        unique_ids.insert(block_id);
                     }
                 }
             }
-        });
+        }
 
         // generate optimized quads from slices
         let mut quad_lists = Vec::new();
-        for layer in 0..64 {
+        for layer in 0..CHUNK_SIZE {
             // ( facing, layer number, Vec< OutputQuad > )
             quad_lists.push((QuadFacing::Left, layer, generate_slice(&ids, QuadFacing::Left, layer)));
             quad_lists.push((QuadFacing::Right, layer, generate_slice(&ids, QuadFacing::Right, layer)));
@@ -244,9 +239,9 @@ impl OctreeMesher {
         }
 
 
-        mesh.transform = Transform::from_position(Point3::new(chunk.position.0 as f32 * 64.0,
-                                                              chunk.position.1 as f32 * 64.0,
-                                                              chunk.position.2 as f32 * 64.0));
+        mesh.transform = Transform::from_position(Point3::new(chunk.position.0 as f32 * CHUNK_SIZE_F32,
+                                                              chunk.position.1 as f32 * CHUNK_SIZE_F32,
+                                                              chunk.position.2 as f32 * CHUNK_SIZE_F32));
 
         mesh.materials.push(Material { albedo_map_name: String::from(""), specular_exponent: 0.0, specular_strength: 0.0 });
         mesh.materials.push(Material { albedo_map_name: String::from("stone"), specular_exponent: 128.0, specular_strength: 1.0 });

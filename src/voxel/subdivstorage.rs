@@ -330,6 +330,7 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
         //}
     }
 
+    #[allow(dead_code)]
     pub fn traverse<F>(&self, pos: OctPos<u32>, func: &mut F) where F: FnMut(OctPos<u32>, L) {
         match self {
             SubdivNode::Leaf(l) => {

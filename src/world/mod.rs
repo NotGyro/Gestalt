@@ -19,6 +19,8 @@ pub use self::dimension::Dimension;
 /// This also corresponds to the height of the root node on an octree: 
 /// CHUNK_SCALE steps down from the root node is your 1x1x1 meter cube.
 #[allow(dead_code)]
-pub const CHUNK_SCALE : i8 = 6;
+pub const CHUNK_SCALE : i8 = 5; // 32x32x32 meters
+pub const CHUNK_SIZE : usize = 32; // 2 ^ 5
+pub const CHUNK_SIZE_F32 : f32 = 32.0; // 2 ^ 5
 //Good candidates are 5 (32 meters to a side), 6 (64 meters to a side),
 //or 8 (256 meters to a side).

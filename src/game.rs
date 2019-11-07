@@ -5,7 +5,7 @@ use std::time::Instant;
 use std::sync::atomic::Ordering;
 use std::thread;
 
-use cgmath::Point3;
+use cgmath::{Point3, MetricSpace};
 use vulkano::buffer::BufferUsage;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -18,7 +18,7 @@ use renderer::Renderer;
 use input::InputState;
 use registry::DimensionRegistry;
 use player::Player;
-use world::Dimension;
+use world::{Dimension, Chunk};
 use world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
 
 
@@ -181,27 +181,42 @@ impl Game {
             lock.chunk_meshes.clear();
         }
         {
-            let mut chunks = self.dimension_registry.get(0).unwrap().chunks.write().unwrap();
-            for (_, (ref mut chunk, ref mut state)) in chunks.iter_mut() {
-                if self.chunk_meshing_threads.load(Ordering::Relaxed) >= MAX_CHUNK_MESH_THREADS {
-                    break;
-                }
-                let is_dirty = state.load(Ordering::Relaxed) == CHUNK_STATE_DIRTY;
-                if is_dirty {
-                    self.chunk_meshing_threads.fetch_add(1, Ordering::Relaxed);
-                    state.store(CHUNK_STATE_WRITING, Ordering::Relaxed);
-                    let chunk_arc = chunk.clone();
-                    let device_arc = self.renderer.device.clone();
-                    let memory_pool_arc = self.renderer.memory_pool.clone();
-                    let state_arc = state.clone();
-                    let thread_count_clone = self.chunk_meshing_threads.clone();
-                    thread::spawn(move || {
-                        let mut chunk_lock = chunk_arc.write().unwrap();
-                        (*chunk_lock).generate_mesh(device_arc, memory_pool_arc);
-                        state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
-                        thread_count_clone.fetch_sub(1, Ordering::Relaxed);
-                    });
-                    break;
+            if self.chunk_meshing_threads.load(Ordering::Relaxed) < MAX_CHUNK_MESH_THREADS {
+                let mut chunks = self.dimension_registry.get(0).unwrap().chunks.write().unwrap();
+                let mut chunk_positions: Vec< (i32, i32, i32) > = chunks.keys().cloned().collect();
+
+                let player_pos = self.player.position.clone();
+                chunk_positions.sort_by(|a, b| {
+                    let a_world = Chunk::chunk_pos_to_center_ws(*a);
+                    let b_world = Chunk::chunk_pos_to_center_ws(*b);
+                    let pdist_a = Point3::distance(Point3::new(a_world.0, a_world.1, a_world.2), player_pos);
+                    let pdist_b = Point3::distance(Point3::new(b_world.0, b_world.1, b_world.2), player_pos);
+                    pdist_a.partial_cmp(&pdist_b).unwrap()
+                });
+
+                for chunk_pos in chunk_positions {
+                    match chunks.get_mut(&chunk_pos) {
+                        Some((ref mut chunk, ref mut state)) => {
+                            let is_dirty = state.load(Ordering::Relaxed) == CHUNK_STATE_DIRTY;
+                            if is_dirty {
+                                self.chunk_meshing_threads.fetch_add(1, Ordering::Relaxed);
+                                state.store(CHUNK_STATE_WRITING, Ordering::Relaxed);
+                                let chunk_arc = chunk.clone();
+                                let device_arc = self.renderer.device.clone();
+                                let memory_pool_arc = self.renderer.memory_pool.clone();
+                                let state_arc = state.clone();
+                                let thread_count_clone = self.chunk_meshing_threads.clone();
+                                thread::spawn(move || {
+                                    let mut chunk_lock = chunk_arc.write().unwrap();
+                                    (*chunk_lock).generate_mesh(device_arc, memory_pool_arc);
+                                    state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
+                                    thread_count_clone.fetch_sub(1, Ordering::Relaxed);
+                                });
+                                break;
+                            }
+                        },
+                        None => { continue; }
+                    }
                 }
             }
         }

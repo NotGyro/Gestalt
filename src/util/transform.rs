@@ -2,7 +2,7 @@ use cgmath::{Point3, Quaternion, Vector3, Matrix4, EuclideanSpace};
 
 
 /// A 3D transform, with position, rotation, and scale.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Transform {
     pub position: Point3<f32>,
     pub rotation: Quaternion<f32>,
