@@ -207,8 +207,8 @@ fn test_subdiv_space() {
     world.load_new_chunk(chunk_1_pos, chunk);
     world.load_new_chunk(chunk_2_pos, chunk2);
     world.load_new_chunk(chunk_3_pos, chunk3);
-    assert_eq!(world.get(opos!((72,0,0) @ 0)).unwrap(), SubdivNode::Leaf(lava_id) );
-    assert_eq!(world.get(opos!((129,0,0) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
+    assert_eq!(world.get(opos!((40,0,0) @ 0)).unwrap(), SubdivNode::Leaf(lava_id) );
+    assert_eq!(world.get(opos!((65,0,0) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
     assert_eq!(world.get(opos!((9,0,9) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
     assert_eq!(world.get(opos!((3,3,3) @ 0)).unwrap(), SubdivNode::Leaf(stone_id) );
 }

@@ -5,7 +5,7 @@ use std::time::Instant;
 use std::sync::atomic::Ordering;
 use std::thread;
 
-use cgmath::{Point3, MetricSpace};
+use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
 use vulkano::buffer::BufferUsage;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -18,8 +18,9 @@ use renderer::Renderer;
 use input::InputState;
 use registry::DimensionRegistry;
 use player::Player;
-use world::{Dimension, Chunk};
+use world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
+use util::{view_to_frustum, aabb_frustum_intersection};
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
@@ -52,8 +53,8 @@ impl Game {
 
         let mut player = Player::new();
         player.position = Point3::new(16.0, 32.0, 16.0);
-        player.yaw = 135.0;
-        player.pitch = -30.0;
+        //player.yaw = 135.0;
+        //player.pitch = -30.0;
 
         let mut dimension_registry = DimensionRegistry::new();
         let dimension = Dimension::new();
@@ -107,6 +108,7 @@ impl Game {
                     }
                 },
                 Event::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
+                    let delta = (delta.0 as f32, delta.1 as f32);
                     self.input_state.add_mouse_delta(delta);
                     if self.input_state.right_mouse_pressed {
                         let dimensions = match self.surface.window().get_inner_size() {
@@ -224,9 +226,13 @@ impl Game {
         // queueing chunks and drawing
         {
             let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
-            for (_, (chunk, state)) in chunks.iter() {
+            let frustum = view_to_frustum(self.player.pitch, self.player.yaw, self.player.camera.fov, 4.0/3.0, 1.0, 10000.0);
+            for (pos, (chunk, state)) in chunks.iter() {
+                let aabb_min = Point3::new(pos.0 as f32, pos.1 as f32, pos.2 as f32) * CHUNK_SIZE_F32 - self.player.position.to_vec();
+                let aabb_max = aabb_min + Vector3::new(CHUNK_SIZE_F32, CHUNK_SIZE_F32, CHUNK_SIZE_F32);
                 let is_ready = state.load(Ordering::Relaxed) == CHUNK_STATE_CLEAN;
-                if is_ready {
+                let is_in_view = aabb_frustum_intersection(aabb_min, aabb_max, frustum.clone());
+                if is_ready && is_in_view {
                     let chunk_lock = chunk.read().unwrap();
                     let mut queue_lock = self.renderer.render_queue.write().unwrap();
                     queue_lock.chunk_meshes.append(&mut chunk_lock.mesh.queue());

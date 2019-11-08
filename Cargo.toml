@@ -1,7 +1,15 @@
 [package]
 name = "gestalt"
 version = "0.0.1"
-authors = ["gyro"]
+authors = ["gyro", "trashbyte"]
+
+[lib]
+name = "gestalt"
+path = "src/main.rs"
+
+[[bin]]
+name = "gestalt"
+path = "src/bin/main.rs"
 
 [dependencies]
 cgmath = { version = "0.17.0", features = [ "swizzle" ] }

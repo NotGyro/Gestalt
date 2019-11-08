@@ -9,7 +9,7 @@ use winit::{ElementState, VirtualKeyCode, KeyboardInput};
 #[derive(Clone, Default)]
 pub struct InputState {
     keys_held: HashSet<VirtualKeyCode>,
-    pub mouse_delta: (f64, f64),
+    pub mouse_delta: (f32, f32),
     pub right_mouse_pressed: bool
 }
 
@@ -48,7 +48,7 @@ impl InputState {
 
 
     /// Adds mouse input. Used in the game update loop.
-    pub fn add_mouse_delta(&mut self, delta: (f64, f64)) {
+    pub fn add_mouse_delta(&mut self, delta: (f32, f32)) {
         self.mouse_delta = (self.mouse_delta.0 + delta.0, self.mouse_delta.1 + delta.1);
     }
 }

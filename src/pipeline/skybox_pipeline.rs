@@ -60,7 +60,7 @@ impl SkyboxRenderPipeline {
             .build(device.clone())
             .unwrap());
 
-        const SIZE: f32 = 500.0;
+        const SIZE: f32 = 5000.0;
         let verts = vec![
             VertexPositionUV { position: [  SIZE, -SIZE, -SIZE ], uv: [ 0.3333, 0.5 ] },
             VertexPositionUV { position: [ -SIZE, -SIZE, -SIZE ], uv: [ 0.6666, 0.5 ] },

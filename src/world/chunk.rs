@@ -40,9 +40,9 @@ impl Chunk {
         }
     }
 
-    /// Generates a mesh for the chunk, using [::octree_mesher::OctreeMesher].
+    /// Generates a mesh for the chunk, using [::chunk_mesher].
     pub fn generate_mesh(&mut self, device: Arc<Device>, memory_pool: AutoMemoryPool) {
-        ::octree_mesher::OctreeMesher::generate_mesh(self, device, memory_pool);
+        ::chunk_mesher::generate_mesh(self, device, memory_pool);
     }
 
     /// convert a position in chunks to a world space position for the center of that chunk

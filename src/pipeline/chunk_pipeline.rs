@@ -81,6 +81,7 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
     fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let mut descriptor_sets = Vec::new();
         let lock = render_queue.read().unwrap();
+        println!("chunks being drawn: {}", lock.chunk_meshes.len());
         for entry in lock.chunk_meshes.iter() {
             let uniform_data = ChunksShaders::vertex::ty::Data {
                 world: entry.transform.clone().into(),

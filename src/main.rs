@@ -34,27 +34,27 @@ extern crate vek;
 
 // modules
 
-#[macro_use] mod voxel;
+#[macro_use] pub mod voxel;
 
-mod buffer;
-mod client;
-mod entity;
-mod game;
-mod geometry;
-mod input;
-mod memory;
-mod mesh_simplifier;
-mod octree_mesher;
-mod player;
-mod pipeline;
-mod registry;
-mod renderer;
-mod renderpass;
-mod shader;
-mod network;
-mod util;
-mod vulkano_win;
-mod world;
+pub mod buffer;
+pub mod client;
+pub mod entity;
+pub mod game;
+pub mod geometry;
+pub mod input;
+pub mod memory;
+pub mod mesh_simplifier;
+pub mod chunk_mesher;
+pub mod player;
+pub mod pipeline;
+pub mod registry;
+pub mod renderer;
+pub mod renderpass;
+pub mod shader;
+pub mod network;
+pub mod util;
+pub mod vulkano_win;
+pub mod world;
 
 // imports
 
@@ -71,7 +71,7 @@ pub enum NetworkRole {
 }
 
 
-fn main() {
+pub fn main() {
     // command line parsing (currently unused)
     let matches = App::new("Gestalt Engine")
         .arg(Arg::with_name("server")
