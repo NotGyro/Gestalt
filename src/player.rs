@@ -15,9 +15,9 @@ pub struct Player {
     /// Camera the player is looking through.
     pub camera: Camera,
     /// Pitch (vertical rotation) of the player camera.
-    pub pitch: f64,
+    pub pitch: f32,
     /// Yaw (horizontal rotation) of the player camera.
-    pub yaw: f64,
+    pub yaw: f32,
     /// ID of the dimension the player is currently in.
     pub dimension_id: u32
 }
@@ -39,9 +39,9 @@ impl Player {
     /// Updates the player. Called every frame in the game loop.
     pub fn update(&mut self, dt: f64, input: &InputState) {
         if input.right_mouse_pressed {
-            const MOUSE_SPEED: f64 = 3.0;
-            self.yaw += input.mouse_delta.0 * MOUSE_SPEED * dt;
-            self.pitch -= input.mouse_delta.1 * MOUSE_SPEED * dt;
+            const MOUSE_SPEED: f32 = 3.0;
+            self.yaw += input.mouse_delta.0 * MOUSE_SPEED * dt as f32;
+            self.pitch -= input.mouse_delta.1 * MOUSE_SPEED * dt as f32;
             if self.pitch < -89.0 { self.pitch = -89.0; }
             if self.pitch > 89.0 { self.pitch = 89.0; }
 

@@ -1,7 +1,7 @@
 //! Custom RenderPass types.
 
 
-use vulkano::framebuffer::{RenderPassDesc, LayoutAttachmentDescription, LayoutPassDescription, LayoutPassDependencyDescription, LoadOp, StoreOp, RenderPassDescClearValues};
+use vulkano::framebuffer::{RenderPassDesc, AttachmentDescription, PassDescription, PassDependencyDescription, LoadOp, StoreOp, RenderPassDescClearValues};
 use vulkano::image::ImageLayout;
 use vulkano::format::{Format, ClearValue};
 
@@ -14,9 +14,9 @@ pub struct RenderPassClearedColorWithDepth {
 
 unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
     fn num_attachments(&self) -> usize { 2 }
-    fn attachment_desc(&self, num: usize) -> Option<LayoutAttachmentDescription> {
+    fn attachment_desc(&self, num: usize) -> Option<AttachmentDescription> {
         match num {
-            0 => Some(LayoutAttachmentDescription {
+            0 => Some(AttachmentDescription {
                 format: self.color_format,
                 samples: 1,
                 load: LoadOp::Clear,
@@ -26,7 +26,7 @@ unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
                 initial_layout: ImageLayout::Undefined,
                 final_layout: ImageLayout::ColorAttachmentOptimal
             }),
-            1 => Some(LayoutAttachmentDescription {
+            1 => Some(AttachmentDescription {
                 format: Format::D32Sfloat,
                 samples: 1,
                 load: LoadOp::Clear,
@@ -41,9 +41,9 @@ unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
     }
 
     fn num_subpasses(&self) -> usize { 1 }
-    fn subpass_desc(&self, num: usize) -> Option<LayoutPassDescription> {
+    fn subpass_desc(&self, num: usize) -> Option<PassDescription> {
         match num {
-            0 => Some(LayoutPassDescription {
+            0 => Some(PassDescription {
                 color_attachments: vec![ (0, ImageLayout::ColorAttachmentOptimal) ],
                 depth_stencil: Some((1, ImageLayout::DepthStencilAttachmentOptimal)),
                 input_attachments: vec![],
@@ -55,7 +55,7 @@ unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
     }
 
     fn num_dependencies(&self) -> usize { 0 }
-    fn dependency_desc(&self, _num: usize) -> Option<LayoutPassDependencyDescription> { None }
+    fn dependency_desc(&self, _num: usize) -> Option<PassDependencyDescription> { None }
 }
 
 
@@ -75,9 +75,9 @@ pub struct RenderPassUnclearedColorWithDepth {
 
 unsafe impl RenderPassDesc for RenderPassUnclearedColorWithDepth {
     fn num_attachments(&self) -> usize { 2 }
-    fn attachment_desc(&self, num: usize) -> Option<LayoutAttachmentDescription> {
+    fn attachment_desc(&self, num: usize) -> Option<AttachmentDescription> {
         match num {
-            0 => Some(LayoutAttachmentDescription {
+            0 => Some(AttachmentDescription {
                 format: self.color_format,
                 samples: 1,
                 load: LoadOp::Load,
@@ -87,7 +87,7 @@ unsafe impl RenderPassDesc for RenderPassUnclearedColorWithDepth {
                 initial_layout: ImageLayout::Undefined,
                 final_layout: ImageLayout::ColorAttachmentOptimal
             }),
-            1 => Some(LayoutAttachmentDescription {
+            1 => Some(AttachmentDescription {
                 format: Format::D32Sfloat,
                 samples: 1,
                 load: LoadOp::Load,
@@ -102,9 +102,9 @@ unsafe impl RenderPassDesc for RenderPassUnclearedColorWithDepth {
     }
 
     fn num_subpasses(&self) -> usize { 1 }
-    fn subpass_desc(&self, num: usize) -> Option<LayoutPassDescription> {
+    fn subpass_desc(&self, num: usize) -> Option<PassDescription> {
         match num {
-            0 => Some(LayoutPassDescription {
+            0 => Some(PassDescription {
                 color_attachments: vec![ (0, ImageLayout::ColorAttachmentOptimal) ],
                 depth_stencil: Some((1, ImageLayout::DepthStencilAttachmentOptimal)),
                 input_attachments: vec![],
@@ -116,7 +116,7 @@ unsafe impl RenderPassDesc for RenderPassUnclearedColorWithDepth {
     }
 
     fn num_dependencies(&self) -> usize { 0 }
-    fn dependency_desc(&self, _num: usize) -> Option<LayoutPassDependencyDescription> { None }
+    fn dependency_desc(&self, _num: usize) -> Option<PassDependencyDescription> { None }
 }
 
 

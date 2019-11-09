@@ -14,7 +14,7 @@ pub use self::vertexgroup::VertexGroup;
 
 
 /// Shader parameters for a given material.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Material {
     /// Name of albedo map, used to look up texture in the [TextureRegistry](::registry::TextureRegistry).
     pub albedo_map_name: String,

@@ -17,6 +17,7 @@ use memory::pool::AutoMemoryPool;
 /// Vertex group object. Material id is a `u8` which corresponds to the index of a material in the owning [Mesh](super::Mesh).
 ///
 /// See [module-level documentation](self).
+#[derive(Debug)]
 pub struct VertexGroup {
     /// Vertex data. Set this and call [update_vertex_buffer](VertexGroup::update_vertex_buffer) to update the buffer.
     pub vertices: Vec<VertexPositionNormalUVColor>,

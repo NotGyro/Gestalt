@@ -1,6 +1,6 @@
 //! Main renderer.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::collections::VecDeque;
 
 use cgmath::{EuclideanSpace, Matrix4, Vector4};
@@ -19,10 +19,11 @@ use util::{Camera, Transform};
 use geometry::{VertexGroup, Material};
 use registry::TextureRegistry;
 use memory::pool::AutoMemoryPool;
-use pipeline::{RenderPipelineAbstract, SkyboxRenderPipeline, ChunkRenderPipeline, LinesRenderPipeline, PipelineCbCreateInfo};
+use pipeline::{RenderPipelineAbstract, SkyboxRenderPipeline, ChunkRenderPipeline, LinesRenderPipeline, PipelineCbCreateInfo, TextRenderPipeline};
 
 use buffer::CpuAccessibleBufferAutoPool;
 use geometry::VertexPositionColorAlpha;
+use pipeline::text_pipeline::TextData;
 
 
 /// Matrix to correct vulkan clipping planes and flip y axis.
@@ -38,7 +39,8 @@ pub static VULKAN_CORRECT_CLIP: Matrix4<f32> = Matrix4 {
 /// Queue of all objects to be drawn.
 pub struct RenderQueue {
     pub chunk_meshes: Vec<ChunkRenderQueueEntry>,
-    pub lines: LineRenderQueue
+    pub lines: LineRenderQueue,
+    pub text: Vec<TextData>,
 }
 
 
@@ -81,7 +83,7 @@ pub struct Renderer {
     /// List of render pipelines.
     pipelines: Vec<Box<dyn RenderPipelineAbstract>>,
     /// Render queue.
-    pub render_queue: RenderQueue
+    pub render_queue: Arc<RwLock<RenderQueue>>
 }
 
 
@@ -139,6 +141,7 @@ impl Renderer {
         pipelines.push(Box::new(SkyboxRenderPipeline::new(&swapchain, &device, &queue, &memory_pool)));
         pipelines.push(Box::new(ChunkRenderPipeline::new(&swapchain, &device)));
         pipelines.push(Box::new(LinesRenderPipeline::new(&swapchain, &device)));
+        pipelines.push(Box::new(TextRenderPipeline::new(&swapchain, &device, &memory_pool)));
 
         let chunk_lines_vertex_buffer = CpuAccessibleBufferAutoPool::<[VertexPositionColorAlpha]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
         let chunk_lines_index_buffer = CpuAccessibleBufferAutoPool::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
@@ -154,14 +157,15 @@ impl Renderer {
             recreate_swapchain: false,
             tex_registry,
             pipelines,
-            render_queue: RenderQueue {
+            render_queue: Arc::new(RwLock::new(RenderQueue {
                 chunk_meshes: Vec::new(),
                 lines: LineRenderQueue {
                     chunk_lines_vertex_buffer,
                     chunk_lines_index_buffer,
-                    chunks_changed: false
-                }
-            }
+                    chunks_changed: false,
+                },
+                text: Vec::new(),
+            })),
         }
     }
 
@@ -217,12 +221,12 @@ impl Renderer {
         };
 
         let mut cbs = VecDeque::new();
-        for pipeline in self.pipelines.iter() {
+        for pipeline in self.pipelines.iter_mut() {
             let info = PipelineCbCreateInfo {
                 image_num, dimensions, queue: self.queue.clone(), camera_transform: transform.clone(),
                 view_mat: view_mat.clone(), proj_mat: proj_mat.clone(), tex_registry: self.tex_registry.clone()
             };
-            cbs.push_back(pipeline.build_command_buffer(info, &self.render_queue));
+            cbs.push_back(pipeline.build_command_buffer(info, self.render_queue.clone()));
         }
 
         let mut future_box: Box<dyn GpuFuture> = Box::new(future);
@@ -234,7 +238,11 @@ impl Renderer {
             .then_signal_fence_and_flush();
 
         match future {
-            Ok(mut f) => { f.cleanup_finished(); }
+            Ok(mut f) => {
+                // This wait is required when using NVIDIA or running on macOS. See https://github.com/vulkano-rs/vulkano/issues/1247
+                f.wait(None).unwrap();
+                f.cleanup_finished();
+            }
             Err(::vulkano::sync::FlushError::OutOfDate) => {
                 self.recreate_swapchain = true;
             }

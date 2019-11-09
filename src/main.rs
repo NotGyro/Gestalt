@@ -2,6 +2,8 @@
 
 #[macro_use] extern crate vulkano;
 #[macro_use] extern crate vulkano_shader_derive;
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate log;
 
 extern crate cgmath;
 extern crate fine_grained;
@@ -10,8 +12,6 @@ extern crate noise;
 extern crate rand;
 extern crate smallvec;
 extern crate winit;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate log;
 extern crate string_cache;
 extern crate linear_map;
 extern crate crossbeam;
@@ -22,39 +22,39 @@ extern crate hashbrown;
 extern crate parking_lot;
 extern crate clap;
 extern crate num;
-
+extern crate rusttype;
 extern crate image;
 extern crate rgb;
 extern crate swsurface;
 extern crate euc;
 extern crate vek;
 
-//extern crate flame;
+extern crate flame;
 
 
 // modules
 
-#[macro_use] mod voxel;
+#[macro_use] pub mod voxel;
 
-mod buffer;
-mod client;
-mod entity;
-mod game;
-mod geometry;
-mod input;
-mod memory;
-mod mesh_simplifier;
-mod player;
-mod pipeline;
-mod registry;
-mod renderer;
-mod renderpass;
-mod shader;
-mod network;
-mod util;
-mod vulkano_win;
-mod world;
-mod world_vg;
+pub mod buffer;
+pub mod client;
+pub mod entity;
+pub mod game;
+pub mod geometry;
+pub mod input;
+pub mod memory;
+pub mod mesh_simplifier;
+pub mod chunk_mesher;
+pub mod player;
+pub mod pipeline;
+pub mod registry;
+pub mod renderer;
+pub mod renderpass;
+pub mod shader;
+pub mod network;
+pub mod util;
+pub mod vulkano_win;
+pub mod world;
 
 // imports
 
@@ -71,7 +71,7 @@ pub enum NetworkRole {
 }
 
 
-fn main() {
+pub fn main() {
     // command line parsing (currently unused)
     let matches = App::new("Gestalt Engine")
         .arg(Arg::with_name("server")

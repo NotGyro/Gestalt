@@ -4,7 +4,6 @@ extern crate parking_lot;
 
 use self::parking_lot::RwLock;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::error::Error;
 use std::fmt;
 
@@ -17,10 +16,9 @@ use voxel::subdivstorage::*;
 
 use world::CHUNK_SCALE;
 
-use world::TileID;
-
 /// An error reported upon trying to get or set a voxel which is not currently loaded. 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ChunkedSubdivError<T, S> where T : VoxelCoord, S : VoxelCoord {
     NotLoaded(OctPos<T>, VoxelPos<S>),
     SubdivError(SubdivError),
@@ -56,11 +54,13 @@ pub fn blockpos_to_chunk(point: OctPos<i32>, chunk_scale: Scale) -> OctPos<i32> 
 }
 
 /// The "Point" argument here must have a scale equal to the chunk's scale.
+#[allow(dead_code)]
 pub fn chunkpos_to_block(point: OctPos<i32>, block_scale: Scale) -> OctPos<i32> {
     point.scale_to(block_scale)
 }
 
-/// The "Point" argument here must have a scale equal to the chunk's scale. 
+/// The "Point" argument here must have a scale equal to the chunk's scale.
+#[allow(dead_code)]
 pub fn chunkpos_to_center(point: OctPos<i32>, result_scale: Scale) -> Point3<f32> {
     let block_pos = chunkpos_to_block(point, result_scale);
     //How many blocks of "result_scale" make up our chunk?
@@ -140,7 +140,9 @@ impl<L, C> SubdivVoxelDrain<L, i32> for SubdivSpace<C>
     }
 }
 
+#[allow(dead_code)]
 impl<C> SubdivSpace<C> {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         SubdivSpace {
             chunks: HashMap::new(),
@@ -185,7 +187,7 @@ fn test_subdiv_space() {
 
     let mut world : SubdivSpace<NaiveVoxelOctree<TileID, ()>> = SubdivSpace::new();
 
-    assert_eq!(world.get_chunk_size(0), 64);
+    assert_eq!(world.get_chunk_size(0), 32);
 
     let mut chunk : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(stone_id)};
     chunk.set(opos!((1,0,1) @ 3), air_id).unwrap();
@@ -205,8 +207,8 @@ fn test_subdiv_space() {
     world.load_new_chunk(chunk_1_pos, chunk);
     world.load_new_chunk(chunk_2_pos, chunk2);
     world.load_new_chunk(chunk_3_pos, chunk3);
-    assert_eq!(world.get(opos!((72,0,0) @ 0)).unwrap(), SubdivNode::Leaf(lava_id) );
-    assert_eq!(world.get(opos!((129,0,0) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
+    assert_eq!(world.get(opos!((40,0,0) @ 0)).unwrap(), SubdivNode::Leaf(lava_id) );
+    assert_eq!(world.get(opos!((65,0,0) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
     assert_eq!(world.get(opos!((9,0,9) @ 0)).unwrap(), SubdivNode::Leaf(air_id) );
     assert_eq!(world.get(opos!((3,3,3) @ 0)).unwrap(), SubdivNode::Leaf(stone_id) );
 }

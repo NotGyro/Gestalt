@@ -351,7 +351,7 @@ impl ChunkCubesMesh {
                     _chunk: &T,
                     _source_range: VoxelRange<i32>, _scale: Scale)
                             -> Result<(), Box<dyn Error>>
-                            where T : SubOctreeSource<TileID, (), i32> {
+                            where T : OctreeSource<TileID, (), i32> {
         Ok(())
     }
 }

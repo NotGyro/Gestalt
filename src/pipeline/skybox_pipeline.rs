@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::path::Path;
 
 use vulkano::buffer::BufferUsage;
@@ -60,7 +60,7 @@ impl SkyboxRenderPipeline {
             .build(device.clone())
             .unwrap());
 
-        const SIZE: f32 = 500.0;
+        const SIZE: f32 = 5000.0;
         let verts = vec![
             VertexPositionUV { position: [  SIZE, -SIZE, -SIZE ], uv: [ 0.3333, 0.5 ] },
             VertexPositionUV { position: [ -SIZE, -SIZE, -SIZE ], uv: [ 0.6666, 0.5 ] },
@@ -144,8 +144,7 @@ impl RenderPipelineAbstract for SkyboxRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, _rq: &RenderQueue) -> AutoCommandBuffer {
+    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, _rq: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let descriptor_set;
         let subbuffer = self.uniform_buffer_pool.next(SkyboxShaders::vertex::ty::Data {
             projection: info.proj_mat.into(),
@@ -170,6 +169,9 @@ impl RenderPipelineAbstract for SkyboxRenderPipeline {
                     depth_range: 0.0..1.0,
                 }]),
                 scissors: None,
+                compare_mask: None,
+                write_mask: None,
+                reference: None
             },
                           vec![self.vertex_buffer.clone()],
                           self.index_buffer.clone(),

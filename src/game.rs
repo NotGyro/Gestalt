@@ -1,11 +1,11 @@
 //! Main type for the game. `Game::new().run()` runs the game.
 
 use std::sync::Arc;
+use std::time::Instant;
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::Instant;
 
-use cgmath::Point3;
+use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
 use vulkano::buffer::BufferUsage;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -16,13 +16,16 @@ use buffer::CpuAccessibleBufferAutoPool;
 use geometry::VertexPositionColorAlpha;
 use renderer::Renderer;
 use input::InputState;
-use world_vg::Dimension;
 use registry::DimensionRegistry;
 use player::Player;
-use world_vg::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
+use world::{Dimension, Chunk, CHUNK_SIZE_F32};
+use world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
+use util::{view_to_frustum, aabb_frustum_intersection};
+use pipeline::text_pipeline::TextData;
 
 
-const MAX_CHUNK_THREADS: u32 = 1;
+const MAX_CHUNK_GEN_THREADS: u32 = 1;
+const MAX_CHUNK_MESH_THREADS: u32 = 1;
 
 
 /// Main type for the game. `Game::new().run()` runs the game.
@@ -34,7 +37,8 @@ pub struct Game {
     input_state: InputState,
     player: Player,
     dimension_registry: DimensionRegistry,
-    chunk_threads: Arc<std::sync::atomic::AtomicU32>,
+    chunk_generating_threads: Arc<std::sync::atomic::AtomicU32>,
+    chunk_meshing_threads: Arc<std::sync::atomic::AtomicU32>,
 }
 
 
@@ -50,8 +54,8 @@ impl Game {
 
         let mut player = Player::new();
         player.position = Point3::new(16.0, 32.0, 16.0);
-        player.yaw = 135.0;
-        player.pitch = -30.0;
+        //player.yaw = 135.0;
+        //player.pitch = -30.0;
 
         let mut dimension_registry = DimensionRegistry::new();
         let dimension = Dimension::new();
@@ -65,7 +69,8 @@ impl Game {
             input_state,
             player,
             dimension_registry,
-            chunk_threads: Arc::new(std::sync::atomic::AtomicU32::new(0))
+            chunk_generating_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            chunk_meshing_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
         }
     }
 
@@ -82,7 +87,9 @@ impl Game {
         let mut keep_running = true;
 
         let elapsed = Instant::now() - self.prev_time;
-        let dt = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9;
+        let dt: f64 = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9;
+        // dt capped for laggy frames to prevent mouse swinging like 180° around on the next frame
+        let dt_clamped: f64 = if dt > 0.1 { 0.05 } else { dt };
         self.prev_time = Instant::now();
 
         self.input_state.mouse_delta = (0.0, 0.0);
@@ -102,6 +109,7 @@ impl Game {
                     }
                 },
                 Event::DeviceEvent { event: DeviceEvent::MouseMotion { delta }, .. } => {
+                    let delta = (delta.0 as f32, delta.1 as f32);
                     self.input_state.add_mouse_delta(delta);
                     if self.input_state.right_mouse_pressed {
                         let dimensions = match self.surface.window().get_inner_size() {
@@ -134,20 +142,34 @@ impl Game {
 
         // general updates
 
-        self.player.update(dt, &self.input_state);
+        self.player.update(dt_clamped, &self.input_state);
 
-        self.dimension_registry.get(0).unwrap().load_unload_chunks(self.player.position.clone(), &mut self.renderer.render_queue.lines);
+        self.dimension_registry.get(0).unwrap().unload_chunks(self.player.position.clone(), self.renderer.render_queue.clone());
+        if self.chunk_generating_threads.load(Ordering::Relaxed) < MAX_CHUNK_GEN_THREADS {
+            self.dimension_registry.get(0).unwrap().load_chunks(self.player.position.clone(), self.renderer.render_queue.clone());
+        }
 
         {
-            let line_queue = &mut self.renderer.render_queue.lines;
+            let mut lock = self.renderer.render_queue.write().unwrap();
+            (*lock).text.clear();
+            lock.text.push(TextData {
+                text: format!("{} FPS ({}ms)", (1.0/dt).floor(), (dt*100000.0).floor()/100.0),
+                position: (10, 10),
+                ..TextData::default()
+            });
+
+            let line_queue = &mut lock.lines;
             if line_queue.chunks_changed {
                 let mut verts = Vec::new();
                 let mut idxs = Vec::new();
                 let mut index_offset = 0;
-                for (pos, (_, _)) in self.dimension_registry.get(0).unwrap().chunks.iter() {
-                    verts.append(&mut ::util::cube::generate_chunk_debug_line_vertices(pos.0, pos.1, pos.2, 0.25f32).to_vec());
-                    idxs.append(&mut ::util::cube::generate_chunk_debug_line_indices(index_offset).to_vec());
-                    index_offset += 1;
+                {
+                    let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
+                    for (pos, (_, _)) in chunks.iter() {
+                        verts.append(&mut ::util::cube::generate_chunk_debug_line_vertices(pos.0, pos.1, pos.2, 0.25f32).to_vec());
+                        idxs.append(&mut ::util::cube::generate_chunk_debug_line_indices(index_offset).to_vec());
+                        index_offset += 1;
+                    }
                 }
                 line_queue.chunk_lines_vertex_buffer =
                     CpuAccessibleBufferAutoPool::<[VertexPositionColorAlpha]>::from_iter(self.renderer.device.clone(),
@@ -164,37 +186,65 @@ impl Game {
                 line_queue.chunks_changed = false;
             }
         }
+        {
+            let mut lock = self.renderer.render_queue.write().unwrap();
+            lock.chunk_meshes.clear();
+        }
+        {
+            if self.chunk_meshing_threads.load(Ordering::Relaxed) < MAX_CHUNK_MESH_THREADS {
+                let mut chunks = self.dimension_registry.get(0).unwrap().chunks.write().unwrap();
+                let mut chunk_positions: Vec< (i32, i32, i32) > = chunks.keys().cloned().collect();
 
-        self.renderer.render_queue.chunk_meshes.clear();
-        for (_, (ref mut chunk, ref mut state)) in self.dimension_registry.get(0).unwrap().chunks.iter_mut() {
-            if self.chunk_threads.load(Ordering::Relaxed) >= MAX_CHUNK_THREADS {
-                break;
-            }
-            let is_dirty = state.load(Ordering::Relaxed) == CHUNK_STATE_DIRTY;
-            if is_dirty {
-                self.chunk_threads.fetch_add(1, Ordering::Relaxed);
-                state.store(CHUNK_STATE_WRITING, Ordering::Relaxed);
-                let chunk_arc = chunk.clone();
-                let device_arc = self.renderer.device.clone();
-                let memory_pool_arc = self.renderer.memory_pool.clone();
-                let state_arc = state.clone();
-                let thread_count_clone = self.chunk_threads.clone();
-                thread::spawn(move || {
-                    let mut chunk_lock = chunk_arc.write().unwrap();
-                    chunk_lock.generate_mesh(device_arc, memory_pool_arc);
-                    state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
-                    thread_count_clone.fetch_sub(1, Ordering::Relaxed);
+                let player_pos = self.player.position.clone();
+                chunk_positions.sort_by(|a, b| {
+                    let a_world = Chunk::chunk_pos_to_center_ws(*a);
+                    let b_world = Chunk::chunk_pos_to_center_ws(*b);
+                    let pdist_a = Point3::distance(Point3::new(a_world.0, a_world.1, a_world.2), player_pos);
+                    let pdist_b = Point3::distance(Point3::new(b_world.0, b_world.1, b_world.2), player_pos);
+                    pdist_a.partial_cmp(&pdist_b).unwrap()
                 });
-                break;
+
+                for chunk_pos in chunk_positions {
+                    match chunks.get_mut(&chunk_pos) {
+                        Some((ref mut chunk, ref mut state)) => {
+                            let is_dirty = state.load(Ordering::Relaxed) == CHUNK_STATE_DIRTY;
+                            if is_dirty {
+                                self.chunk_meshing_threads.fetch_add(1, Ordering::Relaxed);
+                                state.store(CHUNK_STATE_WRITING, Ordering::Relaxed);
+                                let chunk_arc = chunk.clone();
+                                let device_arc = self.renderer.device.clone();
+                                let memory_pool_arc = self.renderer.memory_pool.clone();
+                                let state_arc = state.clone();
+                                let thread_count_clone = self.chunk_meshing_threads.clone();
+                                thread::spawn(move || {
+                                    let mut chunk_lock = chunk_arc.write().unwrap();
+                                    (*chunk_lock).generate_mesh(device_arc, memory_pool_arc);
+                                    state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
+                                    thread_count_clone.fetch_sub(1, Ordering::Relaxed);
+                                });
+                                break;
+                            }
+                        },
+                        None => { continue; }
+                    }
+                }
             }
         }
 
         // queueing chunks and drawing
-        for (_, (chunk, state)) in self.dimension_registry.get(0).unwrap().chunks.iter() {
-            let is_ready = state.load(Ordering::Relaxed) == CHUNK_STATE_CLEAN;
-            if is_ready {
-                let chunk_lock = chunk.read().unwrap();
-                self.renderer.render_queue.chunk_meshes.append(&mut chunk_lock.mesh.queue());
+        {
+            let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
+            let frustum = view_to_frustum(self.player.pitch, self.player.yaw, self.player.camera.fov, 4.0/3.0, 1.0, 10000.0);
+            for (pos, (chunk, state)) in chunks.iter() {
+                let aabb_min = Point3::new(pos.0 as f32, pos.1 as f32, pos.2 as f32) * CHUNK_SIZE_F32 - self.player.position.to_vec();
+                let aabb_max = aabb_min + Vector3::new(CHUNK_SIZE_F32, CHUNK_SIZE_F32, CHUNK_SIZE_F32);
+                let is_ready = state.load(Ordering::Relaxed) == CHUNK_STATE_CLEAN;
+                let is_in_view = aabb_frustum_intersection(aabb_min, aabb_max, frustum.clone());
+                if is_ready && is_in_view {
+                    let chunk_lock = chunk.read().unwrap();
+                    let mut queue_lock = self.renderer.render_queue.write().unwrap();
+                    queue_lock.chunk_meshes.append(&mut chunk_lock.mesh.queue());
+                }
             }
         }
 

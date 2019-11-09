@@ -65,3 +65,25 @@ pub mod skybox {
         struct Dummy;
     }
 }
+
+
+/// Shader for rendering text.
+pub mod text {
+    /// Vertex shader.
+    #[allow(dead_code)]
+    pub mod vertex {
+        #[derive(VulkanoShader)]
+        #[ty = "vertex"]
+        #[path = "src/shader/text.vert"]
+        struct Dummy;
+    }
+
+    /// Fragment shader.
+    #[allow(dead_code)]
+    pub mod fragment {
+        #[derive(VulkanoShader)]
+        #[ty = "fragment"]
+        #[path = "src/shader/text.frag"]
+        struct Dummy;
+    }
+}

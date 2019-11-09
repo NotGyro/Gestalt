@@ -1,7 +1,15 @@
 [package]
 name = "gestalt"
 version = "0.0.1"
-authors = ["gyro"]
+authors = ["gyro", "trashbyte"]
+
+[lib]
+name = "gestalt"
+path = "src/main.rs"
+
+[[bin]]
+name = "gestalt"
+path = "src/bin/main.rs"
 
 [dependencies]
 cgmath = { version = "0.17.0", features = [ "swizzle" ] }
@@ -36,10 +44,11 @@ winit = "0.19.4"
 swsurface = "0.1.2"
 euc = "0.4.2"
 
-vulkano = "0.10.0"
+vulkano = "0.16.0"
 vulkano-shader-derive = "0.10.0"
+rusttype = { version = "0.8.1", features = ["gpu_cache"] }
 
-#flame = "0.2.2"
+flame = "0.2.2"
 
 #tramp = "*"
 

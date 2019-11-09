@@ -13,6 +13,7 @@ use util::Transform;
 /// A mesh object, made up of a set of vertex groups, a list of associated materials, and a transform.
 ///
 /// See [module-level documentation](self).
+#[derive(Debug)]
 pub struct Mesh {
     pub transform: Transform,
     pub vertex_groups: Vec<Arc<VertexGroup>>,

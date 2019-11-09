@@ -9,7 +9,7 @@ use vulkano::format::R8G8B8A8Srgb;
 use vulkano::image::immutable::ImmutableImage;
 use vulkano::device::Queue;
 
-use world_vg::Dimension;
+use world::Dimension;
 
 
 /// Global texture registry.
@@ -28,7 +28,7 @@ impl TextureRegistry {
 
     /// Loads the textures from disk, and onto the GPU.
     pub fn load(&mut self, queue: Arc<Queue>) {
-        let tex_names = [ String::from("stone"), String::from("dirt"), String::from("grass") ];
+        let tex_names = [ String::from("stone"), String::from("dirt"), String::from("grass"), String::from("test") ];
 
         for name in tex_names.iter().clone() {
             let (texture, _future) = {

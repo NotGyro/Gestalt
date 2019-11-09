@@ -10,6 +10,7 @@ use std::error::Error;
 use std::result::Result;
 use voxel::voxelstorage::Voxel;
 
+
 /// An error reported upon trying to get or set a voxel outside of our range.
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -81,16 +82,16 @@ impl <L, B> Default for SubdivNode<L, B> where L : Voxel, B : Voxel {
     fn default() -> Self { SubdivNode::Leaf(L::default()) }
 }
 
-#[allow(dead_code)]
-pub enum NodeChildIndex { 
-    ZeroXZeroYZeroZ, 
-    ZeroXZeroYOneZ, 
-    ZeroXOneYZeroZ, 
-    ZeroXOneYOneZ, 
-    OneXZeroYZeroZ,
-    OneXZeroYOneZ,
-    OneXOneYZeroZ,
-    OneXOneYOneZ,
+#[allow(dead_code, non_camel_case_types)]
+pub enum NodeChildIndex {
+    X0_Y0_Z0,
+    X0_Y0_Z1,
+    X0_Y1_Z0,
+    X0_Y1_Z1,
+    X1_Y0_Z0,
+    X1_Y0_Z1,
+    X1_Y1_Z0,
+    X1_Y1_Z1,
 }
 
 // Bitwise encoding, last three bits of a u8. It goes x, y, then z. (z changes first) Each is 0 if closer to origin, 1 if further.
@@ -98,27 +99,27 @@ impl NodeChildIndex {
     #[allow(dead_code)]
     fn num_representation(&self) -> usize {
         match self { 
-            NodeChildIndex::ZeroXZeroYZeroZ => 0, 
-            NodeChildIndex::ZeroXZeroYOneZ => 1,
-            NodeChildIndex::ZeroXOneYZeroZ => 2, 
-            NodeChildIndex::ZeroXOneYOneZ => 3,
-            NodeChildIndex::OneXZeroYZeroZ => 4,
-            NodeChildIndex::OneXZeroYOneZ => 5,
-            NodeChildIndex::OneXOneYZeroZ => 6,
-            NodeChildIndex::OneXOneYOneZ => 7,
+            NodeChildIndex::X0_Y0_Z0 => 0,
+            NodeChildIndex::X0_Y0_Z1 => 1,
+            NodeChildIndex::X0_Y1_Z0 => 2,
+            NodeChildIndex::X0_Y1_Z1 => 3,
+            NodeChildIndex::X1_Y0_Z0 => 4,
+            NodeChildIndex::X1_Y0_Z1 => 5,
+            NodeChildIndex::X1_Y1_Z0 => 6,
+            NodeChildIndex::X1_Y1_Z1 => 7,
         }
     }
     #[allow(dead_code)]
     fn from_num_representation(val : usize) -> Self {
         match val {
-            0 => NodeChildIndex::ZeroXZeroYZeroZ,
-            1 => NodeChildIndex::ZeroXZeroYOneZ,
-            2 => NodeChildIndex::ZeroXOneYZeroZ, 
-            3 => NodeChildIndex::ZeroXOneYOneZ,
-            4 => NodeChildIndex::OneXZeroYZeroZ,
-            5 => NodeChildIndex::OneXZeroYOneZ,
-            6 => NodeChildIndex::OneXOneYZeroZ,
-            7 => NodeChildIndex::OneXOneYOneZ,
+            0 => NodeChildIndex::X0_Y0_Z0,
+            1 => NodeChildIndex::X0_Y0_Z1,
+            2 => NodeChildIndex::X0_Y1_Z0,
+            3 => NodeChildIndex::X0_Y1_Z1,
+            4 => NodeChildIndex::X1_Y0_Z0,
+            5 => NodeChildIndex::X1_Y0_Z1,
+            6 => NodeChildIndex::X1_Y1_Z0,
+            7 => NodeChildIndex::X1_Y1_Z1,
             _ => panic!(),
         }
     }
@@ -312,8 +313,8 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
                                                     SubdivNode::new_leaf(leaf_value.clone()),
                                                     SubdivNode::new_leaf(leaf_value.clone()),];
             *self = NaiveOctreeNode::Branch(Box::new(NaiveOctreeBranch {
-                    children: children,
-                    lod_data: D::represent(&leaf_value),
+                    children,
+                    lod_data: D::represent(&leaf_value)
             }));
         } 
         //else {
@@ -327,6 +328,37 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
         //else {
             //We are a leaf node, no LOD to rebuild.
         //}
+    }
+
+    #[allow(dead_code)]
+    pub fn traverse<F>(&self, pos: OctPos<u32>, func: &mut F) where F: FnMut(OctPos<u32>, L) {
+        match self {
+            SubdivNode::Leaf(l) => {
+                func(pos, l.clone());
+            }
+            SubdivNode::Branch(b) => {
+                for (i, child) in b.children.iter().enumerate() {
+                    let idx = NodeChildIndex::from_num_representation(i);
+                    let s = 2u32.pow((pos.scale-1) as u32);
+                    let offset = match idx {
+                        NodeChildIndex::X0_Y0_Z0 => (0, 0, 0),
+                        NodeChildIndex::X0_Y0_Z1 => (0, 0, s),
+                        NodeChildIndex::X0_Y1_Z0 => (0, s, 0),
+                        NodeChildIndex::X0_Y1_Z1 => (0, s, s),
+                        NodeChildIndex::X1_Y0_Z0 => (s, 0, 0),
+                        NodeChildIndex::X1_Y0_Z1 => (s, 0, s),
+                        NodeChildIndex::X1_Y1_Z0 => (s, s, 0),
+                        NodeChildIndex::X1_Y1_Z1 => (s, s, s),
+                    };
+                    child.traverse(OctPos::from_four(
+                        pos.pos.x+offset.0,
+                        pos.pos.y+offset.1,
+                        pos.pos.z+offset.2,
+                        pos.scale - 1),
+                                   func);
+                }
+            }
+        }
     }
 }
 
@@ -381,6 +413,69 @@ impl<L, D, P> SubdivVoxelSource<SubdivNode<L, D>, P> for NaiveVoxelOctree<L, D> 
     fn get_max_scale(&self) -> Scale { self.scale }
 }
 
+// Ok(bool) means true if we're still checking for consolidation on the way out, false means we've
+// already determined that we can't consolidate any more
+fn set_recurse<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord>
+        (node: &mut NaiveOctreeNode<L,D>, coord: OctPos<P>, current_scale: Scale, target_scale: Scale, value: &L)
+        -> Result<bool, SubdivError> {
+
+    if current_scale < target_scale {
+        return Err(SubdivError::DetailNotPresent);
+    }
+
+    // Have we hit our target?
+    if current_scale == target_scale {
+        *node = SubdivNode::Leaf(value.clone());
+        return Ok(true);
+    }
+    else {
+        // We have not yet gotten to target.
+        if let SubdivNode::Leaf(_) = *node {
+            // Target is below our scale. We will need to create a child node, and recurse on it.
+            (*node).split_into_branch();
+        }
+        match *node {
+            SubdivNode::Branch(ref mut branch_dat) => {
+                // Not found and this is a branch. Time for recursion.
+                // Our child nodes are implicitly at our scale -1.
+                let child = &mut branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)];
+                match set_recurse(child, coord, current_scale-1, target_scale, value) {
+                    Ok(b) => {
+                        // consolidate?
+                        if b {
+                            // check for homogenous children
+                            for c in branch_dat.children.iter() {
+                                match c {
+                                    SubdivNode::Leaf(l) => {
+                                        if l != value {
+                                            // non-matching voxel found, stop checking
+                                            return Ok(false);
+                                        }
+                                    },
+                                    SubdivNode::Branch(_) => {
+                                        // since homogenous branches should already be consolidated,
+                                        // a branch can be assumed to be non-homogenous
+                                        return Ok(false);
+                                    }
+                                }
+                            }
+                            // if we've made it to this point, each child has been checked and is
+                            // the same. now we consolidate this branch into a leaf
+                            *node = SubdivNode::Leaf(value.clone());
+                            // go up one level, keep checking
+                            return Ok(true);
+                        }
+                    },
+                    Err(e) => { return Err(e); }
+                }
+
+            }
+            _ => unreachable!(), // We just split this into a branch if it's a leaf.
+        }
+    }
+    Ok(false)
+}
+
 impl<L, D, P> SubdivVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord {
     
     fn set(&mut self, coord: OctPos<P>, value: L) -> Result<(), SubdivError> {
@@ -391,34 +486,11 @@ impl<L, D, P> SubdivVoxelDrain<L, P> for NaiveVoxelOctree<L, D> where L: Voxel, 
             //Selected node cannot possibly exist in our octree.
             return Err( SubdivError::OutOfBounds);
         }
-        unsafe { 
-            let mut current_node = &mut self.root as *mut NaiveOctreeNode<L,D>;
-            let mut current_scale = self.scale;
-            while current_scale >= coord.scale {
-                        //Have we hit our target?
-                if current_scale == coord.scale {
-                    *current_node = SubdivNode::Leaf(value);
-                    return Ok(());
-                }
-                else {
-                    // We have not yet gotten to target.
-                    if let SubdivNode::Leaf(_) = &mut *current_node {
-                        //Target is below our scale. We will need to create a child node, and recurse on it.
-                        (*current_node).split_into_branch();
-                    }
-                    match *current_node { 
-                        SubdivNode::Branch(ref mut branch_dat) => {
-                            //Not found and this is a branch. Time for recursion.
-                            //Our child nodes are implicitly at our scale -1.
-                            current_node = &mut branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)] as *mut NaiveOctreeNode<L,D>;
-                        }
-                        _ => unreachable!(), // We just split this into a branch if it's a leaf.
-                    }
-                }
-                current_scale -= 1;
-            }
+
+        match set_recurse(&mut self.root, coord, self.scale, coord.scale, &value) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e)
         }
-        Err(SubdivError::DetailNotPresent)
     }
 }
 

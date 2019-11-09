@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::cpu_pool::CpuBufferPool;
@@ -17,6 +17,7 @@ use renderpass::RenderPassUnclearedColorWithDepth;
 use renderer::RenderQueue;
 use shader::chunks as ChunksShaders;
 use super::{RenderPipelineAbstract, PipelineCbCreateInfo};
+use pipeline::text_pipeline::TextData;
 
 
 pub struct ChunkRenderPipeline {
@@ -77,10 +78,19 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: &RenderQueue) -> AutoCommandBuffer {
+    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
+        {
+            let mut lock = render_queue.write().unwrap();
+            let num = lock.chunk_meshes.len();
+            lock.text.push(TextData {
+                text: format!("Chunks drawing: {}", num),
+                position: (10, 40),
+                ..TextData::default()
+            });
+        }
         let mut descriptor_sets = Vec::new();
-        for entry in render_queue.chunk_meshes.iter() {
+        let lock = render_queue.read().unwrap();
+        for entry in lock.chunk_meshes.iter() {
             let uniform_data = ChunksShaders::vertex::ty::Data {
                 world: entry.transform.clone().into(),
                 view: info.view_mat.into(),
@@ -103,7 +113,7 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
             .begin_render_pass(
                 self.framebuffers.as_ref().unwrap()[info.image_num].clone(), false,
                 vec![::vulkano::format::ClearValue::None, ::vulkano::format::ClearValue::None]).unwrap();
-        for (i, entry) in render_queue.chunk_meshes.iter().enumerate() {
+        for (i, entry) in lock.chunk_meshes.iter().enumerate() {
             cb = cb.draw_indexed(self.vulkan_pipeline.clone(), &DynamicState {
                 line_width: None,
                 viewports: Some(vec![Viewport {
@@ -112,6 +122,9 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
                     depth_range: 0.0..1.0,
                 }]),
                 scissors: None,
+                compare_mask: None,
+                write_mask: None,
+                reference: None
             },
                                  vec![entry.vertex_group.vertex_buffer.as_ref().unwrap().clone()],
                                  entry.vertex_group.index_buffer.as_ref().unwrap().clone(),
