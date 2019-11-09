@@ -21,6 +21,7 @@ use player::Player;
 use world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_WRITING, CHUNK_STATE_CLEAN};
 use util::{view_to_frustum, aabb_frustum_intersection};
+use pipeline::text_pipeline::TextData;
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
@@ -150,6 +151,13 @@ impl Game {
 
         {
             let mut lock = self.renderer.render_queue.write().unwrap();
+            (*lock).text.clear();
+            lock.text.push(TextData {
+                text: format!("{} FPS ({}ms)", (1.0/dt).floor(), (dt*100000.0).floor()/100.0),
+                position: (10, 10),
+                ..TextData::default()
+            });
+
             let line_queue = &mut lock.lines;
             if line_queue.chunks_changed {
                 let mut verts = Vec::new();

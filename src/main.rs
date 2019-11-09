@@ -2,6 +2,8 @@
 
 #[macro_use] extern crate vulkano;
 #[macro_use] extern crate vulkano_shader_derive;
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate log;
 
 extern crate cgmath;
 extern crate fine_grained;
@@ -10,8 +12,6 @@ extern crate noise;
 extern crate rand;
 extern crate smallvec;
 extern crate winit;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate log;
 extern crate string_cache;
 extern crate linear_map;
 extern crate crossbeam;
@@ -22,14 +22,14 @@ extern crate hashbrown;
 extern crate parking_lot;
 extern crate clap;
 extern crate num;
-
+extern crate rusttype;
 extern crate image;
 extern crate rgb;
 extern crate swsurface;
 extern crate euc;
 extern crate vek;
 
-//extern crate flame;
+extern crate flame;
 
 
 // modules

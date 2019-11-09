@@ -144,8 +144,7 @@ impl RenderPipelineAbstract for SkyboxRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, _rq: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
+    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, _rq: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let descriptor_set;
         let subbuffer = self.uniform_buffer_pool.next(SkyboxShaders::vertex::ty::Data {
             projection: info.proj_mat.into(),
@@ -170,6 +169,9 @@ impl RenderPipelineAbstract for SkyboxRenderPipeline {
                     depth_range: 0.0..1.0,
                 }]),
                 scissors: None,
+                compare_mask: None,
+                write_mask: None,
+                reference: None
             },
                           vec![self.vertex_buffer.clone()],
                           self.index_buffer.clone(),

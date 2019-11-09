@@ -17,6 +17,7 @@ use renderpass::RenderPassUnclearedColorWithDepth;
 use renderer::RenderQueue;
 use shader::chunks as ChunksShaders;
 use super::{RenderPipelineAbstract, PipelineCbCreateInfo};
+use pipeline::text_pipeline::TextData;
 
 
 pub struct ChunkRenderPipeline {
@@ -77,11 +78,18 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
+    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
+        {
+            let mut lock = render_queue.write().unwrap();
+            let num = lock.chunk_meshes.len();
+            lock.text.push(TextData {
+                text: format!("Chunks drawing: {}", num),
+                position: (10, 40),
+                ..TextData::default()
+            });
+        }
         let mut descriptor_sets = Vec::new();
         let lock = render_queue.read().unwrap();
-        println!("chunks being drawn: {}", lock.chunk_meshes.len());
         for entry in lock.chunk_meshes.iter() {
             let uniform_data = ChunksShaders::vertex::ty::Data {
                 world: entry.transform.clone().into(),
@@ -114,6 +122,9 @@ impl RenderPipelineAbstract for ChunkRenderPipeline {
                     depth_range: 0.0..1.0,
                 }]),
                 scissors: None,
+                compare_mask: None,
+                write_mask: None,
+                reference: None
             },
                                  vec![entry.vertex_group.vertex_buffer.as_ref().unwrap().clone()],
                                  entry.vertex_group.index_buffer.as_ref().unwrap().clone(),

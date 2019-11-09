@@ -72,8 +72,7 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-
-    fn build_command_buffer(&self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
+    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
         let descriptor_set;
         let subbuffer = self.uniform_buffer_pool.next(LinesShaders::vertex::ty::Data {
             world: Matrix4::from_scale(1.0).into(),
@@ -98,6 +97,9 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
                     depth_range: 0.0..1.0,
                 }]),
                 scissors: None,
+                compare_mask: None,
+                write_mask: None,
+                reference: None
             },
                           vec![lock.lines.chunk_lines_vertex_buffer.clone()],
                           lock.lines.chunk_lines_index_buffer.clone(),
