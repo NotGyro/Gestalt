@@ -1,0 +1,8 @@
+[package]
+name = "gestalt_bin"
+version = "0.0.1"
+authors = ["gyro", "trashbyte"]
+edition = "2018"
+
+[dependencies]
+gestalt = { path = "../gestalt" }
