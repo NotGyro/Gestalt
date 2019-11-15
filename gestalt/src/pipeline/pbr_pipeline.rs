@@ -1,30 +1,34 @@
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use vulkano::buffer::BufferUsage;
-use vulkano::buffer::cpu_pool::CpuBufferPool;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::descriptor::DescriptorSet;
 use vulkano::device::{Device, Queue};
+use vulkano::format::{D32Sfloat, R16G16B16A16Sfloat, R8G8B8A8Srgb};
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPass, RenderPassDesc, Subpass, RenderPassAbstract};
+use vulkano::image::{SwapchainImage, AttachmentImage, ImmutableImage};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::sampler::{Sampler, Filter, SamplerAddressMode, MipmapMode};
 use vulkano::swapchain::Swapchain;
-use vulkano::format::{D32Sfloat, R16G16B16A16Sfloat, R8G8B8A8Srgb};
 use winit::Window;
-use vulkano::image::{SwapchainImage, AttachmentImage, ImmutableImage};
 
-use crate::geometry::{PBRPipelineVertex, VertexPosition, VertexPositionUV};
-use crate::renderpass::PBRMainRenderPass;
-use crate::renderer::RenderQueue;
-use crate::shader::pbr as PBRShaders;
-use crate::shader::tonemapper as TonemapperShaders;
-use crate::shader::skybox as SkyboxShaders;
-use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
-use crate::pipeline::text_pipeline::TextData;
 use crate::buffer::CpuAccessibleBufferXalloc;
-use std::path::Path;
+use crate::cpu_pool::XallocCpuBufferPool;
+use crate::geometry::{PBRPipelineVertex, VertexPosition, VertexPositionUV};
 use crate::memory::xalloc::XallocMemoryPool;
+use crate::pipeline::text_pipeline::TextData;
+use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
+use crate::registry::TextureRegistry;
+use crate::renderer::RenderQueue;
+use crate::renderpass::PBRMainRenderPass;
+use crate::shader::{
+    skybox as SkyboxShaders,
+    pbr as PBRShaders,
+    tonemapper as TonemapperShaders
+};
 
 
 pub struct PBRRenderPipeline {
@@ -34,19 +38,21 @@ pub struct PBRRenderPipeline {
     skybox_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     pub framebuffers: Option<Vec<Arc<dyn FramebufferAbstract + Send + Sync>>>,
     renderpass: Arc<RenderPass<PBRMainRenderPass>>,
-    voxel_uniform_buffer_pool: CpuBufferPool<PBRShaders::vertex::ty::Data>,
-    tonemapper_uniform_buffer_pool: CpuBufferPool<TonemapperShaders::fragment::ty::Data>,
-    skybox_uniform_buffer_pool: CpuBufferPool<SkyboxShaders::vertex::ty::Data>,
+    voxel_uniform_buffer_pool: XallocCpuBufferPool<PBRShaders::vertex::ty::InstanceData>,
+    tonemapper_uniform_buffer_pool: XallocCpuBufferPool<TonemapperShaders::fragment::ty::Data>,
+    skybox_uniform_buffer_pool: XallocCpuBufferPool<SkyboxShaders::vertex::ty::Data>,
     fullscreen_vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPosition]>>,
     linear_sampler: Arc<Sampler>,
     skybox_vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPositionUV]>>,
     skybox_index_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
-    skybox_texture: Arc<ImmutableImage<R8G8B8A8Srgb>>
+    skybox_texture: Arc<ImmutableImage<R8G8B8A8Srgb>>,
+    // TODO: texture bindings per material
+    voxel_texture_descriptors: Arc<dyn DescriptorSet + Send + Sync>,
 }
 
 
 impl PBRRenderPipeline {
-    pub fn new(_swapchain: &Swapchain<Window>, device: &Arc<Device>, queue: &Arc<Queue>, memory_pool: &XallocMemoryPool) -> Self {
+    pub fn new(_swapchain: &Swapchain<Window>, device: &Arc<Device>, queue: &Arc<Queue>, memory_pool: &XallocMemoryPool, tex_registry: Arc<TextureRegistry>) -> Self {
         let renderpass = Arc::new(
             PBRMainRenderPass{}
                 .build_render_pass(device.clone())
@@ -169,6 +175,18 @@ impl PBRRenderPipeline {
                 queue.clone()).unwrap()
         };
 
+        let linear_sampler = Sampler::new(device.clone(), Filter::Linear, Filter::Linear, MipmapMode::Linear,
+            SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
+            0.0, 4.0, 0.0, 0.0).unwrap();
+
+        let voxel_texture_descriptors = Arc::new(PersistentDescriptorSet::start(voxel_pipeline.clone(), 0)
+            .add_sampled_image(tex_registry.get("test_albedo").unwrap().clone(), linear_sampler.clone()).unwrap()
+            .add_sampled_image(tex_registry.get("test_normal").unwrap().clone(), linear_sampler.clone()).unwrap()
+            .add_sampled_image(tex_registry.get("black").unwrap().clone(), linear_sampler.clone()).unwrap()
+            .add_sampled_image(tex_registry.get("black").unwrap().clone(), linear_sampler.clone()).unwrap()
+            .build().unwrap()
+        );
+
         PBRRenderPipeline {
             device: device.clone(),
             voxel_pipeline,
@@ -176,16 +194,15 @@ impl PBRRenderPipeline {
             skybox_pipeline,
             framebuffers: None,
             renderpass,
-            voxel_uniform_buffer_pool: CpuBufferPool::<PBRShaders::vertex::ty::Data>::new(device.clone(), BufferUsage::all()),
-            tonemapper_uniform_buffer_pool: CpuBufferPool::<TonemapperShaders::fragment::ty::Data>::new(device.clone(), BufferUsage::all()),
-            skybox_uniform_buffer_pool: CpuBufferPool::<SkyboxShaders::vertex::ty::Data>::new(device.clone(), BufferUsage::all()),
+            voxel_uniform_buffer_pool: XallocCpuBufferPool::<PBRShaders::vertex::ty::InstanceData>::new(device.clone(), BufferUsage::all(), memory_pool.clone()),
+            tonemapper_uniform_buffer_pool: XallocCpuBufferPool::<TonemapperShaders::fragment::ty::Data>::new(device.clone(), BufferUsage::all(), memory_pool.clone()),
+            skybox_uniform_buffer_pool: XallocCpuBufferPool::<SkyboxShaders::vertex::ty::Data>::new(device.clone(), BufferUsage::all(), memory_pool.clone()),
             fullscreen_vertex_buffer,
-            linear_sampler: Sampler::new(device.clone(), Filter::Linear, Filter::Linear, MipmapMode::Linear,
-                                         SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
-                                         0.0, 4.0, 0.0, 0.0).unwrap(),
+            linear_sampler,
             skybox_vertex_buffer,
             skybox_index_buffer,
-            skybox_texture
+            skybox_texture,
+            voxel_texture_descriptors
         }
     }
 }
@@ -214,22 +231,15 @@ impl RenderPipelineAbstract for PBRRenderPipeline {
         let mut voxel_descriptor_sets = Vec::new();
         let lock = render_queue.read().unwrap();
         for entry in lock.chunk_meshes.iter() {
-            let uniform_data = PBRShaders::vertex::ty::Data {
+            let uniform_data = PBRShaders::vertex::ty::InstanceData {
                 world: entry.transform.clone().into(),
-                view: info.view_mat.into(),
-                proj: info.proj_mat.into(),
-                view_pos: info.camera_transform.position.into(),
                 specular_exponent: entry.material.specular_exponent,
                 specular_strength: entry.material.specular_strength
             };
 
             let subbuffer = self.voxel_uniform_buffer_pool.next(uniform_data).unwrap();
-            voxel_descriptor_sets.push(Arc::new(PersistentDescriptorSet::start(self.voxel_pipeline.clone(), 0)
+            voxel_descriptor_sets.push(Arc::new(PersistentDescriptorSet::start(self.voxel_pipeline.clone(), 1)
                 .add_buffer(subbuffer).unwrap()
-                .add_sampled_image(info.tex_registry.get("test_albedo").unwrap().clone(), self.linear_sampler.clone()).unwrap()
-                .add_sampled_image(info.tex_registry.get("test_normal").unwrap().clone(), self.linear_sampler.clone()).unwrap()
-                .add_sampled_image(info.tex_registry.get("black").unwrap().clone(), self.linear_sampler.clone()).unwrap()
-                .add_sampled_image(info.tex_registry.get("black").unwrap().clone(), self.linear_sampler.clone()).unwrap()
                 .build().unwrap()
             ));
         };
@@ -292,7 +302,12 @@ impl RenderPipelineAbstract for PBRRenderPipeline {
             },
                                  vec![entry.vertex_group.vertex_buffer.as_ref().unwrap().clone()],
                                  entry.vertex_group.index_buffer.as_ref().unwrap().clone(),
-                                 voxel_descriptor_sets[i].clone(), ()).unwrap();
+                                 (self.voxel_texture_descriptors.clone(), voxel_descriptor_sets[i].clone()),
+                                 PBRShaders::vertex::ty::Constants {
+                                     view: info.view_mat.into(),
+                                     proj: info.proj_mat.into(),
+                                     view_pos: info.camera_transform.position.into(),
+                                 }).unwrap();
         }
         // tonemapper
         cb = cb.next_subpass(false).unwrap()

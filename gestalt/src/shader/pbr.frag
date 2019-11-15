@@ -7,18 +7,22 @@ layout(location = 3) in vec3 surface_pos;
 
 layout(location = 0) out vec4 f_color;
 
-layout(set = 0, binding = 0) uniform Data {
-    mat4 world;
+layout(set = 0, binding = 0) uniform sampler2D tex_albedo;
+layout(set = 0, binding = 1) uniform sampler2D tex_normal;
+layout(set = 0, binding = 2) uniform sampler2D tex_roughness;
+layout(set = 0, binding = 3) uniform sampler2D tex_metal;
+
+layout(push_constant) uniform Constants {
     mat4 view;
     mat4 proj;
     vec3 view_pos;
+} constants;
+
+layout(set = 1, binding = 0) uniform InstanceData {
+    mat4 world;
     float specular_exponent;
     float specular_strength;
-} uniforms;
-layout(set = 0, binding = 1) uniform sampler2D tex_albedo;
-layout(set = 0, binding = 2) uniform sampler2D tex_normal;
-layout(set = 0, binding = 3) uniform sampler2D tex_roughness;
-layout(set = 0, binding = 4) uniform sampler2D tex_metal;
+} instancedata;
 
 #include "bsdf.inc"
 
@@ -40,7 +44,7 @@ void main() {
     ts_normal = vec3(ts_normal.x, -ts_normal.y, ts_normal.z);
     vec3 binormal = cross(ws_normal, tangent);
     vec3 N = normalize(tangent * ts_normal.x + binormal * ts_normal.y + ws_normal * ts_normal.z);
-    vec3 V = normalize(uniforms.view_pos - surface_pos);
+    vec3 V = normalize(constants.view_pos - surface_pos);
 
     vec3 albedo = texture(tex_albedo, uv).xyz;
     float roughness = 0.2;//texture(tex_roughness, uv).x;

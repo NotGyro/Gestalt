@@ -37,6 +37,7 @@ extern crate xalloc;
 
 pub mod buffer;
 pub mod client;
+pub mod cpu_pool;
 pub mod entity;
 pub mod game;
 pub mod geometry;

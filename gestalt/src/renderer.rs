@@ -183,7 +183,7 @@ impl Renderer {
         let chunk_lines_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
 
         let pipelines = RenderPipelines {
-            pbr_pipeline: Box::new(PBRRenderPipeline::new(&swapchain, &device, &queue, &memory_pool)),
+            pbr_pipeline: Box::new(PBRRenderPipeline::new(&swapchain, &device, &queue, &memory_pool, tex_registry.clone())),
             lines_pipeline: Box::new(LinesRenderPipeline::new(&swapchain, &device)),
             text_pipeline: Box::new(TextRenderPipeline::new(&swapchain, &device, &memory_pool))
         };

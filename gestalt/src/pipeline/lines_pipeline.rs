@@ -2,7 +2,6 @@ use std::sync::{Arc, RwLock};
 
 use cgmath::Matrix4;
 use vulkano::buffer::BufferUsage;
-use vulkano::buffer::cpu_pool::CpuBufferPool;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::Device;
@@ -17,6 +16,8 @@ use crate::renderer::RenderQueue;
 use crate::renderpass::RenderPassUnclearedColorWithDepth;
 use crate::shader::lines as LinesShaders;
 use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
+use crate::cpu_pool::XallocCpuBufferPool;
+use crate::memory::XallocMemoryPool;
 
 
 pub struct LinesRenderPipeline {
@@ -24,12 +25,12 @@ pub struct LinesRenderPipeline {
     vulkan_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     pub framebuffers: Option<Vec<Arc<dyn FramebufferAbstract + Send + Sync>>>,
     renderpass: Arc<RenderPass<RenderPassUnclearedColorWithDepth>>,
-    uniform_buffer_pool: CpuBufferPool<LinesShaders::vertex::ty::Data>,
+    uniform_buffer_pool: XallocCpuBufferPool<LinesShaders::vertex::ty::Data>,
 }
 
 
 impl LinesRenderPipeline {
-    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>) -> LinesRenderPipeline {
+    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: XallocMemoryPool) -> LinesRenderPipeline {
         let vs = LinesShaders::vertex::Shader::load(device.clone()).expect("failed to create shader module");
         let fs = LinesShaders::fragment::Shader::load(device.clone()).expect("failed to create shader module");
 
@@ -56,7 +57,7 @@ impl LinesRenderPipeline {
             vulkan_pipeline: pipeline,
             framebuffers: None,
             renderpass,
-            uniform_buffer_pool: CpuBufferPool::<LinesShaders::vertex::ty::Data>::new(device.clone(), BufferUsage::all()),
+            uniform_buffer_pool: XallocCpuBufferPool::<LinesShaders::vertex::ty::Data>::new(device.clone(), BufferUsage::all(), memory_pool.clone()),
         }
     }
 }

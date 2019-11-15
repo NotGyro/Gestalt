@@ -10,21 +10,24 @@ layout(location = 1) out vec3 tangent_out;
 layout(location = 2) out vec2 uv_out;
 layout(location = 3) out vec3 surface_pos_out;
 
-layout(set = 0, binding = 0) uniform Data {
-    mat4 world;
+layout(push_constant) uniform Constants {
     mat4 view;
     mat4 proj;
     vec3 view_pos;
+} constants;
+
+layout(set = 1, binding = 0) uniform InstanceData {
+    mat4 world;
     float specular_exponent;
     float specular_strength;
-} uniforms;
+} instancedata;
 
 
 void main() {
-    normal_out = transpose(inverse(mat3(uniforms.world))) * normal; // normal in world space
+    normal_out = transpose(inverse(mat3(instancedata.world))) * normal; // normal in world space
     tangent_out = tangent;
     uv_out = uv;
-    surface_pos_out = (uniforms.world * vec4(position, 1.0)).xyz;
+    surface_pos_out = (instancedata.world * vec4(position, 1.0)).xyz;
 
-    gl_Position = uniforms.proj * uniforms.view * uniforms.world * vec4(position, 1.0);
+    gl_Position = constants.proj * constants.view * instancedata.world * vec4(position, 1.0);
 }
