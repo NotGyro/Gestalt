@@ -12,7 +12,7 @@ use vulkano::swapchain::Surface;
 use winit::{Event, WindowEvent, DeviceEvent, ElementState, Window, WindowBuilder, EventsLoop};
 
 use crate::vulkano_win::VkSurfaceBuild;
-use crate::buffer::CpuAccessibleBufferAutoPool;
+use crate::buffer::CpuAccessibleBufferXalloc;
 use crate::geometry::VertexPositionColorAlpha;
 use crate::renderer::Renderer;
 use crate::input::InputState;
@@ -101,7 +101,9 @@ impl Game {
             match event {
                 Event::WindowEvent { event, .. } => {
                     match event {
-                        WindowEvent::CloseRequested => { keep_running = false; },
+                        WindowEvent::CloseRequested => {
+                            keep_running = false;
+                        },
                         WindowEvent::KeyboardInput { input, .. } => {
                             self.input_state.update_key(input);
                         },
@@ -180,16 +182,16 @@ impl Game {
                     }
                 }
                 line_queue.chunk_lines_vertex_buffer =
-                    CpuAccessibleBufferAutoPool::<[VertexPositionColorAlpha]>::from_iter(self.renderer.device.clone(),
-                                                                                         self.renderer.memory_pool.clone(),
-                                                                                         BufferUsage::all(),
-                                                                                         verts.iter().cloned())
+                    CpuAccessibleBufferXalloc::<[VertexPositionColorAlpha]>::from_iter(self.renderer.device.clone(),
+                                                                                       self.renderer.memory_pool.clone(),
+                                                                                       BufferUsage::all(),
+                                                                                       verts.iter().cloned())
                         .expect("failed to create buffer");
                 line_queue.chunk_lines_index_buffer =
-                    CpuAccessibleBufferAutoPool::<[u32]>::from_iter(self.renderer.device.clone(),
-                                                                    self.renderer.memory_pool.clone(),
-                                                                    BufferUsage::all(),
-                                                                    idxs.iter().cloned())
+                    CpuAccessibleBufferXalloc::<[u32]>::from_iter(self.renderer.device.clone(),
+                                                                  self.renderer.memory_pool.clone(),
+                                                                  BufferUsage::all(),
+                                                                  idxs.iter().cloned())
                         .expect("failed to create buffer");
                 line_queue.chunks_changed = false;
             }
@@ -211,8 +213,6 @@ impl Game {
                     let pdist_b = Point3::distance(Point3::new(b_world.0, b_world.1, b_world.2), player_pos);
                     pdist_a.partial_cmp(&pdist_b).unwrap()
                 });
-
-
 
                 for chunk_pos in chunk_positions {
                     match chunks.get_mut(&chunk_pos) {

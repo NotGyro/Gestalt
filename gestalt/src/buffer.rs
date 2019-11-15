@@ -36,18 +36,19 @@ use vulkano::memory::CpuAccess as MemCpuAccess;
 use vulkano::memory::pool::{AllocLayout, MappingRequirement, MemoryPool, MemoryPoolAlloc};
 use vulkano::sync::{AccessError, Sharing};
 
-use crate::memory::pool::{AutoMemoryPool, AutoMemoryPoolBlock};
+use crate::memory::xalloc::{XallocMemoryPoolBlock, XallocMemoryPool};
 
-/// Buffer whose content is accessible by the CPU.
+/// Buffer whose content is accessible by the CPU. Managed by
+/// [XallocMemoryPool](crate::memory::xalloc::XallocMemoryPool).
 #[derive(Debug)]
-pub struct CpuAccessibleBufferAutoPool<T: ?Sized, A = AutoMemoryPoolBlock> {
+pub struct CpuAccessibleBufferXalloc<T: ?Sized, A = XallocMemoryPoolBlock> {
     // Inner content.
     inner: UnsafeBuffer,
 
     // The memory held by the buffer.
     memory: A,
 
-    memory_pool: AutoMemoryPool,
+    memory_pool: XallocMemoryPool,
 
     // Access pattern of the buffer.
     // Every time the user tries to read or write the buffer from the CPU, this `RwLock` is kept
@@ -75,15 +76,15 @@ enum CurrentGpuAccess {
 }
 
 #[allow(dead_code)]
-impl<T> CpuAccessibleBufferAutoPool<T> {
+impl<T> CpuAccessibleBufferXalloc<T> {
     /// Builds a new buffer with some data in it. Only allowed for sized data.
-    pub fn from_data(device: Arc<Device>, pool: AutoMemoryPool, usage: BufferUsage, data: T)
-                     -> Result<Arc<CpuAccessibleBufferAutoPool<T>>, DeviceMemoryAllocError>
+    pub fn from_data(device: Arc<Device>, pool: XallocMemoryPool, usage: BufferUsage, data: T)
+                     -> Result<Arc<CpuAccessibleBufferXalloc<T>>, DeviceMemoryAllocError>
         where T: Content + 'static
     {
         unsafe {
             let uninitialized =
-                CpuAccessibleBufferAutoPool::raw(device, mem::size_of::<T>(), pool.clone(), usage, iter::empty())?;
+                CpuAccessibleBufferXalloc::raw(device, mem::size_of::<T>(), pool.clone(), usage, iter::empty())?;
 
             // Note that we are in panic-unsafety land here. However a panic should never ever
             // happen here, so in theory we are safe.
@@ -100,23 +101,23 @@ impl<T> CpuAccessibleBufferAutoPool<T> {
 
     /// Builds a new uninitialized buffer. Only allowed for sized data.
     #[inline]
-    pub unsafe fn uninitialized(device: Arc<Device>, pool: AutoMemoryPool, usage: BufferUsage)
-                                -> Result<Arc<CpuAccessibleBufferAutoPool<T>>, DeviceMemoryAllocError> {
-        CpuAccessibleBufferAutoPool::raw(device, mem::size_of::<T>(), pool.clone(), usage, iter::empty())
+    pub unsafe fn uninitialized(device: Arc<Device>, pool: XallocMemoryPool, usage: BufferUsage)
+                                -> Result<Arc<CpuAccessibleBufferXalloc<T>>, DeviceMemoryAllocError> {
+        CpuAccessibleBufferXalloc::raw(device, mem::size_of::<T>(), pool.clone(), usage, iter::empty())
     }
 }
 
-impl<T> CpuAccessibleBufferAutoPool<[T]> {
+impl<T> CpuAccessibleBufferXalloc<[T]> {
     /// Builds a new buffer that contains an array `T`. The initial data comes from an iterator
     /// that produces that list of Ts.
-    pub fn from_iter<I>(device: Arc<Device>, pool: AutoMemoryPool, usage: BufferUsage, data: I)
-                        -> Result<Arc<CpuAccessibleBufferAutoPool<[T]>>, DeviceMemoryAllocError>
+    pub fn from_iter<I>(device: Arc<Device>, pool: XallocMemoryPool, usage: BufferUsage, data: I)
+                        -> Result<Arc<CpuAccessibleBufferXalloc<[T]>>, DeviceMemoryAllocError>
         where I: ExactSizeIterator<Item = T>,
               T: Content + 'static
     {
         unsafe {
             let uninitialized =
-                CpuAccessibleBufferAutoPool::uninitialized_array(device, data.len(), pool.clone(), usage)?;
+                CpuAccessibleBufferXalloc::uninitialized_array(device, data.len(), pool.clone(), usage)?;
 
             // Note that we are in panic-unsafety land here. However a panic should never ever
             // happen here, so in theory we are safe.
@@ -137,21 +138,21 @@ impl<T> CpuAccessibleBufferAutoPool<[T]> {
     /// Builds a new buffer. Can be used for arrays.
     #[inline]
     pub unsafe fn uninitialized_array(
-        device: Arc<Device>, len: usize, pool: AutoMemoryPool, usage: BufferUsage)
-        -> Result<Arc<CpuAccessibleBufferAutoPool<[T]>>, DeviceMemoryAllocError> {
-        CpuAccessibleBufferAutoPool::raw(device, len * mem::size_of::<T>(), pool.clone(), usage, iter::empty())
+        device: Arc<Device>, len: usize, pool: XallocMemoryPool, usage: BufferUsage)
+        -> Result<Arc<CpuAccessibleBufferXalloc<[T]>>, DeviceMemoryAllocError> {
+        CpuAccessibleBufferXalloc::raw(device, len * mem::size_of::<T>(), pool.clone(), usage, iter::empty())
     }
 }
 
-impl<T: ?Sized> CpuAccessibleBufferAutoPool<T> {
+impl<T: ?Sized> CpuAccessibleBufferXalloc<T> {
     /// Builds a new buffer without checking the size.
     ///
     /// # Safety
     ///
     /// You must ensure that the size that you pass is correct for `T`.
     ///
-    pub unsafe fn raw<'a, I>(device: Arc<Device>, size: usize, pool: AutoMemoryPool, usage: BufferUsage, queue_families: I)
-                             -> Result<Arc<CpuAccessibleBufferAutoPool<T>>, DeviceMemoryAllocError>
+    pub unsafe fn raw<'a, I>(device: Arc<Device>, size: usize, pool: XallocMemoryPool, usage: BufferUsage, queue_families: I)
+                             -> Result<Arc<CpuAccessibleBufferXalloc<T>>, DeviceMemoryAllocError>
         where I: IntoIterator<Item = QueueFamily<'a>>
     {
         let queue_families = queue_families
@@ -180,7 +181,7 @@ impl<T: ?Sized> CpuAccessibleBufferAutoPool<T> {
         debug_assert!(mem.mapped_memory().is_some());
         buffer.bind_memory(mem.memory(), mem.offset())?;
 
-        Ok(Arc::new(CpuAccessibleBufferAutoPool {
+        Ok(Arc::new(CpuAccessibleBufferXalloc {
             inner: buffer,
             memory: mem,
             memory_pool: pool.clone(),
@@ -194,7 +195,7 @@ impl<T: ?Sized> CpuAccessibleBufferAutoPool<T> {
 }
 
 #[allow(dead_code)]
-impl<T: ?Sized, A> CpuAccessibleBufferAutoPool<T, A> {
+impl<T: ?Sized, A> CpuAccessibleBufferXalloc<T, A> {
     /// Returns the queue families this buffer can be used on.
     // TODO: use a custom iterator
     #[inline]
@@ -212,7 +213,7 @@ impl<T: ?Sized, A> CpuAccessibleBufferAutoPool<T, A> {
 }
 
 #[allow(dead_code)]
-impl<T: ?Sized, A> CpuAccessibleBufferAutoPool<T, A>
+impl<T: ?Sized, A> CpuAccessibleBufferXalloc<T, A>
     where T: Content + 'static,
           A: MemoryPoolAlloc
 {
@@ -282,7 +283,7 @@ impl<T: ?Sized, A> CpuAccessibleBufferAutoPool<T, A>
     }
 }
 
-unsafe impl<T: ?Sized, A> BufferAccess for CpuAccessibleBufferAutoPool<T, A>
+unsafe impl<T: ?Sized, A> BufferAccess for CpuAccessibleBufferXalloc<T, A>
     where T: 'static + Send + Sync
 {
     #[inline]
@@ -408,13 +409,13 @@ unsafe impl<T: ?Sized, A> BufferAccess for CpuAccessibleBufferAutoPool<T, A>
     }
 }
 
-unsafe impl<T: ?Sized, A> TypedBufferAccess for CpuAccessibleBufferAutoPool<T, A>
+unsafe impl<T: ?Sized, A> TypedBufferAccess for CpuAccessibleBufferXalloc<T, A>
     where T: 'static + Send + Sync
 {
     type Content = T;
 }
 
-unsafe impl<T: ?Sized, A> DeviceOwned for CpuAccessibleBufferAutoPool<T, A> {
+unsafe impl<T: ?Sized, A> DeviceOwned for CpuAccessibleBufferXalloc<T, A> {
     #[inline]
     fn device(&self) -> &Arc<Device> {
         self.inner.device()

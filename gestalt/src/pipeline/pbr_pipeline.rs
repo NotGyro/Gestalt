@@ -22,9 +22,9 @@ use crate::shader::tonemapper as TonemapperShaders;
 use crate::shader::skybox as SkyboxShaders;
 use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
 use crate::pipeline::text_pipeline::TextData;
-use crate::buffer::CpuAccessibleBufferAutoPool;
-use crate::memory::pool::AutoMemoryPool;
+use crate::buffer::CpuAccessibleBufferXalloc;
 use std::path::Path;
+use crate::memory::xalloc::XallocMemoryPool;
 
 
 pub struct PBRRenderPipeline {
@@ -37,16 +37,16 @@ pub struct PBRRenderPipeline {
     voxel_uniform_buffer_pool: CpuBufferPool<PBRShaders::vertex::ty::Data>,
     tonemapper_uniform_buffer_pool: CpuBufferPool<TonemapperShaders::fragment::ty::Data>,
     skybox_uniform_buffer_pool: CpuBufferPool<SkyboxShaders::vertex::ty::Data>,
-    fullscreen_vertex_buffer: Arc<CpuAccessibleBufferAutoPool<[VertexPosition]>>,
+    fullscreen_vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPosition]>>,
     linear_sampler: Arc<Sampler>,
-    skybox_vertex_buffer: Arc<CpuAccessibleBufferAutoPool<[VertexPositionUV]>>,
-    skybox_index_buffer: Arc<CpuAccessibleBufferAutoPool<[u32]>>,
+    skybox_vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPositionUV]>>,
+    skybox_index_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
     skybox_texture: Arc<ImmutableImage<R8G8B8A8Srgb>>
 }
 
 
 impl PBRRenderPipeline {
-    pub fn new(_swapchain: &Swapchain<Window>, device: &Arc<Device>, queue: &Arc<Queue>, memory_pool: &AutoMemoryPool) -> Self {
+    pub fn new(_swapchain: &Swapchain<Window>, device: &Arc<Device>, queue: &Arc<Queue>, memory_pool: &XallocMemoryPool) -> Self {
         let renderpass = Arc::new(
             PBRMainRenderPass{}
                 .build_render_pass(device.clone())
@@ -104,7 +104,7 @@ impl PBRRenderPipeline {
                 .unwrap())
         };
 
-        let fullscreen_vertex_buffer = CpuAccessibleBufferAutoPool::<[VertexPosition]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), vec![
+        let fullscreen_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPosition]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), vec![
             VertexPosition { position: [ -1.0,  1.0, 0.0 ] },
             VertexPosition { position: [  1.0,  1.0, 0.0 ] },
             VertexPosition { position: [  1.0, -1.0, 0.0 ] },
@@ -153,8 +153,8 @@ impl PBRRenderPipeline {
             16, 17, 18, 18, 19, 16,
             20, 21, 22, 22, 23, 20
         ];
-        let skybox_vertex_buffer = CpuAccessibleBufferAutoPool::<[VertexPositionUV]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), skybox_verts.iter().cloned()).expect("failed to create buffer");
-        let skybox_index_buffer = CpuAccessibleBufferAutoPool::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), skybox_idxs.iter().cloned()).expect("failed to create buffer");
+        let skybox_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionUV]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), skybox_verts.iter().cloned()).expect("failed to create buffer");
+        let skybox_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), skybox_idxs.iter().cloned()).expect("failed to create buffer");
 
         let (skybox_texture, _future) = {
             let path_str = String::from("textures/skybox.png");

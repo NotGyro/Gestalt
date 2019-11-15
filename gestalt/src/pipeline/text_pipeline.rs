@@ -22,8 +22,8 @@ use crate::geometry::vertex::VertexPositionUVColor;
 use crate::renderer::RenderQueue;
 use crate::shader::text as TextShaders;
 use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
-use crate::buffer::CpuAccessibleBufferAutoPool;
-use crate::memory::pool::AutoMemoryPool;
+use crate::buffer::CpuAccessibleBufferXalloc;
+use crate::memory::xalloc::XallocMemoryPool;
 
 
 /// The size of each font's cache texture, in pixels (i.e. 512 x 512)
@@ -95,7 +95,7 @@ impl Default for TextData {
 pub struct FontData {
     pub font: Box<Font<'static>>,
     pub cache: Box<Cache<'static>>,
-    pub cache_buffer: Arc<CpuAccessibleBufferAutoPool<[u8]>>,
+    pub cache_buffer: Arc<CpuAccessibleBufferXalloc<[u8]>>,
     pub cache_texture: Arc<AttachmentImage<R8Unorm, PotentialDedicatedAllocation<StdMemoryPoolAlloc>>>,
 }
 
@@ -107,12 +107,12 @@ pub struct TextRenderPipeline {
     renderpass: Arc<RenderPass<RenderPassUnclearedColorWithDepth>>,
     fonts: HashMap<String, FontData>,
     sampler: Arc<Sampler>,
-    memory_pool: AutoMemoryPool,
+    memory_pool: XallocMemoryPool,
 }
 
 
 impl TextRenderPipeline {
-    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: &AutoMemoryPool) -> Self {
+    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: &XallocMemoryPool) -> Self {
         let vs = TextShaders::vertex::Shader::load(device.clone()).expect("failed to create shader module");
         let fs = TextShaders::fragment::Shader::load(device.clone()).expect("failed to create shader module");
 
@@ -137,10 +137,10 @@ impl TextRenderPipeline {
         fonts.insert("Roboto Regular".into(), FontData {
             font: Box::new(Font::from_bytes(include_bytes!("../../../fonts/Roboto-Regular.ttf") as & [u8]).unwrap()),
             cache: Box::new(Cache::builder().dimensions(CACHE_SIZE as u32, CACHE_SIZE as u32).build()),
-            cache_buffer: CpuAccessibleBufferAutoPool::from_iter(device.clone(),
-                                                         memory_pool.clone(),
-                                                         BufferUsage::all(),
-                                                         (0 .. CACHE_SIZE*CACHE_SIZE).map(|_| 0u8)
+            cache_buffer: CpuAccessibleBufferXalloc::from_iter(device.clone(),
+                                                               memory_pool.clone(),
+                                                               BufferUsage::all(),
+                                                               (0 .. CACHE_SIZE*CACHE_SIZE).map(|_| 0u8)
                                                     ).expect("failed to create buffer"),
             cache_texture: AttachmentImage::with_usage(
                 device.clone(),
@@ -259,7 +259,7 @@ impl RenderPipelineAbstract for TextRenderPipeline {
                         });
                     }
                 }
-                let vertex_buffer = CpuAccessibleBufferAutoPool::<[VertexPositionUVColor]>::from_iter(
+                let vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionUVColor]>::from_iter(
                     self.device.clone(),
                     self.memory_pool.clone(),
                     BufferUsage::all(),

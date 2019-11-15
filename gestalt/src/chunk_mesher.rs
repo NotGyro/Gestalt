@@ -5,12 +5,12 @@ use vulkano::device::Device;
 use cgmath::Point3;
 use hashbrown::HashSet;
 
-use crate::memory::pool::AutoMemoryPool;
 use crate::geometry::{Mesh, PBRPipelineVertex, VertexGroup, Material};
 use crate::util::Transform;
 use crate::world::Chunk;
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32};
 use crate::voxel::subdivstorage::{SubdivVoxelSource, SubdivNode};
+use crate::memory::xalloc::XallocMemoryPool;
 
 
 /// Struct used internally to represent unoptimized quads.
@@ -205,7 +205,7 @@ fn generate_slice(ids: &[u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE], facing: QuadFaci
 
 /// Given a reference to a chunk, generate a mesh for it and assign it to the chunk.
 /// TODO: make this work for different kinds of data than octrees (?)
-pub fn generate_mesh(chunk: &mut Chunk, device: Arc<Device>, memory_pool: AutoMemoryPool) {
+pub fn generate_mesh(chunk: &mut Chunk, device: Arc<Device>, memory_pool: XallocMemoryPool) {
     let mut mesh = Mesh::new();
 
     let mut ids = [0u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];

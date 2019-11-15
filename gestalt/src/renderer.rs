@@ -18,9 +18,9 @@ use winit::Window;
 use crate::util::{Camera, Transform};
 use crate::geometry::{VertexGroup, Material};
 use crate::registry::TextureRegistry;
-use crate::memory::pool::AutoMemoryPool;
+use crate::memory::xalloc::XallocMemoryPool;
 use crate::pipeline::{RenderPipelineAbstract, PBRRenderPipeline, LinesRenderPipeline, PipelineCbCreateInfo, TextRenderPipeline};
-use crate::buffer::CpuAccessibleBufferAutoPool;
+use crate::buffer::CpuAccessibleBufferXalloc;
 use crate::geometry::VertexPositionColorAlpha;
 use crate::pipeline::text_pipeline::TextData;
 use vulkano::command_buffer::AutoCommandBuffer;
@@ -55,8 +55,8 @@ pub struct ChunkRenderQueueEntry {
 
 /// Render queue for all lines to be drawn.
 pub struct LineRenderQueue {
-    pub chunk_lines_vertex_buffer: Arc<CpuAccessibleBufferAutoPool<[VertexPositionColorAlpha]>>,
-    pub chunk_lines_index_buffer: Arc<CpuAccessibleBufferAutoPool<[u32]>>,
+    pub chunk_lines_vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPositionColorAlpha]>>,
+    pub chunk_lines_index_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
     pub chunks_changed: bool,
 }
 
@@ -98,7 +98,7 @@ pub struct Renderer {
     /// Vulkan device.
     pub device: Arc<Device>,
     /// Memory pool for memory-managed objects.
-    pub memory_pool: AutoMemoryPool,
+    pub memory_pool: XallocMemoryPool,
     /// Device queue.
     queue: Arc<Queue>,
     /// Vulkano surface.
@@ -177,10 +177,10 @@ impl Renderer {
         tex_registry.load(queue.clone());
         let tex_registry = Arc::new(tex_registry);
 
-        let memory_pool = AutoMemoryPool::new(device.clone());
+        let memory_pool = XallocMemoryPool::new(device.clone());
 
-        let chunk_lines_vertex_buffer = CpuAccessibleBufferAutoPool::<[VertexPositionColorAlpha]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
-        let chunk_lines_index_buffer = CpuAccessibleBufferAutoPool::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
+        let chunk_lines_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionColorAlpha]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
+        let chunk_lines_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
 
         let pipelines = RenderPipelines {
             pbr_pipeline: Box::new(PBRRenderPipeline::new(&swapchain, &device, &queue, &memory_pool)),

@@ -178,9 +178,10 @@ impl<C> SubdivSpace<C> {
 
 #[test]
 fn test_subdiv_space() {
-    use world::TileID;
-    use string_cache::DefaultAtom as Atom; 
-    use world::tile::*;
+    use crate::world::TileID;
+    use crate::world::tile::*;
+    use string_cache::DefaultAtom as Atom;
+
     let air_id = TILE_REGISTRY.lock().register_tile(&Atom::from("air"));
     let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
     let lava_id = TILE_REGISTRY.lock().register_tile(&Atom::from("lava"));
