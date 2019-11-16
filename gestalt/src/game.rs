@@ -172,7 +172,7 @@ impl Game {
                 let mut idxs = Vec::new();
                 let mut index_offset = 0;
                 {
-                    let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
+                    let chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
                     for (pos, (_, _)) in chunks.iter() {
                         verts.append(&mut cube::generate_chunk_debug_line_vertices(pos.0, pos.1, pos.2, 0.25f32).to_vec());
                         idxs.append(&mut cube::generate_chunk_debug_line_indices(index_offset).to_vec());
@@ -200,7 +200,7 @@ impl Game {
         }
         {
             if self.chunk_meshing_threads.load(Ordering::Relaxed) < MAX_CHUNK_MESH_THREADS {
-                let mut chunks = self.dimension_registry.get(0).unwrap().chunks.write().unwrap();
+                let mut chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
                 let mut chunk_positions: Vec< (i32, i32, i32) > = chunks.keys().cloned().collect();
 
                 let player_pos = self.player.position.clone();
@@ -227,7 +227,7 @@ impl Game {
                                 let state_arc = state.clone();
                                 let thread_count_clone = self.chunk_meshing_threads.clone();
                                 thread::spawn(move || {
-                                    let mut chunk_lock = chunk_arc.write().unwrap();
+                                    let mut chunk_lock = chunk_arc.lock().unwrap();
                                     (*chunk_lock).generate_mesh(device_arc, memory_pool_arc);
                                     state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
                                     thread_count_clone.fetch_sub(1, Ordering::Relaxed);
@@ -242,7 +242,7 @@ impl Game {
         }
 
         {
-            let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
+            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
             let mut num_generated = 0;
 
             for (_, (_, state))  in chunks.iter() {
@@ -264,7 +264,7 @@ impl Game {
 
         // queueing chunks and drawing
         {
-            let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
+            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
             let frustum = view_to_frustum(self.player.pitch, self.player.yaw, self.player.camera.fov, 4.0/3.0, 1.0, 10000.0);
 
             for (pos, (chunk, state)) in chunks.iter() {
@@ -273,7 +273,7 @@ impl Game {
                 let is_ready = state.load(Ordering::Relaxed) == CHUNK_STATE_CLEAN;
                 let is_in_view = aabb_frustum_intersection(aabb_min, aabb_max, frustum.clone());
                 if is_ready && is_in_view {
-                    let chunk_lock = chunk.read().unwrap();
+                    let mut chunk_lock = chunk.lock().unwrap();
                     let mut queue_lock = self.renderer.render_queue.write().unwrap();
                     queue_lock.chunk_meshes.append(&mut chunk_lock.mesh.queue());
                 }

@@ -8,10 +8,9 @@ use std::error::Error;
 use std::result::Result;
 
 use crate::voxel::voxelmath::{VoxelCoord, VoxelPos, VoxelRange,VoxelAxis};
-use crate::voxel::voxelevent::{VoxelEvent, VoxelEventInner};
 
-pub trait Voxel : Clone + Debug + Default + Eq {}
-impl<T> Voxel for T where T : Clone + Debug + Default + Eq {}
+pub trait Voxel : Clone + Debug + Eq {}
+impl<T> Voxel for T where T : Clone + Debug + Eq {}
 
 #[allow(dead_code)]
 pub enum VoxelErrorKind {
@@ -196,10 +195,11 @@ pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
     fn get(&self, coord: VoxelPos<P>) -> Result<T, VoxelError>;
     fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), VoxelError>;
 
+    /*
     fn apply_event(&mut self, e : VoxelEvent<T, P>) -> Result<(), VoxelError> where Self: std::marker::Sized {
         e.apply_blind(self)?;
         Ok(())
-    }
+    }*/
 
     // ----------------------------------------------------------------------------------------------------------------
     // ---- Batch operations and etc start here. Everything below this point should have a default implementation. ----
