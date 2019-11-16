@@ -335,6 +335,42 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
                 func(pos, l.clone());
             }
             SubdivNode::Branch(b) => {
+                if pos.scale > 0 {
+                    for (i, child) in b.children.iter().enumerate() {
+                        let idx = NodeChildIndex::from_num_representation(i);
+                        let s = 2u32.pow((pos.scale-1) as u32);
+                        let offset = match idx {
+                            NodeChildIndex::X0_Y0_Z0 => (0, 0, 0),
+                            NodeChildIndex::X0_Y0_Z1 => (0, 0, s),
+                            NodeChildIndex::X0_Y1_Z0 => (0, s, 0),
+                            NodeChildIndex::X0_Y1_Z1 => (0, s, s),
+                            NodeChildIndex::X1_Y0_Z0 => (s, 0, 0),
+                            NodeChildIndex::X1_Y0_Z1 => (s, 0, s),
+                            NodeChildIndex::X1_Y1_Z0 => (s, s, 0),
+                            NodeChildIndex::X1_Y1_Z1 => (s, s, s),
+                        };
+                        child.traverse(OctPos::from_four(
+                            pos.pos.x+offset.0,
+                            pos.pos.y+offset.1,
+                            pos.pos.z+offset.2,
+                            pos.scale - 1),
+                                       func);
+                    }
+                }
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn traverse_to_depth<F>(&self, pos: OctPos<u32>, func: &mut F, min_scale: Scale) where F: FnMut(OctPos<u32>, L) {
+        match self {
+            SubdivNode::Leaf(l) => {
+                func(pos, l.clone());
+            }
+            SubdivNode::Branch(b) => {
+                if pos.scale <= min_scale {
+                    return;
+                }
                 for (i, child) in b.children.iter().enumerate() {
                     let idx = NodeChildIndex::from_num_representation(i);
                     let s = 2u32.pow((pos.scale-1) as u32);
@@ -348,12 +384,12 @@ impl<L, D> NaiveOctreeNode<L, D> where L: Voxel, D: Voxel + LODData<L> {
                         NodeChildIndex::X1_Y1_Z0 => (s, s, 0),
                         NodeChildIndex::X1_Y1_Z1 => (s, s, s),
                     };
-                    child.traverse(OctPos::from_four(
+                    child.traverse_to_depth(OctPos::from_four(
                         pos.pos.x+offset.0,
                         pos.pos.y+offset.1,
                         pos.pos.z+offset.2,
                         pos.scale - 1),
-                                   func);
+                                   func, min_scale);
                 }
             }
         }
@@ -411,7 +447,7 @@ impl<L, D, P> SubdivVoxelSource<SubdivNode<L, D>, P> for NaiveVoxelOctree<L, D> 
     fn get_max_scale(&self) -> Scale { self.scale }
 }
 
-// Ok(bool) means true if we're still checking for consolidation on the way out, false means we've
+// Ok(true) means true if we're still checking for consolidation on the way out, false means we've
 // already determined that we can't consolidate any more
 fn set_recurse<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord>
         (node: &mut NaiveOctreeNode<L,D>, coord: OctPos<P>, current_scale: Scale, target_scale: Scale, value: &L)
@@ -428,48 +464,46 @@ fn set_recurse<L: Voxel, D: Voxel + LODData<L>, P: VoxelCoord>
     }
     else {
         // We have not yet gotten to target.
-        if let SubdivNode::Leaf(_) = *node {
-            // Target is below our scale. We will need to create a child node, and recurse on it.
-            (*node).split_into_branch();
-        }
-        match *node {
-            SubdivNode::Branch(ref mut branch_dat) => {
-                // Not found and this is a branch. Time for recursion.
-                // Our child nodes are implicitly at our scale -1.
-                let child = &mut branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale-coord.scale-1)];
-                match set_recurse(child, coord, current_scale-1, target_scale, value) {
-                    Ok(b) => {
-                        // consolidate?
-                        if b {
-                            // check for homogenous children
-                            for c in branch_dat.children.iter() {
-                                match c {
-                                    SubdivNode::Leaf(l) => {
-                                        if l != value {
-                                            // non-matching voxel found, stop checking
-                                            return Ok(false);
-                                        }
-                                    },
-                                    SubdivNode::Branch(_) => {
-                                        // since homogenous branches should already be consolidated,
-                                        // a branch can be assumed to be non-homogenous
+        // Target is below our scale. We will need to create a child node, and recurse on it.
+        (*node).split_into_branch();
+    }
+    match *node {
+        SubdivNode::Branch(ref mut branch_dat) => {
+            // Not found and this is a branch. Time for recursion.
+            // Our child nodes are implicitly at our scale -1.
+            let child = &mut branch_dat.children[index_for_scale_at_pos(coord.pos, current_scale - coord.scale - 1)];
+            match set_recurse(child, coord, current_scale - 1, target_scale, &value.clone()) {
+                Ok(b) => {
+                    // consolidate?
+                    if b {
+                        // check for homogenous children
+                        for c in branch_dat.children.iter() {
+                            match c {
+                                SubdivNode::Leaf(l) => {
+                                    if l != value {
+                                        // non-matching voxel found, stop checking
                                         return Ok(false);
                                     }
+                                },
+                                SubdivNode::Branch(_) => {
+
+                                    // since homogenous branches should already be consolidated,
+                                    // a branch can be assumed to be non-homogenous
+                                    return Ok(false);
                                 }
                             }
-                            // if we've made it to this point, each child has been checked and is
-                            // the same. now we consolidate this branch into a leaf
-                            *node = SubdivNode::Leaf(value.clone());
-                            // go up one level, keep checking
-                            return Ok(true);
                         }
-                    },
-                    Err(e) => { return Err(e); }
-                }
-
+                        // if we've made it to this point, each child has been checked and is
+                        // the same. now we consolidate this branch into a leaf
+                        *node = SubdivNode::Leaf(value.clone());
+                        // go up one level, keep checking
+                        return Ok(true);
+                    }
+                },
+                Err(e) => { return Err(e); }
             }
-            _ => unreachable!(), // We just split this into a branch if it's a leaf.
-        }
+        },
+        _ => unreachable!() // We just split this into a branch if it's a leaf.
     }
     Ok(false)
 }
@@ -559,4 +593,124 @@ fn test_octree() {
     
     println!("We have: {:?}", tree);
     //if let SubdivNode::Branch(ref branch_dat) = tree.get()
+}
+
+#[test]
+fn test_octree_2() {
+    let mut tree : NaiveVoxelOctree<u8, ()> = NaiveVoxelOctree{scale : 5 , root: NaiveOctreeNode::new_leaf(0u8)};
+
+    tree.set(opos!((0,0,0) @ 0), 1).unwrap();
+    match tree.get(opos!((0,0,0) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(0,0,0) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(0,0,0) value incorrect"); }
+        }
+    }
+
+    tree.set(opos!((0,0,1) @ 0), 1).unwrap();
+    match tree.get(opos!((0,0,1) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(0,0,1) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(0,0,1) value incorrect"); }
+        }
+    }
+
+    tree.set(opos!((0,1,0) @ 0), 1).unwrap();
+    match tree.get(opos!((0,1,0) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(0,1,0) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(0,1,0) value incorrect"); }
+        }
+    }
+
+    tree.set(opos!((0,1,1) @ 0), 1).unwrap();
+    match tree.get(opos!((0,1,1) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(0,1,1) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(0,1,1) value incorrect"); }
+        }
+    }
+    tree.set(opos!((1,0,0) @ 0), 1).unwrap();
+    match tree.get(opos!((1,0,0) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(1,0,0) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(1,0,0) value incorrect"); }
+        }
+    }
+
+    tree.set(opos!((1,0,1) @ 0), 1).unwrap();
+    match tree.get(opos!((1,0,1) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(1,0,1) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(1,0,1) value incorrect"); }
+        }
+    }
+
+    tree.set(opos!((1,1,0) @ 0), 1).unwrap();
+    match tree.get(opos!((1,1,0) @ 0)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("(1,1,0) is not a leaf");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("(1,1,0) value incorrect"); }
+        }
+    }
+
+    tree.set(opos!((1,1,1) @ 0), 1).unwrap();
+    match tree.get(opos!((0,0,0) @ 1)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("consolidate failed");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 1 { panic!("consolidated node value incorrect"); }
+        }
+    }
+
+    for x in 0..4 {
+        for y in 0..4 {
+            for z in 0..4 {
+                tree.set(OctPos::from_four(x, y, z, 0), 2).unwrap();
+            }
+        }
+    }
+    match tree.get(opos!((0,0,0) @ 2)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("consolidate failed");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 2 { panic!("consolidated node value incorrect"); }
+        }
+    }
+
+    println!("{:?}", tree);
+
+    for x in 0..32 {
+        for z in 0..32 {
+            for y in 0..32 {
+                tree.set(OctPos::from_four(x, y, z, 0), 3).unwrap();
+            }
+        }
+    }
+    match tree.get(opos!((0,0,0) @ 5)).unwrap() {
+        SubdivNode::Branch(_) => {
+            panic!("consolidate failed");
+        },
+        SubdivNode::Leaf(l) => {
+            if l != 3 { panic!("consolidated node value incorrect"); }
+        }
+    }
+
+    println!("{:?}", tree);
 }

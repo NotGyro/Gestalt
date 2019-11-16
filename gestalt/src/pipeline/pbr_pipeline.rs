@@ -52,7 +52,7 @@ pub struct PBRRenderPipeline {
 
 
 impl PBRRenderPipeline {
-    pub fn new(_swapchain: &Swapchain<Window>, device: &Arc<Device>, queue: &Arc<Queue>, memory_pool: &XallocMemoryPool, tex_registry: Arc<TextureRegistry>) -> Self {
+    pub fn new(_swapchain: &Swapchain<Window>, device: &Arc<Device>, queue: &Arc<Queue>, memory_pool: XallocMemoryPool, tex_registry: Arc<TextureRegistry>) -> Self {
         let renderpass = Arc::new(
             PBRMainRenderPass{}
                 .build_render_pass(device.clone())
@@ -111,12 +111,12 @@ impl PBRRenderPipeline {
         };
 
         let fullscreen_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPosition]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), vec![
-            VertexPosition { position: [ -1.0,  1.0, 0.0 ] },
-            VertexPosition { position: [  1.0,  1.0, 0.0 ] },
-            VertexPosition { position: [  1.0, -1.0, 0.0 ] },
-            VertexPosition { position: [ -1.0,  1.0, 0.0 ] },
-            VertexPosition { position: [  1.0, -1.0, 0.0 ] },
-            VertexPosition { position: [ -1.0, -1.0, 0.0 ] },
+            VertexPosition { position: [ -1.0,  1.0, 1.0 ] },
+            VertexPosition { position: [  1.0,  1.0, 1.0 ] },
+            VertexPosition { position: [  1.0, -1.0, 1.0 ] },
+            VertexPosition { position: [ -1.0,  1.0, 1.0 ] },
+            VertexPosition { position: [  1.0, -1.0, 1.0 ] },
+            VertexPosition { position: [ -1.0, -1.0, 1.0 ] },
         ].iter().cloned()).expect("failed to create buffer");
 
         const SKYBOX_SIZE: f32 = 5000.0;
@@ -224,7 +224,7 @@ impl RenderPipelineAbstract for PBRRenderPipeline {
             let num = lock.chunk_meshes.len();
             lock.text.push(TextData {
                 text: format!("Chunks drawing: {}", num),
-                position: (10, 70),
+                position: (5, 110),
                 ..TextData::default()
             });
         }

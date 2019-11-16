@@ -83,3 +83,12 @@ pub struct VertexPositionUVColor {
     pub color:    [f32; 4]
 }
 impl_vertex!(VertexPositionUVColor, position, uv, color);
+
+
+/// A vertex type with position and object ID data.
+#[derive(Debug, Clone, Default)]
+pub struct VertexPositionObjectId {
+    pub position: [f32; 3],
+    pub id:      u32,
+}
+impl_vertex!(VertexPositionObjectId, position, id);

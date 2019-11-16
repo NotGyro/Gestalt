@@ -1,7 +1,6 @@
 //! Main renderer.
 
 use std::sync::{Arc, RwLock};
-use std::collections::VecDeque;
 
 use cgmath::{EuclideanSpace, Matrix4, Vector4};
 
@@ -14,17 +13,19 @@ use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::swapchain::{Swapchain, Surface, SwapchainCreationError};
 use vulkano::sync::GpuFuture;
 use winit::Window;
+use vulkano::command_buffer::AutoCommandBuffer;
+use vulkano::image::ImageUsage;
 
 use crate::util::{Camera, Transform};
-use crate::geometry::{VertexGroup, Material};
+use crate::geometry::{VertexGroup, Material, VertexPositionObjectId};
 use crate::registry::TextureRegistry;
 use crate::memory::xalloc::XallocMemoryPool;
-use crate::pipeline::{RenderPipelineAbstract, PBRRenderPipeline, LinesRenderPipeline, PipelineCbCreateInfo, TextRenderPipeline};
+use crate::pipeline::{RenderPipelineAbstract, PBRRenderPipeline, LinesRenderPipeline, PipelineCbCreateInfo, TextRenderPipeline, OcclusionRenderPipeline};
 use crate::buffer::CpuAccessibleBufferXalloc;
 use crate::geometry::VertexPositionColorAlpha;
 use crate::pipeline::text_pipeline::TextData;
-use vulkano::command_buffer::AutoCommandBuffer;
-use vulkano::image::ImageUsage;
+use crate::metrics::FrameMetrics;
+use crate::pipeline::occlusion_pipeline::OCCLUSION_FRAME_SIZE;
 
 
 /// Matrix to correct vulkan clipping planes and flip y axis.
@@ -42,6 +43,7 @@ pub struct RenderQueue {
     pub chunk_meshes: Vec<ChunkRenderQueueEntry>,
     pub lines: LineRenderQueue,
     pub text: Vec<TextData>,
+    pub occluders: OcclusionRenderQueue
 }
 
 
@@ -60,11 +62,19 @@ pub struct LineRenderQueue {
     pub chunks_changed: bool,
 }
 
+/// Render queue for the occlusion pass.
+pub struct OcclusionRenderQueue {
+    pub vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPositionObjectId]>>,
+    pub index_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
+    pub output_cpu_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
+}
+
 
 pub struct RenderPipelines {
     pub pbr_pipeline: Box<PBRRenderPipeline>,
     pub lines_pipeline: Box<LinesRenderPipeline>,
-    pub text_pipeline: Box<TextRenderPipeline>
+    pub text_pipeline: Box<TextRenderPipeline>,
+    pub occlusion_pipeline: Box<OcclusionRenderPipeline>,
 }
 
 impl RenderPipelines {
@@ -72,22 +82,25 @@ impl RenderPipelines {
         self.pbr_pipeline.remove_framebuffers();
         self.lines_pipeline.remove_framebuffers();
         self.text_pipeline.remove_framebuffers();
+        self.occlusion_pipeline.remove_framebuffers();
     }
 
     pub fn recreate_framebuffers_if_none(&mut self, images: &Vec<Arc<SwapchainImage<Window>>>, hdr_buffer: &Arc<AttachmentImage<R16G16B16A16Sfloat>>, depth_buffer: &Arc<AttachmentImage<D32Sfloat>>) {
         self.pbr_pipeline.recreate_framebuffers_if_none(images, hdr_buffer, depth_buffer);
         self.lines_pipeline.recreate_framebuffers_if_none(images, hdr_buffer, depth_buffer);
         self.text_pipeline.recreate_framebuffers_if_none(images, hdr_buffer, depth_buffer);
+        // occlusion pipeline uses fixed offscreen framebuffer
     }
 
     pub fn create_command_buffers(&mut self,
                                   info: PipelineCbCreateInfo,
                                   render_queue: Arc<RwLock<RenderQueue>>)
-            -> VecDeque<AutoCommandBuffer> {
-        let mut cbs = VecDeque::new();
-        cbs.push_back(self.pbr_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
-        cbs.push_back(self.lines_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
-        cbs.push_back(self.text_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
+            -> Vec<AutoCommandBuffer> {
+        let mut cbs = Vec::new();
+        cbs.push(self.occlusion_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
+        cbs.push(self.pbr_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
+        //cbs.push(self.lines_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
+        cbs.push(self.text_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
         cbs
     }
 }
@@ -118,7 +131,7 @@ pub struct Renderer {
     /// List of render pipelines.
     pipelines: RenderPipelines,
     /// Render queue.
-    pub render_queue: Arc<RwLock<RenderQueue>>
+    pub render_queue: Arc<RwLock<RenderQueue>>,
 }
 
 
@@ -146,7 +159,7 @@ impl Renderer {
         let (swapchain, images) = {
             capabilities = surface.capabilities(physical.clone()).expect("failed to get surface capabilities");
 
-            dimensions = capabilities.current_extent.unwrap_or([1024, 768]);
+            dimensions = [1024, 768];
             let usage = capabilities.supported_usage_flags;
             let alpha = capabilities.supported_composite_alpha.iter().next().unwrap();
 
@@ -170,6 +183,7 @@ impl Renderer {
                                                      R16G16B16A16Sfloat,
                                                      ImageUsage {
                                                          input_attachment: true,
+                                                         transfer_destination: true,
                                                          ..ImageUsage::none()
                                                      }).unwrap();
 
@@ -182,10 +196,15 @@ impl Renderer {
         let chunk_lines_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionColorAlpha]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
         let chunk_lines_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
 
+        let occlusion_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionObjectId]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
+        let occlusion_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
+        let occlusion_cpu_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), vec![0u32; 320*240].iter().cloned()).expect("failed to create buffer");
+
         let pipelines = RenderPipelines {
-            pbr_pipeline: Box::new(PBRRenderPipeline::new(&swapchain, &device, &queue, &memory_pool, tex_registry.clone())),
-            lines_pipeline: Box::new(LinesRenderPipeline::new(&swapchain, &device)),
-            text_pipeline: Box::new(TextRenderPipeline::new(&swapchain, &device, &memory_pool))
+            pbr_pipeline: Box::new(PBRRenderPipeline::new(&swapchain, &device, &queue, memory_pool.clone(), tex_registry.clone())),
+            lines_pipeline: Box::new(LinesRenderPipeline::new(&swapchain, &device, memory_pool.clone())),
+            text_pipeline: Box::new(TextRenderPipeline::new(&swapchain, &device, memory_pool.clone())),
+            occlusion_pipeline: Box::new(OcclusionRenderPipeline::new(&device, OCCLUSION_FRAME_SIZE)),
         };
 
         Renderer {
@@ -208,13 +227,18 @@ impl Renderer {
                     chunks_changed: false,
                 },
                 text: Vec::new(),
+                occluders: OcclusionRenderQueue {
+                    vertex_buffer: occlusion_vertex_buffer,
+                    index_buffer: occlusion_index_buffer,
+                    output_cpu_buffer: occlusion_cpu_buffer
+                }
             })),
         }
     }
 
 
     /// Draw all objects in the render queue. Called every frame in the game loop.
-    pub fn draw(&mut self, camera: &Camera, transform: Transform) {
+    pub fn draw(&mut self, camera: &Camera, transform: Transform, frame_metrics: &mut FrameMetrics) {
         let dimensions = match self.surface.window().get_inner_size() {
             Some(logical_size) => [logical_size.width as u32, logical_size.height as u32],
             None => [800, 600]
@@ -249,7 +273,7 @@ impl Renderer {
 
         self.pipelines.recreate_framebuffers_if_none(&self.images, &self.hdr_buffer, &self.depth_buffer);
 
-        let (image_num, future) = match ::vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None) {
+        let (image_num, future) = match vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None) {
             Ok(r) => r,
             Err(::vulkano::swapchain::AcquireError::OutOfDate) => {
                 self.recreate_swapchain = true;
@@ -267,11 +291,21 @@ impl Renderer {
             view_mat: view_mat.clone(),
             proj_mat: proj_mat.clone(),
             tex_registry: self.tex_registry.clone(),
-            hdr_buffer_image: self.hdr_buffer.clone()
+            hdr_buffer_image: self.hdr_buffer.clone(),
+            fov: camera.fov
         };
+
         let cbs = self.pipelines.create_command_buffers(info, self.render_queue.clone());
 
-        let mut future_box: Box<dyn GpuFuture> = Box::new(future);
+        frame_metrics.end_draw();
+
+        self.submit(cbs, image_num, Box::new(future));
+
+        frame_metrics.end_gpu();
+    }
+
+    pub fn submit(&mut self, cbs: Vec<AutoCommandBuffer>, image_num: usize, future: Box<dyn GpuFuture>) {
+        let mut future_box = future;
         for cb in cbs {
             future_box = Box::new(future_box.then_execute(self.queue.clone(), cb).unwrap());
         }

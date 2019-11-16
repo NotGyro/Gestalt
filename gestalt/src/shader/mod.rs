@@ -79,3 +79,19 @@ pub mod tonemapper {
         }
     }
 }
+
+/// Occlusion pass shaders
+pub mod occlusion {
+    pub mod vertex {
+        vulkano_shaders::shader!{
+            ty: "vertex",
+            path: "src/shader/occlusion.vert"
+        }
+    }
+    pub mod fragment {
+        vulkano_shaders::shader!{
+            ty: "fragment",
+            path: "src/shader/occlusion.frag"
+        }
+    }
+}

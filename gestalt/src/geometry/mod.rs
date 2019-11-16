@@ -9,7 +9,7 @@ pub mod vertex;
 pub mod vertexgroup;
 
 pub use self::mesh::Mesh;
-pub use self::vertex::{VertexPositionNormalUVColor, VertexPositionColorAlpha, VertexPosition, VertexPositionUV, VertexPositionNormalTangentUVColor, VoxelVertex, PBRPipelineVertex};
+pub use self::vertex::{VertexPositionNormalUVColor, VertexPositionColorAlpha, VertexPosition, VertexPositionUV, VertexPositionNormalTangentUVColor, VoxelVertex, PBRPipelineVertex, VertexPositionObjectId};
 pub use self::vertexgroup::VertexGroup;
 
 

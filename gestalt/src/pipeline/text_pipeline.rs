@@ -71,7 +71,7 @@ fn layout_paragraph<'a>(
     result
 }
 
-
+#[derive(Clone)]
 pub struct TextData {
     pub text: String,
     pub position: (i32, i32),
@@ -84,7 +84,7 @@ impl Default for TextData {
         Self {
             text: "".to_string(),
             position: (0, 0),
-            size: 24.0,
+            size: 18.0,
             color: [1.0, 1.0, 1.0, 1.0],
             family: "Roboto Regular".to_string(),
         }
@@ -112,7 +112,7 @@ pub struct TextRenderPipeline {
 
 
 impl TextRenderPipeline {
-    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: &XallocMemoryPool) -> Self {
+    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: XallocMemoryPool) -> Self {
         let vs = TextShaders::vertex::Shader::load(device.clone()).expect("failed to create shader module");
         let fs = TextShaders::fragment::Shader::load(device.clone()).expect("failed to create shader module");
 
@@ -128,6 +128,7 @@ impl TextRenderPipeline {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(fs.main_entry_point(), ())
+            .depth_stencil_simple_depth()
             .blend_alpha_blending()
             .render_pass(Subpass::from(renderpass.clone(), 0).unwrap())
             .build(device.clone())
@@ -156,6 +157,26 @@ impl TextRenderPipeline {
                 }).unwrap(),
         });
 
+        fonts.insert("Fira Mono".into(), FontData {
+            font: Box::new(Font::from_bytes(include_bytes!("../../../fonts/FiraMono-Regular.ttf") as & [u8]).unwrap()),
+            cache: Box::new(Cache::builder().dimensions(CACHE_SIZE as u32, CACHE_SIZE as u32).build()),
+            cache_buffer: CpuAccessibleBufferXalloc::from_iter(device.clone(),
+                                                               memory_pool.clone(),
+                                                               BufferUsage::all(),
+                                                               (0 .. CACHE_SIZE*CACHE_SIZE).map(|_| 0u8)
+            ).expect("failed to create buffer"),
+            cache_texture: AttachmentImage::with_usage(
+                device.clone(),
+                [CACHE_SIZE as u32, CACHE_SIZE as u32],
+                R8Unorm,
+                ImageUsage {
+                    transfer_destination: true,
+                    sampled: true,
+                    input_attachment: true,
+                    .. ImageUsage::none()
+                }).unwrap(),
+        });
+
         TextRenderPipeline {
             device: device.clone(),
             vulkan_pipeline: pipeline,
@@ -165,7 +186,7 @@ impl TextRenderPipeline {
             sampler: Sampler::new(device.clone(), Filter::Nearest, Filter::Nearest, MipmapMode::Nearest,
                                   SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
                                   0.0, 4.0, 0.0, 0.0).unwrap(),
-            memory_pool: memory_pool.clone(),
+            memory_pool,
         }
     }
 }

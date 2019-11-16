@@ -1,7 +1,7 @@
 //! A dimension.
 
 use std::sync::{Arc, RwLock};
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, AtomicU32, Ordering};
 use std::collections::HashMap;
 use cgmath::{Point3, MetricSpace};
 
@@ -9,7 +9,6 @@ use crate::renderer::RenderQueue;
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_GENERATING};
 use crate::world::{
     Chunk, CHUNK_SIZE_F32,
-    //changeset::Changeset,
     generators::ChunkGenerator,
 };
 
@@ -18,6 +17,7 @@ use crate::world::{
 pub struct Dimension {
     /// HashMap<chunk position, (chunk, chunk state)>
     pub chunks: Arc<RwLock< HashMap<(i32, i32, i32), (Arc<RwLock<Chunk>>, Arc<AtomicUsize>)> >>,
+    next_chunk_id: Arc<AtomicU32>
 }
 
 
@@ -35,6 +35,7 @@ impl Dimension {
     pub fn new() -> Dimension {
         Dimension {
             chunks: Arc::new(RwLock::new(HashMap::new())),
+            next_chunk_id: Arc::new(AtomicU32::new(0))
         }
     }
 
@@ -82,8 +83,10 @@ impl Dimension {
                 }
             }
             let chunks_arc = self.chunks.clone();
+            let id_arc = self.next_chunk_id.clone();
             std::thread::spawn(move || {
-                let chunk = Chunk::new(chunk_pos, 0); // TODO: use dimension id
+                let id = id_arc.fetch_add(1, Ordering::Relaxed);
+                let chunk = Chunk::new(id, chunk_pos, 0); // TODO: use dimension id
                 let chunk_arc = Arc::new(RwLock::new(chunk));
                 {
                     let mut lock = chunks_arc.write().unwrap();
@@ -93,9 +96,6 @@ impl Dimension {
                 {
                     let mut lock = chunk_arc.write().unwrap();
                     lock.data = data;
-                    //let mut changeset = Changeset::new();
-                    //changeset.data.set(opos!((16, 16, 16) @ 0), 2).unwrap();
-                    //changeset.apply_to_chunk(&mut *lock);
                     {
                         let mut lock = chunks_arc.write().unwrap();
                         match lock.get(&chunk_pos) {

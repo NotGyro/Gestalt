@@ -3,14 +3,16 @@
 pub mod pbr_pipeline;
 pub mod lines_pipeline;
 pub mod text_pipeline;
+pub mod occlusion_pipeline;
 pub use self::pbr_pipeline::PBRRenderPipeline;
 pub use self::lines_pipeline::LinesRenderPipeline;
 pub use self::text_pipeline::TextRenderPipeline;
+pub use self::occlusion_pipeline::OcclusionRenderPipeline;
 
 
 use std::sync::{Arc, RwLock};
 
-use cgmath::Matrix4;
+use cgmath::{Matrix4, Deg};
 use vulkano::command_buffer::AutoCommandBuffer;
 use vulkano::device::Queue;
 use vulkano::image::swapchain::SwapchainImage;
@@ -34,6 +36,7 @@ pub struct PipelineCbCreateInfo {
     pub proj_mat: Matrix4<f32>,
     pub tex_registry: Arc<TextureRegistry>,
     pub hdr_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub fov: Deg<f32>,
 }
 
 
