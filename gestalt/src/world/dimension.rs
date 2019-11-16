@@ -1,6 +1,6 @@
 //! A dimension.
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::sync::atomic::AtomicUsize;
 use std::collections::HashMap;
 use cgmath::{Point3, MetricSpace};
@@ -17,7 +17,7 @@ use crate::world::{
 /// A dimension.
 pub struct Dimension {
     /// HashMap<chunk position, (chunk, chunk state)>
-    pub chunks: Arc<RwLock< HashMap<(i32, i32, i32), (Arc<RwLock<Chunk>>, Arc<AtomicUsize>)> >>,
+    pub chunks: Arc<Mutex< HashMap<(i32, i32, i32), (Arc<Mutex<Chunk>>, Arc<AtomicUsize>)> >>,
 }
 
 
@@ -34,7 +34,7 @@ pub const TEST_SEED: u32 = 0;
 impl Dimension {
     pub fn new() -> Dimension {
         Dimension {
-            chunks: Arc::new(RwLock::new(HashMap::new())),
+            chunks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -75,7 +75,7 @@ impl Dimension {
         // starting with closest
         for chunk_pos in nearby_positions {
             {
-                let lock = self.chunks.read().unwrap();
+                let lock = self.chunks.lock().unwrap();
                 // if the chunk pos already exists, the chunk has already begun (or completed) processing
                 if lock.contains_key(&chunk_pos) {
                     continue;
@@ -84,20 +84,20 @@ impl Dimension {
             let chunks_arc = self.chunks.clone();
             std::thread::spawn(move || {
                 let chunk = Chunk::new(chunk_pos, 0); // TODO: use dimension id
-                let chunk_arc = Arc::new(RwLock::new(chunk));
+                let chunk_arc = Arc::new(Mutex::new(chunk));
                 {
-                    let mut lock = chunks_arc.write().unwrap();
+                    let mut lock = chunks_arc.lock().unwrap();
                     lock.insert(chunk_pos, (chunk_arc.clone(), Arc::new(AtomicUsize::new(CHUNK_STATE_GENERATING))));
                 }
                 let data = gen.generate(chunk_pos);
                 {
-                    let mut lock = chunk_arc.write().unwrap();
+                    let mut lock = chunk_arc.lock().unwrap();
                     lock.data = data;
                     //let mut changeset = Changeset::new();
                     //changeset.data.set(opos!((16, 16, 16) @ 0), 2).unwrap();
                     //changeset.apply_to_chunk(&mut *lock);
                     {
-                        let mut lock = chunks_arc.write().unwrap();
+                        let mut lock = chunks_arc.lock().unwrap();
                         match lock.get(&chunk_pos) {
                             Some(x) => {
                                 let old = x.clone();
@@ -121,7 +121,7 @@ impl Dimension {
 
     /// Removes old chunks as the player moves away.
     pub fn unload_chunks(&mut self, player_pos: Point3<f32>, queue: Arc<RwLock<RenderQueue>>) {
-        let mut chunks = self.chunks.write().unwrap();
+        let mut chunks = self.chunks.lock().unwrap();
         let old_num = chunks.len();
         chunks.retain(|pos, _| {
             let center = Chunk::chunk_pos_to_center_ws((pos.0, pos.1, pos.2));

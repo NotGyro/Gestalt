@@ -71,8 +71,8 @@ pub fn chunkpos_to_center(point: OctPos<i32>, result_scale: Scale) -> Point3<f32
         block_pos.pos.z as f32 + (chunk_size as f32 * 0.5))
 }
 
-impl<L,D,C> SubdivVoxelSource<SubdivNode<L, D>, i32> for SubdivSpace<C>
-        where L : Voxel,  D : Voxel + LODData<L>, C : OctreeSource<L,D,i32> {
+impl<L,D,C> SubdivSource<SubdivNode<L, D>, i32> for SubdivSpace<C>
+        where L : Voxel,  D : Voxel, C : OctreeSource<L,D,i32> {
 
     fn get(&self, coord: OctPos<i32>) -> Result<SubdivNode<L, D>, SubdivError> {
         Ok(self.get_details(coord)?.0)
@@ -83,7 +83,7 @@ impl<L,D,C> SubdivVoxelSource<SubdivNode<L, D>, i32> for SubdivSpace<C>
 }
 
 impl<L,D,C> OctreeSource<L, D, i32> for SubdivSpace<C>
-        where L : Voxel,  D : Voxel + LODData<L>, C : OctreeSource<L,D,i32> {
+        where L : Voxel,  D : Voxel, C : OctreeSource<L,D,i32> {
     fn get_details(&self, coord: OctPos<i32>) -> Result<(SubdivNode<L, D>, Scale), SubdivError> {
         let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
         // Do we have a chunk that would contain this block position?
@@ -111,8 +111,8 @@ impl<L,D,C> OctreeSource<L, D, i32> for SubdivSpace<C>
         }
     }
 }
-impl<L, C> SubdivVoxelDrain<L, i32> for SubdivSpace<C>
-        where L : Voxel, C : SubdivVoxelDrain<L, i32> {
+impl<L, C> SubdivDrain<L, i32> for SubdivSpace<C>
+        where L : Voxel, C : SubdivDrain<L, i32> {
     fn set(&mut self, coord: OctPos<i32>, value: L) -> Result<(), SubdivError> {
         let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
         let chunk_size = self.get_chunk_size(coord.scale);
@@ -178,9 +178,10 @@ impl<C> SubdivSpace<C> {
 
 #[test]
 fn test_subdiv_space() {
-    use world::TileID;
+    use crate::world::TileID;
     use string_cache::DefaultAtom as Atom; 
-    use world::tile::*;
+    use crate::world::tile::*;
+
     let air_id = TILE_REGISTRY.lock().register_tile(&Atom::from("air"));
     let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
     let lava_id = TILE_REGISTRY.lock().register_tile(&Atom::from("lava"));
@@ -189,17 +190,15 @@ fn test_subdiv_space() {
 
     assert_eq!(world.get_chunk_size(0), 32);
 
-    let mut chunk : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(stone_id)};
+    let mut chunk : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(stone_id.clone(), CHUNK_SCALE);
     chunk.set(opos!((1,0,1) @ 3), air_id).unwrap();
     chunk.set(opos!((0,0,1) @ 3), air_id).unwrap();
     chunk.set(opos!((3,0,0) @ 2), air_id).unwrap();
-
-    chunk.root.rebuild_lod();
     
-    let mut chunk2 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE, root: NaiveOctreeNode::new_leaf(air_id)};
+    let mut chunk2 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
     chunk2.set(opos!((0,0,0) @ CHUNK_SCALE), lava_id ).unwrap();
     
-    let mut chunk3 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree{scale : CHUNK_SCALE, root: NaiveOctreeNode::new_leaf(air_id)};
+    let mut chunk3 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
 
     let chunk_1_pos = vpos!(0,0,0);
     let chunk_2_pos = vpos!(1,0,0);

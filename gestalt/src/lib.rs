@@ -24,12 +24,7 @@ extern crate num;
 extern crate rusttype;
 extern crate image;
 extern crate rgb;
-extern crate swsurface;
-extern crate euc;
-extern crate vek;
 extern crate vulkano_shaders;
-
-extern crate flame;
 
 // modules
 
@@ -49,7 +44,6 @@ pub mod registry;
 pub mod renderer;
 pub mod renderpass;
 pub mod shader;
-pub mod network;
 pub mod util;
 pub mod vulkano_win;
 pub mod world;

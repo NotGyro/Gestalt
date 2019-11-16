@@ -10,7 +10,7 @@ use crate::geometry::{Mesh, PBRPipelineVertex, VertexGroup, Material};
 use crate::util::Transform;
 use crate::world::Chunk;
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32};
-use crate::voxel::subdivstorage::{SubdivVoxelSource, SubdivNode};
+use crate::voxel::subdivstorage::{SubdivSource, SubdivNode, OctreeSource};
 
 
 /// Struct used internally to represent unoptimized quads.
