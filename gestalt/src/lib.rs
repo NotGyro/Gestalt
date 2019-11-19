@@ -24,6 +24,7 @@ extern crate num;
 extern crate rusttype;
 extern crate image;
 extern crate rgb;
+extern crate sodiumoxide;
 extern crate vulkano_shaders;
 
 // modules
@@ -38,6 +39,7 @@ pub mod geometry;
 pub mod input;
 pub mod memory;
 pub mod chunk_mesher;
+pub mod network;
 pub mod player;
 pub mod pipeline;
 pub mod registry;
@@ -54,6 +56,8 @@ use clap::{Arg, App};
 
 use game::Game;
 
+use sodiumoxide::crypto::sign;
+
 
 #[derive(PartialEq)]
 pub enum NetworkRole {
@@ -64,6 +68,35 @@ pub enum NetworkRole {
 
 
 pub fn main() {
+    match util::logger::init_logger() {
+        Ok(_) => {},
+        Err(error) => {
+            println!("Unable to initialize logger. Reason: {}. Closing application.", error);
+            return;
+        }
+    }
+
+    match sodiumoxide::init() {
+        Ok(()) => {},
+        Err(()) => {
+            error!("Unable to initialize cryptography library!");
+            panic!();
+        },
+    };
+
+    let our_identity = match network::SelfIdentity::init() {
+        Ok(ident) => ident,
+        Err(e) => {
+            error!("Could not initialize our cryptographic identity! Reason: {}", e);
+            panic!()
+        }
+    };
+
+    let example_data : u64 = rand::random();
+    let sig = our_identity.sign(&example_data.to_le_bytes());
+    assert!( sign::verify_detached(&sig, &example_data.to_le_bytes(), &our_identity.public_key) );
+    info!("Confirmed our cryptographic identity is valid - data signed by our secret key can be verified by our public key.");
+
     // command line parsing (currently unused)
     let matches = App::new("Gestalt Engine")
         .arg(Arg::with_name("server")
@@ -101,14 +134,6 @@ pub fn main() {
 //        println!("Launching to join a server at {}", join_ip.unwrap());
 //        //mode = game::GameMode::JoinServer(join_ip.unwrap().parse().unwrap());
 //    }
-
-    match util::logger::init_logger() {
-        Ok(_) => {},
-        Err(error) => {
-            println!("Unable to initialize logger. Reason: {}. Closing application.", error);
-            return;
-        }
-    }
 
     if net_role == NetworkRole::Client {
         unimplemented!();
