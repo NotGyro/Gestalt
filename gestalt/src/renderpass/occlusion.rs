@@ -13,7 +13,7 @@ unsafe impl RenderPassDesc for OcclusionRenderPass {
     fn attachment_desc(&self, num: usize) -> Option<AttachmentDescription> {
         match num {
             OUTPUT_BUFFER => Some(AttachmentDescription {
-                format: Format::R8G8B8A8Uint,
+                format: Format::R32Uint,
                 samples: 1,
                 load: LoadOp::Clear,
                 store: StoreOp::Store,

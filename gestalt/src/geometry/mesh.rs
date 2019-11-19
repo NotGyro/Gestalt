@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
-use crate::geometry::{VertexGroup, Material};
-use crate::renderer::ChunkRenderQueueEntry;
+use crate::geometry::{VertexGroup, Material, DeferredShadingVertex};
+use crate::renderer::MeshRenderQueueEntry;
 use crate::util::Transform;
 
 
@@ -16,7 +16,7 @@ use crate::util::Transform;
 #[derive(Debug)]
 pub struct Mesh {
     pub transform: Transform,
-    pub vertex_groups: Vec<Arc<VertexGroup>>,
+    pub vertex_groups: Vec<Arc<VertexGroup<DeferredShadingVertex>>>,
     pub materials: Vec<Material>
 }
 
@@ -25,7 +25,7 @@ impl Mesh {
     /// Creates a new mesh with an identity transform and no geometry or materials.
     pub fn new() -> Mesh {
         Mesh {
-            transform: Transform::new(),
+            transform: Transform::identity(),
             vertex_groups: Vec::new(),
             materials: Vec::new(),
         }
@@ -36,10 +36,10 @@ impl Mesh {
     ///
     /// Stored in [Renderer.chunk_mesh_queue](::renderer::Renderer::render_queue) and used in
     /// [ChunkRenderPipeline](::pipeline::chunk_pipeline::ChunkRenderPipeline).
-    pub fn queue(&self) -> Vec<ChunkRenderQueueEntry> {
+    pub fn queue(&self) -> Vec<MeshRenderQueueEntry> {
         let mut result = Vec::new();
         for vg in self.vertex_groups.iter() {
-            result.push(ChunkRenderQueueEntry {
+            result.push(MeshRenderQueueEntry {
                 vertex_group: vg.clone(),
                 material: self.materials[vg.material_id as usize].clone(),
                 transform: self.transform.to_matrix()

@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "lumberjack",
     "gestalt",
     "gestalt_bin",
 ]

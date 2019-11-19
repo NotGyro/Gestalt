@@ -5,12 +5,12 @@ use std::sync::atomic::{AtomicUsize, AtomicU32, Ordering};
 use std::collections::HashMap;
 use cgmath::{Point3, MetricSpace};
 
-use crate::renderer::RenderQueue;
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_GENERATING};
 use crate::world::{
     Chunk, CHUNK_SIZE_F32,
     generators::ChunkGenerator,
 };
+use crate::renderer::RenderInfo;
 
 
 /// A dimension.
@@ -35,13 +35,14 @@ impl Dimension {
     pub fn new() -> Dimension {
         Dimension {
             chunks: Arc::new(RwLock::new(HashMap::new())),
-            next_chunk_id: Arc::new(AtomicU32::new(0))
+            // start at 1 and skip 0 during check since its used as the clear value
+            next_chunk_id: Arc::new(AtomicU32::new(1))
         }
     }
 
 
     /// Adds new chunks as the player moves closer to them.
-    pub fn load_chunks(&mut self, player_pos: Point3<f32>, queue_arc: Arc<RwLock<RenderQueue>>) {
+    pub fn load_chunks(&mut self, player_pos: Point3<f32>, info: &RenderInfo) {
         let gen = crate::world::generators::PerlinGenerator::new(TEST_SEED); // TODO: use seed
         let player_x_in_chunks = (player_pos.x / CHUNK_SIZE_F32) as i32;
         let player_y_in_chunks = (player_pos.y / CHUNK_SIZE_F32) as i32;
@@ -84,6 +85,7 @@ impl Dimension {
             }
             let chunks_arc = self.chunks.clone();
             let id_arc = self.next_chunk_id.clone();
+            let info_arc = info.clone();
             std::thread::spawn(move || {
                 let id = id_arc.fetch_add(1, Ordering::Relaxed);
                 let chunk = Chunk::new(id, chunk_pos, 0); // TODO: use dimension id
@@ -110,7 +112,7 @@ impl Dimension {
                     }
                 }
                 {
-                    let mut lock = queue_arc.write().unwrap();
+                    let mut lock = info_arc.render_queues.write().unwrap();
                     lock.lines.chunks_changed = true;
                 }
             });
@@ -120,7 +122,7 @@ impl Dimension {
 
 
     /// Removes old chunks as the player moves away.
-    pub fn unload_chunks(&mut self, player_pos: Point3<f32>, queue: Arc<RwLock<RenderQueue>>) {
+    pub fn unload_chunks(&mut self, player_pos: Point3<f32>, info: &RenderInfo) {
         let mut chunks = self.chunks.write().unwrap();
         let old_num = chunks.len();
         chunks.retain(|pos, _| {
@@ -129,7 +131,7 @@ impl Dimension {
             dist < CHUNK_DISTANCE + UNLOAD_OFFSET // offset added to prevent load/unload loop on the edge
         });
         if chunks.len() != old_num {
-            let mut lock = queue.write().unwrap();
+            let mut lock = info.render_queues.write().unwrap();
             lock.lines.chunks_changed = true;
         }
     }

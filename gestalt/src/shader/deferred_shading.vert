@@ -13,18 +13,15 @@ layout(location = 3) out vec3 surface_pos_out;
 layout(push_constant) uniform Constants {
     mat4 view;
     mat4 proj;
-    vec3 view_pos;
 } constants;
 
 layout(set = 1, binding = 0) uniform InstanceData {
     mat4 world;
-    float specular_exponent;
-    float specular_strength;
 } instancedata;
 
 
 void main() {
-    normal_out = transpose(inverse(mat3(instancedata.world))) * normal; // normal in world space
+    normal_out = transpose(inverse(mat3(instancedata.world))) * normal;
     tangent_out = tangent;
     uv_out = uv;
     surface_pos_out = (instancedata.world * vec4(position, 1.0)).xyz;

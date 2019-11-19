@@ -1,18 +1,16 @@
 //! Main type for the game. `Game::new().run()` runs the game.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{Ordering, AtomicU64};
 use std::thread;
 
 use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
-use vulkano::buffer::BufferUsage;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
-use winit::{Event, WindowEvent, DeviceEvent, ElementState, Window, WindowBuilder, EventsLoop};
+use winit::{Event, WindowEvent, DeviceEvent, ElementState, Window, WindowBuilder, EventsLoop, VirtualKeyCode};
 
 use crate::vulkano_win::VkSurfaceBuild;
-use crate::buffer::CpuAccessibleBufferXalloc;
-use crate::geometry::{VertexPositionColorAlpha, VertexPositionObjectId};
+use crate::geometry::VertexGroup;
 use crate::renderer::Renderer;
 use crate::input::InputState;
 use crate::registry::DimensionRegistry;
@@ -20,12 +18,12 @@ use crate::metrics::FrameMetrics;
 use crate::player::Player;
 use crate::world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_MESHING, CHUNK_STATE_CLEAN, CHUNK_STATE_GENERATING};
-use crate::util::{view_to_frustum, aabb_frustum_intersection, cube};
-use crate::pipeline::text_pipeline::TextData;
+use crate::util::{view_to_frustum, aabb_frustum_intersection};
+use crate::pipeline::text::TextData;
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
-const MAX_CHUNK_MESH_THREADS: u32 = 1;
+const MAX_CHUNK_MESH_THREADS: u32 = 2;
 
 
 /// Main type for the game. `Game::new().run()` runs the game.
@@ -39,7 +37,8 @@ pub struct Game {
     dimension_registry: DimensionRegistry,
     chunk_generating_threads: Arc<std::sync::atomic::AtomicU32>,
     chunk_meshing_threads: Arc<std::sync::atomic::AtomicU32>,
-    visible_ids: [bool; 65536]
+    visible_ids: [bool; 65536],
+    tick: Arc<AtomicU64>,
 }
 
 
@@ -72,12 +71,15 @@ impl Game {
             dimension_registry,
             chunk_generating_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             chunk_meshing_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            visible_ids: [false; 65536]
+            visible_ids: [false; 65536],
+            tick: Arc::new(AtomicU64::new(0)),
         }
     }
 
 
     pub fn run(&mut self) {
+        lumberjack::set_tick_arc(self.tick.clone());
+
         let mut keep_running = true;
         while keep_running {
             keep_running = self.update();
@@ -86,6 +88,8 @@ impl Game {
 
 
     pub fn update(&mut self) -> bool {
+        self.tick.fetch_add(1, Ordering::Relaxed);
+
         let mut keep_running = true;
 
         let elapsed = self.frame_metrics.start_frame();
@@ -98,6 +102,8 @@ impl Game {
         let mut events = Vec::new();
         self.event_loop.poll_events(|event| { events.push(event) });
 
+        // clear first_frame on old keypresses
+        self.input_state.update_keys();
         for event in events {
             match event {
                 Event::WindowEvent { event, .. } => {
@@ -121,7 +127,7 @@ impl Game {
                         };
                         match self.surface.window().set_cursor_position(::winit::dpi::LogicalPosition::new(dimensions[0] as f64 / 2.0, dimensions[1] as f64 / 2.0)) {
                             Ok(_) => {},
-                            Err(err) => { println!("Couldn't set cursor position: {:?}", err); }
+                            Err(err) => { warn!(Game, "Couldn't set cursor position: {:?}", err); }
                         }
                     }
                 },
@@ -145,15 +151,32 @@ impl Game {
 
         // general updates
 
+        if self.input_state.get_key_just_pressed(&VirtualKeyCode::V) {
+            if self.input_state.get_key_down(&VirtualKeyCode::LShift) {
+                if self.renderer.info.debug_visualize_setting == 0 {
+                    self.renderer.info.debug_visualize_setting = crate::renderer::DEBUG_VISUALIZE_MAX - 1;
+                }
+                else {
+                    self.renderer.info.debug_visualize_setting -= 1;
+                }
+            }
+            else {
+                self.renderer.info.debug_visualize_setting += 1;
+                if self.renderer.info.debug_visualize_setting == crate::renderer::DEBUG_VISUALIZE_MAX {
+                    self.renderer.info.debug_visualize_setting = 0;
+                }
+            }
+        }
+
         self.player.update(dt_clamped, &self.input_state);
 
-        self.dimension_registry.get(0).unwrap().unload_chunks(self.player.position.clone(), self.renderer.render_queue.clone());
+        self.dimension_registry.get(0).unwrap().unload_chunks(self.player.position.clone(), &self.renderer.info);
         if self.chunk_generating_threads.load(Ordering::Relaxed) < MAX_CHUNK_GEN_THREADS {
-            self.dimension_registry.get(0).unwrap().load_chunks(self.player.position.clone(), self.renderer.render_queue.clone());
+            self.dimension_registry.get(0).unwrap().load_chunks(self.player.position.clone(), &self.renderer.info);
         }
 
         {
-            let mut lock = self.renderer.render_queue.write().unwrap();
+            let mut lock = self.renderer.info.render_queues.write().unwrap();
             (*lock).text.clear();
             lock.text.append(&mut self.frame_metrics.get_text((5, 5)));
             lock.text.push(TextData {
@@ -164,38 +187,47 @@ impl Game {
                 position: (5, 140),
                 ..TextData::default()
             });
+            let debug_vis_text = match self.renderer.info.debug_visualize_setting {
+                crate::renderer::DEBUG_VISUALIZE_DISABLED => "Disabled",
+                crate::renderer::DEBUG_VISUALIZE_POSITION_BUFFER => "Position Buffer",
+                crate::renderer::DEBUG_VISUALIZE_NORMAL_BUFFER => "Normal Buffer",
+                crate::renderer::DEBUG_VISUALIZE_ALBEDO_BUFFER => "Albedo Buffer",
+                crate::renderer::DEBUG_VISUALIZE_ROUGHNESS_BUFFER => "Roughness Buffer",
+                crate::renderer::DEBUG_VISUALIZE_METALLIC_BUFFER => "Metallic Buffer",
+                crate::renderer::DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY => "Deferred Lighting Only",
+                crate::renderer::DEBUG_VISUALIZE_NO_POST_PROCESSING => "No Post Processing",
+                crate::renderer::DEBUG_VISUALIZE_OCCLUSION_BUFFER => "Occlusion Buffer",
+                _ => unreachable!()
+            };
+            lock.text.push(TextData {
+                text: format!("Debug visualization: {}", debug_vis_text),
+                position: (5, 165),
+                ..TextData::default()
+            });
 
-            let line_queue = &mut lock.lines;
-            if line_queue.chunks_changed {
-                let mut verts = Vec::new();
-                let mut idxs = Vec::new();
-                let mut index_offset = 0;
-                {
-                    let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
-                    for (pos, (_, _)) in chunks.iter() {
-                        verts.append(&mut cube::generate_chunk_debug_line_vertices(pos.0, pos.1, pos.2, 0.25f32).to_vec());
-                        idxs.append(&mut cube::generate_chunk_debug_line_indices(index_offset).to_vec());
-                        index_offset += 1;
-                    }
-                }
-                line_queue.chunk_lines_vertex_buffer =
-                    CpuAccessibleBufferXalloc::<[VertexPositionColorAlpha]>::from_iter(self.renderer.device.clone(),
-                                                                                       self.renderer.memory_pool.clone(),
-                                                                                       BufferUsage::all(),
-                                                                                       verts.iter().cloned())
-                        .expect("failed to create buffer");
-                line_queue.chunk_lines_index_buffer =
-                    CpuAccessibleBufferXalloc::<[u32]>::from_iter(self.renderer.device.clone(),
-                                                                  self.renderer.memory_pool.clone(),
-                                                                  BufferUsage::all(),
-                                                                  idxs.iter().cloned())
-                        .expect("failed to create buffer");
-                line_queue.chunks_changed = false;
-            }
+            // line queue (disabled)
+
+//            let line_queue = &mut lock.lines;
+//            if line_queue.chunks_changed {
+//                let mut verts = Vec::new();
+//                let mut idxs = Vec::new();
+//                let mut index_offset = 0;
+//                {
+//                    let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
+//                    for (pos, (_, _)) in chunks.iter() {
+//                        verts.append(&mut cube::generate_chunk_debug_line_vertices(pos.0, pos.1, pos.2, 0.25f32).to_vec());
+//                        idxs.append(&mut cube::generate_chunk_debug_line_indices(index_offset).to_vec());
+//                        index_offset += 1;
+//                    }
+//                }
+//
+//                line_queue.chunk_lines_vg = Arc::new(VertexGroup::new(verts.iter().cloned(), idxs.iter().cloned(), 0, self.renderer.info.device.clone(), self.renderer.info.memory_pool.clone()));
+//                line_queue.chunks_changed = false;
+//            }
         }
         {
-            let mut lock = self.renderer.render_queue.write().unwrap();
-            lock.chunk_meshes.clear();
+            let mut lock = self.renderer.info.render_queues.write().unwrap();
+            lock.meshes.clear();
         }
         {
             if self.chunk_meshing_threads.load(Ordering::Relaxed) < MAX_CHUNK_MESH_THREADS {
@@ -219,14 +251,25 @@ impl Game {
                                 self.chunk_meshing_threads.fetch_add(1, Ordering::Relaxed);
                                 state.store(CHUNK_STATE_MESHING, Ordering::Relaxed);
                                 let chunk_arc = chunk.clone();
-                                let device_arc = self.renderer.device.clone();
-                                let memory_pool_arc = self.renderer.memory_pool.clone();
+                                let device_arc = self.renderer.info.device.clone();
+                                let memory_pool_arc = self.renderer.info.memory_pool.clone();
                                 let state_arc = state.clone();
                                 let thread_count_clone = self.chunk_meshing_threads.clone();
                                 thread::spawn(move || {
                                     let mut chunk_lock = chunk_arc.write().unwrap();
+
                                     (*chunk_lock).generate_mesh(device_arc, memory_pool_arc);
-                                    (*chunk_lock).generate_occlusion_mesh(3);
+
+//                                    let chunk_center = Chunk::chunk_pos_to_center_ws(chunk_pos);
+//                                    let dist = Point3::distance(Point3::new(chunk_center.0, chunk_center.1, chunk_center.2), player_pos);
+                                    let occluder_scale = 2;
+//                                    if dist > 128.0 {
+//                                        occluder_scale = 3;
+//                                        if dist > 192.0 {
+//                                            occluder_scale = 4;
+//                                        }
+//                                    }
+                                    (*chunk_lock).generate_occlusion_mesh(occluder_scale);
                                     state_arc.store(CHUNK_STATE_CLEAN, Ordering::Relaxed);
                                     thread_count_clone.fetch_sub(1, Ordering::Relaxed);
                                 });
@@ -251,7 +294,7 @@ impl Game {
             }
 
             {
-                let mut lock = self.renderer.render_queue.write().unwrap();
+                let mut lock = self.renderer.info.render_queues.write().unwrap();
                 lock.text.push(TextData {
                     text: format!("Chunks generated: {}", num_generated),
                     position: (5, 80),
@@ -273,12 +316,14 @@ impl Game {
             Err(_) => {}
         }
         {
-            let queue_lock = self.renderer.render_queue.read().unwrap();
+            let queue_lock = self.renderer.info.render_queues.read().unwrap();
             let buffer_lock = queue_lock.occluders.output_cpu_buffer.read().unwrap();
             for u in buffer_lock.iter() {
                 self.visible_ids[*u as usize] = true;
             }
         }
+        // 0 is the clear value for the buffer. no chunks should have id 0
+        self.visible_ids[0] = false;
 
         let mut occlusion_verts = Vec::new();
         let mut occlusion_indices = Vec::new();
@@ -308,20 +353,30 @@ impl Game {
                 }
                 if is_ready && is_in_view {
                     let chunk_lock = chunk.read().unwrap();
+                    let mut draw = false;
                     if self.visible_ids[chunk_lock.id as usize] {
-                        let mut queue_lock = self.renderer.render_queue.write().unwrap();
-                        queue_lock.chunk_meshes.append(&mut chunk_lock.mesh.queue());
+                        draw = true;
+                    }
+                    else {
+                        let chunk_center = Chunk::chunk_pos_to_center_ws(*pos);
+                        let dist = Point3::distance(Point3::new(chunk_center.0, chunk_center.1, chunk_center.2), self.player.position.clone());
+                        if dist < 48.0 {
+                            draw = true;
+                        }
+                    }
+                    if draw {
+                        let mut queue_lock = self.renderer.info.render_queues.write().unwrap();
+                        queue_lock.meshes.append(&mut chunk_lock.mesh.queue());
                     }
                 }
             }
-            let mut lock = self.renderer.render_queue.write().unwrap();
+            let mut lock = self.renderer.info.render_queues.write().unwrap();
             lock.text.push(TextData {
                 text: format!("Chunks meshed: {}", num_chunks_before_culling),
                 position: (5, 95),
                 ..TextData::default()
             });
-            lock.occluders.vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionObjectId]>::from_iter(self.renderer.device.clone(), self.renderer.memory_pool.clone(), BufferUsage::all(), occlusion_verts.iter().cloned()).unwrap();
-            lock.occluders.index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(self.renderer.device.clone(), self.renderer.memory_pool.clone(), BufferUsage::all(), occlusion_indices.iter().cloned()).unwrap();
+            lock.occluders.vertex_group = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, self.renderer.info.device.clone(), self.renderer.info.memory_pool.clone()));
         }
 
         self.frame_metrics.end_game();

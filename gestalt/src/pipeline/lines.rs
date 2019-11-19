@@ -1,42 +1,39 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use cgmath::Matrix4;
 use vulkano::buffer::BufferUsage;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::device::Device;
+use vulkano::device::Queue;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subpass, RenderPassAbstract};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
-use vulkano::swapchain::Swapchain;
-use winit::Window;
 
 use crate::geometry::VertexPositionColorAlpha;
-use crate::renderer::RenderQueue;
-use crate::renderpass::RenderPassUnclearedColorWithDepth;
+use crate::renderer::RenderInfo;
+use crate::renderpass::LinesRenderPass;
 use crate::shader::lines as LinesShaders;
-use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
+use crate::pipeline::RenderPipelineAbstract;
 use crate::cpu_pool::XallocCpuBufferPool;
-use crate::memory::XallocMemoryPool;
+use vulkano::format::ClearValue;
 
 
 pub struct LinesRenderPipeline {
-    device: Arc<Device>,
     vulkan_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     pub framebuffers: Option<Vec<Arc<dyn FramebufferAbstract + Send + Sync>>>,
-    renderpass: Arc<RenderPass<RenderPassUnclearedColorWithDepth>>,
+    renderpass: Arc<RenderPass<LinesRenderPass>>,
     uniform_buffer_pool: XallocCpuBufferPool<LinesShaders::vertex::ty::Data>,
 }
 
 
 impl LinesRenderPipeline {
-    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: XallocMemoryPool) -> LinesRenderPipeline {
-        let vs = LinesShaders::vertex::Shader::load(device.clone()).expect("failed to create shader module");
-        let fs = LinesShaders::fragment::Shader::load(device.clone()).expect("failed to create shader module");
+    pub fn new(info: &RenderInfo) -> LinesRenderPipeline {
+        let vs = LinesShaders::vertex::Shader::load(info.device.clone()).expect("failed to create shader module");
+        let fs = LinesShaders::fragment::Shader::load(info.device.clone()).expect("failed to create shader module");
 
         let renderpass= Arc::new(
-            RenderPassUnclearedColorWithDepth { color_format: swapchain.format() }
-                .build_render_pass(device.clone())
+            LinesRenderPass {}
+                .build_render_pass(info.device.clone())
                 .unwrap()
         );
 
@@ -49,15 +46,14 @@ impl LinesRenderPipeline {
             .depth_stencil_simple_depth()
             .blend_alpha_blending()
             .render_pass(Subpass::from(renderpass.clone(), 0).unwrap())
-            .build(device.clone())
+            .build(info.device.clone())
             .unwrap());
 
         LinesRenderPipeline {
-            device: device.clone(),
             vulkan_pipeline: pipeline,
             framebuffers: None,
             renderpass,
-            uniform_buffer_pool: XallocCpuBufferPool::<LinesShaders::vertex::ty::Data>::new(device.clone(), BufferUsage::all(), memory_pool.clone()),
+            uniform_buffer_pool: XallocCpuBufferPool::<LinesShaders::vertex::ty::Data>::new(info.device.clone(), BufferUsage::all(), info.memory_pool.clone()),
         }
     }
 }
@@ -73,7 +69,7 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
+    fn build_command_buffer(&mut self, info: &RenderInfo) -> (AutoCommandBuffer, Arc<Queue>) {
         let descriptor_set;
         let subbuffer = self.uniform_buffer_pool.next(LinesShaders::vertex::ty::Data {
             world: Matrix4::from_scale(1.0).into(),
@@ -84,12 +80,12 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
             .add_buffer(subbuffer).unwrap()
             .build().unwrap()
         );
-        let lock = render_queue.read().unwrap();
-        AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), info.queue.family())
+        let lock = info.render_queues.read().unwrap();
+        let cb = AutoCommandBufferBuilder::primary_one_time_submit(info.device.clone(), info.queue_main.family())
             .unwrap()
             .begin_render_pass(
                 self.framebuffers.as_ref().unwrap()[info.image_num].clone(), false,
-                vec![::vulkano::format::ClearValue::None, ::vulkano::format::ClearValue::None]).unwrap()
+                vec![ClearValue::None, ClearValue::None]).unwrap()
             .draw_indexed(self.vulkan_pipeline.clone(), &DynamicState {
                 line_width: None,
                 viewports: Some(vec![Viewport {
@@ -102,10 +98,11 @@ impl RenderPipelineAbstract for LinesRenderPipeline {
                 write_mask: None,
                 reference: None
             },
-                          vec![lock.lines.chunk_lines_vertex_buffer.clone()],
-                          lock.lines.chunk_lines_index_buffer.clone(),
+                          vec![lock.lines.chunk_lines_vg.vertex_buffer.clone()],
+                          lock.lines.chunk_lines_vg.index_buffer.clone(),
                           descriptor_set.clone(), ()).unwrap()
             .end_render_pass().unwrap()
-            .build().unwrap()
+            .build().unwrap();
+        (cb, info.queue_main.clone())
     }
 }

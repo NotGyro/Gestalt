@@ -4,9 +4,7 @@ use vulkano::format::{Format, ClearValue};
 
 
 /// Render pass that uses a single color attachment and a depth buffer, and clears both before it runs.
-pub struct RenderPassClearedColorWithDepth {
-    pub color_format: Format
-}
+pub struct RenderPassClearedColorWithDepth;
 
 
 unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
@@ -14,12 +12,12 @@ unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
     fn attachment_desc(&self, num: usize) -> Option<AttachmentDescription> {
         match num {
             0 => Some(AttachmentDescription {
-                format: self.color_format,
+                format: Format::R16G16B16A16Sfloat,
                 samples: 1,
                 load: LoadOp::Clear,
                 store: StoreOp::Store,
-                stencil_load: LoadOp::DontCare,
-                stencil_store: StoreOp::DontCare,
+                stencil_load: LoadOp::Clear,
+                stencil_store: StoreOp::Store,
                 initial_layout: ImageLayout::Undefined,
                 final_layout: ImageLayout::ColorAttachmentOptimal
             }),
@@ -28,8 +26,8 @@ unsafe impl RenderPassDesc for RenderPassClearedColorWithDepth {
                 samples: 1,
                 load: LoadOp::Clear,
                 store: StoreOp::Store,
-                stencil_load: LoadOp::DontCare,
-                stencil_store: StoreOp::DontCare,
+                stencil_load: LoadOp::Clear,
+                stencil_store: StoreOp::Store,
                 initial_layout: ImageLayout::Undefined,
                 final_layout: ImageLayout::DepthStencilAttachmentOptimal
             }),

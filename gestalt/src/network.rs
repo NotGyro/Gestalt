@@ -1,5 +1,5 @@
 extern crate parking_lot;
-extern crate log;
+//extern crate log;
 extern crate crossbeam;
 extern crate serde;
 extern crate serde_json;
@@ -166,7 +166,7 @@ impl Server {
     pub fn new(addr: SocketAddr) -> Result<Server, Box<dyn Error>> {
         //Bind our listener.
         let listener = TcpListener::bind(addr)?; //.map_err(|err| {error!("{}", err)})
-        info!("Server listening on port {}", addr.port());
+        info!(Network, "Server listening on port {}", addr.port());
         //Set our listener as nonblocking so we can poll it rather than blocking when no new clients are connecting.
         listener.set_nonblocking(true)?;
         Ok( Server{
@@ -204,7 +204,7 @@ impl Server {
         let msg_len = u32::from_le_bytes(buf);
         //If we already got a packet size, we should finish and read the rest of the packet.
         stream.set_nonblocking(false)?;
-        debug!("Receiving packet of size {} from {:?}", msg_len, stream.peer_addr());
+        trace!(Network, "Receiving packet of size {} from {:?}", msg_len, stream.peer_addr());
 
         let mut buf : Vec<u8> = vec![0; msg_len as usize];
         stream.read_exact(&mut buf)?;
@@ -230,7 +230,7 @@ impl Server {
         match self.listener.accept() {
             Ok(stream_tuple) => {
                 let (mut stream, ip) = stream_tuple;
-                info!("Client connecting from {}", ip);
+                info!(Network, "Client connecting from {}", ip);
                 
                 //The next thing the client does MUST be to send us a join packet.
                 //We shouldn't let them tie up the network thread with it, either,
@@ -243,7 +243,7 @@ impl Server {
                 let mut buf : [u8; 4] = [0; 4];
                 stream.read_exact(&mut buf)?;
                 let prot = u32::from_le_bytes(buf);
-                info!("This client is connecting with protocol version {}. Ours is {}.", prot, PROTOCOL_VERSION);
+                info!(Network, "This client is connecting with protocol version {}. Ours is {}.", prot, PROTOCOL_VERSION);
                 assert_eq!(prot, PROTOCOL_VERSION);
                 //Now let's get a join packet.
                 let packet = Self::read_incoming_packet(&mut stream)?;
@@ -263,7 +263,7 @@ impl Server {
             Err(error) => {
                 match error.kind() {
                     std::io::ErrorKind::WouldBlock => {return Ok(()); /* Do nothing, nobody's connecting. */}, 
-                    _ => error!("Got an error while trying to accept a client connection: {}", error),
+                    _ => error!(Network, "Got an error while trying to accept a client connection: {}", error),
                 }
             },
         }
@@ -277,7 +277,7 @@ impl Server {
             //First, receive. Are there any messages sent to us from this client?
             match Self::read_incoming_packet(stream) {
                 Ok(pak) => {
-                    debug!("Received {:?} from {:?}", pak, client.client_ip);
+                    trace!(Network, "Received {:?} from {:?}", pak, client.client_ip);
                     // TODO: Actually dispatch these packets somewhere.
                     match pak.data {
                         ToServerPacketData::Disconnect => self.to_drop.push(id.clone()),
@@ -289,7 +289,7 @@ impl Server {
                 },
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => { /* Nothing to read right now, check again later. */ },
                 Err(e) => { 
-                    error!("Encountered IO while  from a client stream: {}", e);
+                    error!(Network, "Encountered IO while  from a client stream: {}", e);
                     return Err(Box::new(e));
                 },
             };
@@ -346,7 +346,7 @@ impl Client {
         let msg_len = u32::from_le_bytes(buf);
         //If we already got a packet size, we should finish and read the rest of the packet.
         stream.set_nonblocking(false)?;
-        debug!("Receiving packet of size {} from {:?}", msg_len, stream.peer_addr());
+        trace!(Network, "Receiving packet of size {} from {:?}", msg_len, stream.peer_addr());
 
         let mut buf : Vec<u8> = vec![0; msg_len as usize];
         stream.read_exact(&mut buf)?;
@@ -366,14 +366,14 @@ impl Client {
             inner.stream.write(msg.as_bytes())?;
             inner.stream.flush()?;
         } else {
-            warn!("Attempted to send a packet while not connected to a server: {:?}", packet);
+            warn!(Network, "Attempted to send a packet while not connected to a server: {:?}", packet);
         }
         Ok(())
     }
     pub fn connect(&mut self, addr: SocketAddr) -> Result<(), std::io::Error> {
         match TcpStream::connect(addr) {
             Ok(mut stream) => {
-                debug!("Successfully connected to server at {}.", addr);
+                info!(Network, "Successfully connected to server at {}.", addr);
                 //First, tell the server what protocol breaking change we're using.
                 stream.write(&PROTOCOL_VERSION.to_le_bytes())?;
                 self.inner = Some(_ClientInner{stream:stream.try_clone().unwrap()});
@@ -412,20 +412,20 @@ impl Client {
             inner.stream.shutdown(Shutdown::Both)?;
         }
         else {
-            warn!("Attempted to disconnect from a server while not connected to a server.");
+            warn!(Network, "Attempted to disconnect from a server while not connected to a server.");
         }
         self.inner = None;
         Ok(())
     }
     pub fn receive_step(&mut self) -> Result<(), Box<dyn Error>> {
         if self.inner.is_none() {
-            warn!("Attempted to receive packets from a server while not connected to a server.");
+            warn!(Network, "Attempted to receive packets from a server while not connected to a server.");
             return Ok(());
         }
         let stream = self.inner.as_ref().unwrap().stream.try_clone()?;
         match Self::read_incoming_packet(&mut stream.try_clone()?) {
             Ok(pak) => {
-                debug!("Received {:?} from server.", pak);
+                trace!(Network, "Received {:?} from server.", pak);
                 // TODO: Actually dispatch these packets somewhere.
                 match pak.data {
                     ToClientPacketData::Kick => {
@@ -440,7 +440,7 @@ impl Client {
             },
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => { /* Nothing to read right now, check again later. */ },
             Err(e) => { 
-                error!("Encountered IO while  from a client stream: {}", e);
+                error!(Network, "Encountered IO while  from a client stream: {}", e);
                 return Err(Box::new(e));
             },
         };

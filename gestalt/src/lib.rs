@@ -1,8 +1,9 @@
 // External crates
 
 #[macro_use] extern crate lazy_static;
-#[macro_use] extern crate log;
+//#[macro_use] extern crate log;
 #[macro_use] extern crate vulkano;
+#[macro_use] extern crate lumberjack;
 
 extern crate cgmath;
 extern crate clap;
@@ -63,6 +64,22 @@ use clap::{Arg, App};
 
 use game::Game;
 
+#[allow(non_upper_case_globals)]
+pub mod lumberjack_scopes {
+    use lumberjack::prelude::*;
+    use lumberjack::Verbosity::*;
+
+    lazy_static! {
+        pub static ref Test:     u32 = lumberjack::register_scope(Scope::new("Test").log(Verbose).print(Warning));
+        pub static ref Game:     u32 = lumberjack::register_scope(Scope::new("Game"));
+        pub static ref Network:  u32 = lumberjack::register_scope(Scope::new("Network"));
+        pub static ref Renderer: u32 = lumberjack::register_scope(Scope::new("Renderer"));
+        pub static ref Mesher:   u32 = lumberjack::register_scope(Scope::new("Mesher"));
+    }
+}
+
+
+
 
 #[derive(PartialEq)]
 pub enum NetworkRole {
@@ -111,13 +128,13 @@ pub fn main() {
 //        //mode = game::GameMode::JoinServer(join_ip.unwrap().parse().unwrap());
 //    }
 
-    match util::logger::init_logger() {
-        Ok(_) => {},
-        Err(error) => {
-            println!("Unable to initialize logger. Reason: {}. Closing application.", error);
-            return;
-        }
-    }
+//    match util::logger::init_logger() {
+//        Ok(_) => {},
+//        Err(error) => {
+//            println!("Unable to initialize logger. Reason: {}. Closing application.", error);
+//            return;
+//        }
+//    }
 
     if net_role == NetworkRole::Client {
         unimplemented!();

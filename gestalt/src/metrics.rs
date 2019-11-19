@@ -1,6 +1,6 @@
 use std::time::Instant;
 use std::collections::VecDeque;
-use crate::pipeline::text_pipeline::TextData;
+use crate::pipeline::text::TextData;
 
 
 const AVG_SAMPLE_COUNT: usize = 20;
@@ -10,7 +10,7 @@ pub struct FrameMetrics {
     // timestamps of completed frames, for fps. entries > 1 sec ago are removed
     completed_frames: Vec<Instant>,
     // timestamps for calculating individual segment times
-    frame_start_time: Instant,
+    pub frame_start_time: Instant,
     game_end_time: Instant,
     draw_end_time: Instant,
     gpu_end_time: Instant,

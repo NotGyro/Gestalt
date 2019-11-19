@@ -1,9 +1,9 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use vulkano::buffer::BufferUsage;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, AutoCommandBuffer, DynamicState};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::device::Device;
+use vulkano::device::Queue;
 use vulkano::format::R8Unorm;
 use vulkano::framebuffer::{FramebufferAbstract, RenderPass, RenderPassDesc, Subpass, RenderPassAbstract};
 use vulkano::image::{AttachmentImage, ImageUsage};
@@ -11,19 +11,16 @@ use vulkano::memory::pool::{PotentialDedicatedAllocation, StdMemoryPoolAlloc};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
 use vulkano::sampler::{Sampler, Filter, SamplerAddressMode, MipmapMode};
-use vulkano::swapchain::Swapchain;
-use winit::Window;
 use rusttype::{Font, Scale, PositionedGlyph, point};
 use hashbrown::HashMap;
 use rusttype::gpu_cache::Cache;
 
-use crate::renderpass::RenderPassUnclearedColorWithDepth;
+use crate::renderpass::LinesRenderPass;
 use crate::geometry::vertex::VertexPositionUVColor;
-use crate::renderer::RenderQueue;
+use crate::renderer::RenderInfo;
 use crate::shader::text as TextShaders;
-use crate::pipeline::{RenderPipelineAbstract, PipelineCbCreateInfo};
+use crate::pipeline::RenderPipelineAbstract;
 use crate::buffer::CpuAccessibleBufferXalloc;
-use crate::memory::xalloc::XallocMemoryPool;
 
 
 /// The size of each font's cache texture, in pixels (i.e. 512 x 512)
@@ -101,24 +98,22 @@ pub struct FontData {
 
 
 pub struct TextRenderPipeline {
-    device: Arc<Device>,
     vulkan_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     pub framebuffers: Option<Vec<Arc<dyn FramebufferAbstract + Send + Sync>>>,
-    renderpass: Arc<RenderPass<RenderPassUnclearedColorWithDepth>>,
+    renderpass: Arc<RenderPass<LinesRenderPass>>,
     fonts: HashMap<String, FontData>,
     sampler: Arc<Sampler>,
-    memory_pool: XallocMemoryPool,
 }
 
 
 impl TextRenderPipeline {
-    pub fn new(swapchain: &Swapchain<Window>, device: &Arc<Device>, memory_pool: XallocMemoryPool) -> Self {
-        let vs = TextShaders::vertex::Shader::load(device.clone()).expect("failed to create shader module");
-        let fs = TextShaders::fragment::Shader::load(device.clone()).expect("failed to create shader module");
+    pub fn new(info: &RenderInfo) -> Self {
+        let vs = TextShaders::vertex::Shader::load(info.device.clone()).expect("failed to create shader module");
+        let fs = TextShaders::fragment::Shader::load(info.device.clone()).expect("failed to create shader module");
 
         let renderpass = Arc::new(
-            RenderPassUnclearedColorWithDepth { color_format: swapchain.format() }
-                .build_render_pass(device.clone())
+            LinesRenderPass {}
+                .build_render_pass(info.device.clone())
                 .unwrap()
         );
 
@@ -131,20 +126,20 @@ impl TextRenderPipeline {
             .depth_stencil_simple_depth()
             .blend_alpha_blending()
             .render_pass(Subpass::from(renderpass.clone(), 0).unwrap())
-            .build(device.clone())
+            .build(info.device.clone())
             .unwrap());
 
         let mut fonts = HashMap::new();
         fonts.insert("Roboto Regular".into(), FontData {
             font: Box::new(Font::from_bytes(include_bytes!("../../../fonts/Roboto-Regular.ttf") as & [u8]).unwrap()),
             cache: Box::new(Cache::builder().dimensions(CACHE_SIZE as u32, CACHE_SIZE as u32).build()),
-            cache_buffer: CpuAccessibleBufferXalloc::from_iter(device.clone(),
-                                                               memory_pool.clone(),
+            cache_buffer: CpuAccessibleBufferXalloc::from_iter(info.device.clone(),
+                                                               info.memory_pool.clone(),
                                                                BufferUsage::all(),
                                                                (0 .. CACHE_SIZE*CACHE_SIZE).map(|_| 0u8)
                                                     ).expect("failed to create buffer"),
             cache_texture: AttachmentImage::with_usage(
-                device.clone(),
+                info.device.clone(),
                 [CACHE_SIZE as u32, CACHE_SIZE as u32],
                 R8Unorm,
                 ImageUsage {
@@ -160,13 +155,13 @@ impl TextRenderPipeline {
         fonts.insert("Fira Mono".into(), FontData {
             font: Box::new(Font::from_bytes(include_bytes!("../../../fonts/FiraMono-Regular.ttf") as & [u8]).unwrap()),
             cache: Box::new(Cache::builder().dimensions(CACHE_SIZE as u32, CACHE_SIZE as u32).build()),
-            cache_buffer: CpuAccessibleBufferXalloc::from_iter(device.clone(),
-                                                               memory_pool.clone(),
+            cache_buffer: CpuAccessibleBufferXalloc::from_iter(info.device.clone(),
+                                                               info.memory_pool.clone(),
                                                                BufferUsage::all(),
                                                                (0 .. CACHE_SIZE*CACHE_SIZE).map(|_| 0u8)
             ).expect("failed to create buffer"),
             cache_texture: AttachmentImage::with_usage(
-                device.clone(),
+                info.device.clone(),
                 [CACHE_SIZE as u32, CACHE_SIZE as u32],
                 R8Unorm,
                 ImageUsage {
@@ -178,15 +173,13 @@ impl TextRenderPipeline {
         });
 
         TextRenderPipeline {
-            device: device.clone(),
             vulkan_pipeline: pipeline,
             framebuffers: None,
             renderpass,
             fonts,
-            sampler: Sampler::new(device.clone(), Filter::Nearest, Filter::Nearest, MipmapMode::Nearest,
+            sampler: Sampler::new(info.device.clone(), Filter::Nearest, Filter::Nearest, MipmapMode::Nearest,
                                   SamplerAddressMode::Repeat, SamplerAddressMode::Repeat, SamplerAddressMode::Repeat,
                                   0.0, 4.0, 0.0, 0.0).unwrap(),
-            memory_pool,
         }
     }
 }
@@ -202,10 +195,10 @@ impl RenderPipelineAbstract for TextRenderPipeline {
         self.renderpass.clone() as Arc<dyn RenderPassAbstract + Send + Sync>
     }
 
-    fn build_command_buffer(&mut self, info: PipelineCbCreateInfo, render_queue: Arc<RwLock<RenderQueue>>) -> AutoCommandBuffer {
-        let lock = render_queue.read().unwrap();
+    fn build_command_buffer(&mut self, info: &RenderInfo) -> (AutoCommandBuffer, Arc<Queue>) {
+        let lock = info.render_queues.read().unwrap();
 
-        let mut cb = AutoCommandBufferBuilder::primary_one_time_submit(self.device.clone(), info.queue.family())
+        let mut cb = AutoCommandBufferBuilder::primary_one_time_submit(info.device.clone(), info.queue_main.family())
             .unwrap();
         for text_data in (*lock).text.iter() {
             let font = self.fonts.get(&text_data.family).unwrap();
@@ -281,8 +274,8 @@ impl RenderPipelineAbstract for TextRenderPipeline {
                     }
                 }
                 let vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionUVColor]>::from_iter(
-                    self.device.clone(),
-                    self.memory_pool.clone(),
+                    info.device.clone(),
+                    info.memory_pool.clone(),
                     BufferUsage::all(),
                     vertices.iter().cloned()
                 ).unwrap();
@@ -307,6 +300,6 @@ impl RenderPipelineAbstract for TextRenderPipeline {
                                      descriptor_set, ()).unwrap();
             }
         }
-        cb.end_render_pass().unwrap().build().unwrap()
+        (cb.end_render_pass().unwrap().build().unwrap(), info.queue_main.clone())
     }
 }

@@ -13,7 +13,7 @@ pub struct Transform {
 #[allow(dead_code)]
 impl Transform {
     /// Creates an identity transform.
-    pub fn new() -> Transform {
+    pub fn identity() -> Transform {
         Transform {
             position: Point3::new(0.0, 0.0, 0.0),
             rotation: Quaternion::from_sv(0.0, Vector3::new(0.0, 0.0, 0.0)),

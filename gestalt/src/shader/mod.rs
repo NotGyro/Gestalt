@@ -48,18 +48,34 @@ pub mod text {
     }
 }
 
-/// Pbr rendering pipeline shaders
-pub mod pbr {
+/// Deferred pipeline shading shaders
+pub mod deferred_shading {
     pub mod vertex {
         vulkano_shaders::shader!{
             ty: "vertex",
-            path: "src/shader/pbr.vert"
+            path: "src/shader/deferred_shading.vert"
         }
     }
     pub mod fragment {
         vulkano_shaders::shader!{
             ty: "fragment",
-            path: "src/shader/pbr.frag"
+            path: "src/shader/deferred_shading.frag"
+        }
+    }
+}
+
+/// Deferred pipeline lighting shaders
+pub mod deferred_lighting {
+    pub mod vertex {
+        vulkano_shaders::shader!{
+            ty: "vertex",
+            path: "src/shader/deferred_lighting.vert"
+        }
+    }
+    pub mod fragment {
+        vulkano_shaders::shader!{
+            ty: "fragment",
+            path: "src/shader/deferred_lighting.frag"
         }
     }
 }

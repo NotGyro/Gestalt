@@ -2,11 +2,11 @@
 
 use std::sync::{Arc, RwLock};
 
-use cgmath::{EuclideanSpace, Matrix4, Vector4};
+use cgmath::{EuclideanSpace, Matrix4, Vector4, SquareMatrix, Deg};
 
 use vulkano::buffer::BufferUsage;
 use vulkano::device::{Device, DeviceExtensions, Queue};
-use vulkano::format::{D32Sfloat, R16G16B16A16Sfloat};
+use vulkano::format::{D32Sfloat, R16G16B16A16Sfloat, R32Uint};
 use vulkano::image::attachment::AttachmentImage;
 use vulkano::image::swapchain::SwapchainImage;
 use vulkano::instance::{Instance, PhysicalDevice};
@@ -17,15 +17,15 @@ use vulkano::command_buffer::AutoCommandBuffer;
 use vulkano::image::ImageUsage;
 
 use crate::util::{Camera, Transform};
-use crate::geometry::{VertexGroup, Material, VertexPositionObjectId};
+use crate::geometry::{VertexGroup, Material, VertexPositionObjectId, DeferredShadingVertex};
 use crate::registry::TextureRegistry;
 use crate::memory::xalloc::XallocMemoryPool;
-use crate::pipeline::{RenderPipelineAbstract, PBRRenderPipeline, LinesRenderPipeline, PipelineCbCreateInfo, TextRenderPipeline, OcclusionRenderPipeline};
+use crate::pipeline::{RenderPipelineAbstract, DeferredShadingRenderPipeline, DeferredLightingRenderPipeline, LinesRenderPipeline, TextRenderPipeline, OcclusionRenderPipeline, PostProcessRenderPipeline};
 use crate::buffer::CpuAccessibleBufferXalloc;
 use crate::geometry::VertexPositionColorAlpha;
-use crate::pipeline::text_pipeline::TextData;
+use crate::pipeline::text::TextData;
 use crate::metrics::FrameMetrics;
-use crate::pipeline::occlusion_pipeline::OCCLUSION_FRAME_SIZE;
+use crate::pipeline::occlusion::OCCLUSION_FRAME_SIZE;
 
 
 /// Matrix to correct vulkan clipping planes and flip y axis.
@@ -38,18 +38,74 @@ pub static VULKAN_CORRECT_CLIP: Matrix4<f32> = Matrix4 {
 };
 
 
+pub const DEBUG_VISUALIZE_DISABLED: u32 = 0;
+pub const DEBUG_VISUALIZE_POSITION_BUFFER: u32 = 1;
+pub const DEBUG_VISUALIZE_NORMAL_BUFFER: u32 = 2;
+pub const DEBUG_VISUALIZE_ALBEDO_BUFFER: u32 = 3;
+pub const DEBUG_VISUALIZE_ROUGHNESS_BUFFER: u32 = 4;
+pub const DEBUG_VISUALIZE_METALLIC_BUFFER: u32 = 5;
+pub const DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY: u32 = 6;
+pub const DEBUG_VISUALIZE_NO_POST_PROCESSING: u32 = 7;
+pub const DEBUG_VISUALIZE_OCCLUSION_BUFFER: u32 = 8;
+pub const DEBUG_VISUALIZE_MAX: u32 = 9;
+
+
+#[derive(Clone)]
+pub struct RenderInfo {
+    /// Vulkan device.
+    pub device: Arc<Device>,
+    /// Memory pool for memory-managed objects.
+    pub memory_pool: XallocMemoryPool,
+
+    pub queue_main: Arc<Queue>,
+    pub queue_offscreen: Arc<Queue>,
+
+    pub image_num: usize,
+    pub dimensions: [u32; 2],
+    pub camera_transform: Transform,
+    pub view_mat: Matrix4<f32>,
+    pub proj_mat: Matrix4<f32>,
+    pub fov: Deg<f32>,
+
+    pub tex_registry: Arc<TextureRegistry>,
+
+    pub depth_buffer_image: Arc<AttachmentImage<D32Sfloat>>,
+    pub position_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub normal_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub albedo_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub roughness_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub metallic_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub hdr_color_buffer_image: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
+    pub occlusion_buffer_image: Option<Arc<AttachmentImage<R32Uint>>>,
+
+    pub render_queues: Arc<RwLock<RenderQueues>>,
+
+    pub debug_visualize_setting: u32,
+}
+
+
+pub enum GestaltRenderPass {
+    Occlusion        = 0,
+    DeferredShading  = 1,
+    DeferredLighting = 2,
+    PostProcess      = 3,
+    Lines            = 4,
+    Text             = 5,
+}
+
+
 /// Queue of all objects to be drawn.
-pub struct RenderQueue {
-    pub chunk_meshes: Vec<ChunkRenderQueueEntry>,
+pub struct RenderQueues {
+    pub occluders: OcclusionRenderQueue,
+    pub meshes: Vec<MeshRenderQueueEntry>,
     pub lines: LineRenderQueue,
     pub text: Vec<TextData>,
-    pub occluders: OcclusionRenderQueue
 }
 
 
 /// Render queue entry for a single mesh
-pub struct ChunkRenderQueueEntry {
-    pub vertex_group: Arc<VertexGroup>,
+pub struct MeshRenderQueueEntry {
+    pub vertex_group: Arc<VertexGroup<DeferredShadingVertex>>,
     pub material: Material,
     pub transform: Matrix4<f32>
 }
@@ -57,81 +113,31 @@ pub struct ChunkRenderQueueEntry {
 
 /// Render queue for all lines to be drawn.
 pub struct LineRenderQueue {
-    pub chunk_lines_vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPositionColorAlpha]>>,
-    pub chunk_lines_index_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
+    pub chunk_lines_vg: Arc<VertexGroup<VertexPositionColorAlpha>>,
     pub chunks_changed: bool,
 }
 
 /// Render queue for the occlusion pass.
 pub struct OcclusionRenderQueue {
-    pub vertex_buffer: Arc<CpuAccessibleBufferXalloc<[VertexPositionObjectId]>>,
-    pub index_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
+    pub vertex_group: Arc<VertexGroup<VertexPositionObjectId>>,
     pub output_cpu_buffer: Arc<CpuAccessibleBufferXalloc<[u32]>>,
-}
-
-
-pub struct RenderPipelines {
-    pub pbr_pipeline: Box<PBRRenderPipeline>,
-    pub lines_pipeline: Box<LinesRenderPipeline>,
-    pub text_pipeline: Box<TextRenderPipeline>,
-    pub occlusion_pipeline: Box<OcclusionRenderPipeline>,
-}
-
-impl RenderPipelines {
-    pub fn remove_framebuffers(&mut self) {
-        self.pbr_pipeline.remove_framebuffers();
-        self.lines_pipeline.remove_framebuffers();
-        self.text_pipeline.remove_framebuffers();
-        self.occlusion_pipeline.remove_framebuffers();
-    }
-
-    pub fn recreate_framebuffers_if_none(&mut self, images: &Vec<Arc<SwapchainImage<Window>>>, hdr_buffer: &Arc<AttachmentImage<R16G16B16A16Sfloat>>, depth_buffer: &Arc<AttachmentImage<D32Sfloat>>) {
-        self.pbr_pipeline.recreate_framebuffers_if_none(images, hdr_buffer, depth_buffer);
-        self.lines_pipeline.recreate_framebuffers_if_none(images, hdr_buffer, depth_buffer);
-        self.text_pipeline.recreate_framebuffers_if_none(images, hdr_buffer, depth_buffer);
-        // occlusion pipeline uses fixed offscreen framebuffer
-    }
-
-    pub fn create_command_buffers(&mut self,
-                                  info: PipelineCbCreateInfo,
-                                  render_queue: Arc<RwLock<RenderQueue>>)
-            -> Vec<AutoCommandBuffer> {
-        let mut cbs = Vec::new();
-        cbs.push(self.occlusion_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
-        cbs.push(self.pbr_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
-        //cbs.push(self.lines_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
-        cbs.push(self.text_pipeline.build_command_buffer(info.clone(), render_queue.clone()));
-        cbs
-    }
 }
 
 
 /// Main renderer.
 pub struct Renderer {
-    /// Vulkan device.
-    pub device: Arc<Device>,
-    /// Memory pool for memory-managed objects.
-    pub memory_pool: XallocMemoryPool,
-    /// Device queue.
-    queue: Arc<Queue>,
     /// Vulkano surface.
     surface: Arc<Surface<Window>>,
     /// Vulkano swapchain.
     swapchain: Arc<Swapchain<Window>>,
     /// Swapchain images.
     images: Vec<Arc<SwapchainImage<Window>>>,
-    /// Depth buffer.
-    depth_buffer: Arc<AttachmentImage<D32Sfloat>>,
-    /// Floating-pont HDR buffer. Main render output before tonemapping.
-    hdr_buffer: Arc<AttachmentImage<R16G16B16A16Sfloat>>,
     /// If true, swapchain needs to be recreated.
     recreate_swapchain: bool,
-    /// Global texture registry
-    tex_registry: Arc<TextureRegistry>,
     /// List of render pipelines.
-    pipelines: RenderPipelines,
-    /// Render queue.
-    pub render_queue: Arc<RwLock<RenderQueue>>,
+    pipelines: Vec<Box<dyn RenderPipelineAbstract>>,
+    /// Information required by render pipelines
+    pub info: RenderInfo
 }
 
 
@@ -139,20 +145,24 @@ impl Renderer {
     /// Creates a new `Renderer`.
     pub fn new(instance: Arc<Instance>, surface: Arc<Surface<Window>>) -> Renderer {
         let physical = PhysicalDevice::enumerate(&instance).next().expect("no device available");
-        let queue = physical.queue_families().find(|&q| q.supports_graphics() &&
-            surface.is_supported(q).unwrap_or(false))
-            .expect("couldn't find a graphical queue family");
 
         let device_ext = DeviceExtensions {
             khr_swapchain: true,
             .. DeviceExtensions::none()
         };
 
+        let family_graphics = physical.queue_families().find(|&q| q.supports_graphics() &&
+            surface.is_supported(q).unwrap_or(false))
+            .expect("couldn't find a graphical queue family (main)");
+        let family_offscreen = physical.queue_families().find(|&q| q.supports_graphics())
+            .expect("couldn't find a graphical queue family (offscreen)");
+
         let (device, mut queues) = Device::new(physical, physical.supported_features(),
                                                &device_ext,
-                                               [(queue, 0.5)].iter().cloned())
+                                               [(family_graphics, 0.9), (family_offscreen, 0.5)].iter().cloned())
             .expect("failed to create device");
-        let queue = queues.next().unwrap();
+        let queue_main = queues.next().unwrap();
+        let queue_offscreen = queues.next().unwrap();
 
         let dimensions;
         let capabilities;
@@ -163,157 +173,205 @@ impl Renderer {
             let usage = capabilities.supported_usage_flags;
             let alpha = capabilities.supported_composite_alpha.iter().next().unwrap();
 
-            let format;
-            if capabilities.supported_formats.contains(&(::vulkano::format::Format::B8G8R8A8Srgb, ::vulkano::swapchain::ColorSpace::SrgbNonLinear)) {
-                format = ::vulkano::format::Format::B8G8R8A8Srgb;
-            }
-            else {
-                format = capabilities.supported_formats[0].0;
-            }
-
             Swapchain::new(device.clone(), surface.clone(), capabilities.min_image_count,
-                           format, dimensions, 1, usage, &queue,
-                           ::vulkano::swapchain::SurfaceTransform::Identity, alpha,
-                           ::vulkano::swapchain::PresentMode::Fifo, true, None).expect("failed to create swapchain")
+                           vulkano::format::Format::B8G8R8A8Srgb, dimensions, 1, usage, &queue_main,
+                           vulkano::swapchain::SurfaceTransform::Identity, alpha,
+                           vulkano::swapchain::PresentMode::Fifo, true, None)
+                .expect("failed to create swapchain")
         };
 
-        let depth_buffer = AttachmentImage::transient(device.clone(), dimensions, D32Sfloat).unwrap();
-        let hdr_buffer = AttachmentImage::with_usage(device.clone(),
-                                                     dimensions,
-                                                     R16G16B16A16Sfloat,
-                                                     ImageUsage {
-                                                         input_attachment: true,
-                                                         transfer_destination: true,
-                                                         ..ImageUsage::none()
-                                                     }).unwrap();
+        let gbuffer_usage = ImageUsage {
+            color_attachment: true,
+            input_attachment: true,
+            ..ImageUsage::none()
+        };
+        let position_buffer_image = AttachmentImage::with_usage(device.clone(), dimensions, R16G16B16A16Sfloat, gbuffer_usage.clone()).unwrap();
+        let normal_buffer_image = AttachmentImage::with_usage(device.clone(), dimensions, R16G16B16A16Sfloat, gbuffer_usage.clone()).unwrap();
+        let albedo_buffer_image = AttachmentImage::with_usage(device.clone(), dimensions, R16G16B16A16Sfloat, gbuffer_usage.clone()).unwrap();
+        let roughness_buffer_image = AttachmentImage::with_usage(device.clone(), dimensions, R16G16B16A16Sfloat, gbuffer_usage.clone()).unwrap();
+        let metallic_buffer_image = AttachmentImage::with_usage(device.clone(), dimensions, R16G16B16A16Sfloat, gbuffer_usage.clone()).unwrap();
+        let hdr_color_buffer_image = AttachmentImage::with_usage(device.clone(), dimensions, R16G16B16A16Sfloat, gbuffer_usage.clone()).unwrap();
+        let depth_buffer_image = AttachmentImage::transient(device.clone(), dimensions, D32Sfloat).unwrap();
 
         let mut tex_registry = TextureRegistry::new();
-        tex_registry.load(queue.clone());
+        tex_registry.load(queue_main.clone());
         let tex_registry = Arc::new(tex_registry);
 
         let memory_pool = XallocMemoryPool::new(device.clone());
 
-        let chunk_lines_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionColorAlpha]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
-        let chunk_lines_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
-
-        let occlusion_vertex_buffer = CpuAccessibleBufferXalloc::<[VertexPositionObjectId]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
-        let occlusion_index_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), Vec::new().iter().cloned()).expect("failed to create buffer");
+        let chunk_lines_vg = Arc::new(VertexGroup::new(Vec::<VertexPositionColorAlpha>::new().iter().cloned(), Vec::new().iter().cloned(), 0, device.clone(), memory_pool.clone()));
+        let occlusion_vg = Arc::new(VertexGroup::new(Vec::<VertexPositionObjectId>::new().iter().cloned(), Vec::new().iter().cloned(), 0, device.clone(), memory_pool.clone()));
         let occlusion_cpu_buffer = CpuAccessibleBufferXalloc::<[u32]>::from_iter(device.clone(), memory_pool.clone(), BufferUsage::all(), vec![0u32; 320*240].iter().cloned()).expect("failed to create buffer");
 
-        let pipelines = RenderPipelines {
-            pbr_pipeline: Box::new(PBRRenderPipeline::new(&swapchain, &device, &queue, memory_pool.clone(), tex_registry.clone())),
-            lines_pipeline: Box::new(LinesRenderPipeline::new(&swapchain, &device, memory_pool.clone())),
-            text_pipeline: Box::new(TextRenderPipeline::new(&swapchain, &device, memory_pool.clone())),
-            occlusion_pipeline: Box::new(OcclusionRenderPipeline::new(&device, OCCLUSION_FRAME_SIZE)),
-        };
-
-        Renderer {
+        let mut info = RenderInfo {
             device,
-            memory_pool,
-            queue,
-            surface,
-            swapchain,
-            images,
-            depth_buffer,
-            hdr_buffer,
-            recreate_swapchain: false,
-            tex_registry,
-            pipelines,
-            render_queue: Arc::new(RwLock::new(RenderQueue {
-                chunk_meshes: Vec::new(),
+            image_num: 0,
+            dimensions: [1024, 768],
+            camera_transform: Transform::identity(),
+            view_mat: Matrix4::identity(),
+            proj_mat: Matrix4::identity(),
+            fov: Deg(45f32),
+            tex_registry: tex_registry.clone(),
+            queue_main,
+            queue_offscreen,
+            position_buffer_image,
+            normal_buffer_image,
+            albedo_buffer_image,
+            roughness_buffer_image,
+            metallic_buffer_image,
+            hdr_color_buffer_image,
+            render_queues: Arc::new(RwLock::new(RenderQueues {
                 lines: LineRenderQueue {
-                    chunk_lines_vertex_buffer,
-                    chunk_lines_index_buffer,
+                    chunk_lines_vg,
                     chunks_changed: false,
                 },
                 text: Vec::new(),
                 occluders: OcclusionRenderQueue {
-                    vertex_buffer: occlusion_vertex_buffer,
-                    index_buffer: occlusion_index_buffer,
+                    vertex_group: occlusion_vg,
                     output_cpu_buffer: occlusion_cpu_buffer
-                }
+                },
+                meshes: Vec::new()
             })),
+            memory_pool,
+            depth_buffer_image,
+            debug_visualize_setting: DEBUG_VISUALIZE_DISABLED,
+            occlusion_buffer_image: None,
+        };
+
+        let mut pipelines = Vec::<Box<dyn RenderPipelineAbstract>>::with_capacity(3);
+        pipelines.insert(GestaltRenderPass::Occlusion as usize,        Box::new(OcclusionRenderPipeline::new(&mut info, OCCLUSION_FRAME_SIZE)));
+        pipelines.insert(GestaltRenderPass::DeferredShading as usize,  Box::new(DeferredShadingRenderPipeline::new(&info)));
+        pipelines.insert(GestaltRenderPass::DeferredLighting as usize,  Box::new(DeferredLightingRenderPipeline::new(&info)));
+        pipelines.insert(GestaltRenderPass::PostProcess as usize,      Box::new(PostProcessRenderPipeline::new(&info)));
+        pipelines.insert(GestaltRenderPass::Lines as usize,            Box::new(LinesRenderPipeline::new(&info)));
+        pipelines.insert(GestaltRenderPass::Text as usize,             Box::new(TextRenderPipeline::new(&info)));
+
+        Renderer {
+            surface,
+            swapchain,
+            images,
+            recreate_swapchain: false,
+            pipelines,
+            info
         }
     }
 
 
     /// Draw all objects in the render queue. Called every frame in the game loop.
     pub fn draw(&mut self, camera: &Camera, transform: Transform, frame_metrics: &mut FrameMetrics) {
-        let dimensions = match self.surface.window().get_inner_size() {
+        self.info.dimensions = match self.surface.window().get_inner_size() {
             Some(logical_size) => [logical_size.width as u32, logical_size.height as u32],
             None => [800, 600]
         };
         // minimizing window makes dimensions = [0, 0] which breaks swapchain creation.
         // skip draw loop until window is restored.
-        if dimensions[0] < 1 || dimensions[1] < 1 { return; }
+        if self.info.dimensions[0] < 1 || self.info.dimensions[1] < 1 { return; }
 
-        let view_mat = Matrix4::from(transform.rotation) * Matrix4::from_translation((transform.position * -1.0).to_vec());
-        let proj_mat = VULKAN_CORRECT_CLIP * ::cgmath::perspective(camera.fov, { dimensions[0] as f32 / dimensions[1] as f32 }, 0.1, 100.0);
+        self.info.view_mat = Matrix4::from(transform.rotation) * Matrix4::from_translation((transform.position * -1.0).to_vec());
+        self.info.proj_mat = VULKAN_CORRECT_CLIP * cgmath::perspective(camera.fov, { self.info.dimensions[0] as f32 / self.info.dimensions[1] as f32 }, 0.1, 100.0);
 
         if self.recreate_swapchain {
-            println!("Recreating swapchain");
-            let (new_swapchain, new_images) = match self.swapchain.recreate_with_dimension(dimensions) {
+            info!(Renderer, "Recreating swapchain");
+            let (new_swapchain, new_images) = match self.swapchain.recreate_with_dimension(self.info.dimensions) {
                 Ok(r) => r,
                 Err(SwapchainCreationError::UnsupportedDimensions) => {
-                    println!("SwapchainCreationError::UnsupportedDimensions");
+                    error!(Renderer, "SwapchainCreationError::UnsupportedDimensions");
                     return;
                 },
                 Err(err) => panic!("{:?}", err)
             };
 
-            ::std::mem::replace(&mut self.swapchain, new_swapchain);
-            ::std::mem::replace(&mut self.images, new_images);
-            let new_depth_buffer = AttachmentImage::transient(self.device.clone(), dimensions, D32Sfloat).unwrap();
-            ::std::mem::replace(&mut self.depth_buffer, new_depth_buffer);
+            let gbuffer_usage = ImageUsage {
+                color_attachment: true,
+                input_attachment: true,
+                ..ImageUsage::none()
+            };
 
-            self.pipelines.remove_framebuffers();
+            std::mem::replace(&mut self.swapchain, new_swapchain);
+            std::mem::replace(&mut self.images, new_images);
+
+            let new_depth_buffer = AttachmentImage::transient(self.info.device.clone(), self.info.dimensions, D32Sfloat).unwrap();
+            std::mem::replace(&mut self.info.depth_buffer_image, new_depth_buffer);
+            let new_position_buffer  = AttachmentImage::with_usage(self.info.device.clone(), self.info.dimensions, R16G16B16A16Sfloat, gbuffer_usage).unwrap();
+            std::mem::replace(&mut self.info.position_buffer_image, new_position_buffer);
+            let new_normal_buffer    = AttachmentImage::with_usage(self.info.device.clone(), self.info.dimensions, R16G16B16A16Sfloat, gbuffer_usage).unwrap();
+            std::mem::replace(&mut self.info.normal_buffer_image, new_normal_buffer);
+            let new_albedo_buffer    = AttachmentImage::with_usage(self.info.device.clone(), self.info.dimensions, R16G16B16A16Sfloat, gbuffer_usage).unwrap();
+            std::mem::replace(&mut self.info.albedo_buffer_image, new_albedo_buffer);
+            let new_roughness_buffer = AttachmentImage::with_usage(self.info.device.clone(), self.info.dimensions, R16G16B16A16Sfloat, gbuffer_usage).unwrap();
+            std::mem::replace(&mut self.info.roughness_buffer_image, new_roughness_buffer);
+            let new_metallic_buffer  = AttachmentImage::with_usage(self.info.device.clone(), self.info.dimensions, R16G16B16A16Sfloat, gbuffer_usage).unwrap();
+            std::mem::replace(&mut self.info.metallic_buffer_image, new_metallic_buffer);
+            let new_hdr_buffer       = AttachmentImage::with_usage(self.info.device.clone(), self.info.dimensions, R16G16B16A16Sfloat, gbuffer_usage).unwrap();
+            std::mem::replace(&mut self.info.hdr_color_buffer_image, new_hdr_buffer);
+
+            for p in self.pipelines.iter_mut() {
+                p.remove_framebuffers();
+            }
 
             self.recreate_swapchain = false;
         }
 
-        self.pipelines.recreate_framebuffers_if_none(&self.images, &self.hdr_buffer, &self.depth_buffer);
+        for p in self.pipelines.iter_mut() {
+            p.recreate_framebuffers_if_none(&self.images, &self.info);
+        }
 
         let (image_num, future) = match vulkano::swapchain::acquire_next_image(self.swapchain.clone(), None) {
             Ok(r) => r,
-            Err(::vulkano::swapchain::AcquireError::OutOfDate) => {
+            Err(vulkano::swapchain::AcquireError::OutOfDate) => {
                 self.recreate_swapchain = true;
-                println!("AcquireError::OutOfDate");
+                warn!(Renderer, "AcquireError::OutOfDate");
                 return
             },
-            Err(err) => panic!("{:?}", err)
+            Err(err) => { fatal!(Renderer, "{:?}", err); }
         };
+        self.info.image_num = image_num;
 
-        let info = PipelineCbCreateInfo {
-            image_num,
-            dimensions,
-            queue: self.queue.clone(),
-            camera_transform: transform.clone(),
-            view_mat: view_mat.clone(),
-            proj_mat: proj_mat.clone(),
-            tex_registry: self.tex_registry.clone(),
-            hdr_buffer_image: self.hdr_buffer.clone(),
-            fov: camera.fov
-        };
+        self.info.fov = camera.fov.clone();
+        self.info.camera_transform = transform.clone();
 
-        let cbs = self.pipelines.create_command_buffers(info, self.render_queue.clone());
+        let mut cbs = Vec::new();
+//        for p in self.pipelines.iter_mut() {
+//            cbs.push(p.build_command_buffer(&self.info));
+//        }
 
         frame_metrics.end_draw();
 
-        self.submit(cbs, image_num, Box::new(future));
+        self.submit(cbs, Box::new(future));
 
         frame_metrics.end_gpu();
     }
 
-    pub fn submit(&mut self, cbs: Vec<AutoCommandBuffer>, image_num: usize, future: Box<dyn GpuFuture>) {
-        let mut future_box = future;
-        for cb in cbs {
-            future_box = Box::new(future_box.then_execute(self.queue.clone(), cb).unwrap());
-        }
-        let future = future_box
-            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
-            .then_signal_fence_and_flush();
+    pub fn submit(&mut self, _cbs: Vec<(AutoCommandBuffer, Arc<Queue>)>, image_acq_fut: Box<dyn GpuFuture>) {
+        let mut main_future:      Box<dyn GpuFuture> = Box::new(image_acq_fut);
+        let occlusion_finished_future;
 
-        match future {
+        let (cb, q) = self.pipelines[GestaltRenderPass::Occlusion as usize].build_command_buffer(&self.info);
+        occlusion_finished_future = vulkano::sync::now(self.info.device.clone())
+            .then_execute(q.clone(), cb).unwrap()
+            .then_signal_semaphore_and_flush().unwrap();
+
+        let (cb, q) = self.pipelines[GestaltRenderPass::DeferredShading as usize].build_command_buffer(&self.info);
+        main_future = Box::new(main_future.then_execute(q.clone(), cb).unwrap());
+
+        let (cb, q) = self.pipelines[GestaltRenderPass::DeferredLighting as usize].build_command_buffer(&self.info);
+        main_future = Box::new(main_future.then_execute(q.clone(), cb).unwrap());
+
+        let (cb, q) = self.pipelines[GestaltRenderPass::PostProcess as usize].build_command_buffer(&self.info);
+        main_future = Box::new(main_future.join(occlusion_finished_future)
+            .then_execute(q.clone(), cb).unwrap());
+
+        let (cb, q) = self.pipelines[GestaltRenderPass::Lines as usize].build_command_buffer(&self.info);
+        main_future = Box::new(main_future.then_execute(q.clone(), cb).unwrap());
+
+        let (cb, q) = self.pipelines[GestaltRenderPass::Text as usize].build_command_buffer(&self.info);
+        main_future = Box::new(main_future.then_execute(q.clone(), cb).unwrap());
+
+        let final_main_future = main_future.then_swapchain_present(self.info.queue_main.clone(),
+                                                                  self.swapchain.clone(),
+                                                                  self.info.image_num)
+                                                                  .then_signal_fence_and_flush();
+        match final_main_future {
             Ok(mut f) => {
                 // This wait is required when using NVIDIA or running on macOS. See https://github.com/vulkano-rs/vulkano/issues/1247
                 f.wait(None).unwrap();
@@ -321,9 +379,10 @@ impl Renderer {
             }
             Err(::vulkano::sync::FlushError::OutOfDate) => {
                 self.recreate_swapchain = true;
+                return;
             }
             Err(e) => {
-                println!("ERROR in Renderer::draw(): {:?}", e);
+                error!(Renderer, "Error in submit(): {:?}", e);
             }
         }
     }

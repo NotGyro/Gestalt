@@ -3,17 +3,15 @@ use vulkano::image::ImageLayout;
 use vulkano::format::{Format, ClearValue};
 
 /// Render pass that uses a single color attachment and a depth buffer, and does not clear them before it runs.
-pub struct RenderPassUnclearedColorWithDepth {
-    pub color_format: Format
-}
+pub struct LinesRenderPass { }
 
 
-unsafe impl RenderPassDesc for RenderPassUnclearedColorWithDepth {
+unsafe impl RenderPassDesc for LinesRenderPass {
     fn num_attachments(&self) -> usize { 2 }
     fn attachment_desc(&self, num: usize) -> Option<AttachmentDescription> {
         match num {
             0 => Some(AttachmentDescription {
-                format: self.color_format,
+                format: Format::B8G8R8A8Srgb,
                 samples: 1,
                 load: LoadOp::Load,
                 store: StoreOp::Store,
@@ -55,7 +53,7 @@ unsafe impl RenderPassDesc for RenderPassUnclearedColorWithDepth {
 }
 
 
-unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for RenderPassUnclearedColorWithDepth {
+unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for LinesRenderPass {
     fn convert_clear_values(&self, values: Vec<ClearValue>) -> Box<dyn Iterator<Item = ClearValue>> {
         // FIXME: safety checks
         Box::new(values.into_iter())

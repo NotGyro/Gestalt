@@ -5,7 +5,7 @@ use vulkano::device::Device;
 use cgmath::Point3;
 use hashbrown::HashSet;
 
-use crate::geometry::{Mesh, PBRPipelineVertex, VertexGroup, Material};
+use crate::geometry::{Mesh, DeferredShadingVertex, VertexGroup, Material};
 use crate::util::Transform;
 use crate::world::Chunk;
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32};
@@ -244,7 +244,7 @@ pub fn generate_mesh(chunk: &mut Chunk, device: Arc<Device>, memory_pool: Xalloc
 
     // generate vertex data
     for id in unique_ids.iter() {
-        let mut vertices = Vec::new() as Vec<PBRPipelineVertex>;
+        let mut vertices = Vec::new() as Vec<DeferredShadingVertex>;
         let mut indices = Vec::new() as Vec<u32>;
         let mut o = 0;
         for (facing, layer, list) in quad_lists.iter() {
@@ -260,55 +260,55 @@ pub fn generate_mesh(chunk: &mut Chunk, device: Arc<Device>, memory_pool: Xalloc
                         let normal   = [ -1.0,  0.0, 0.0 ];
                         let tangent  = [  0.0,  0.0, 1.0 ];
                         //let binormal = [  0.0, -1.0, 0.0 ];
-                        vertices.push(PBRPipelineVertex { position: [ layerf,       x,   y+h ], normal, tangent, uv: [ h,   w   ] });
-                        vertices.push(PBRPipelineVertex { position: [ layerf,       x+w, y+h ], normal, tangent, uv: [ h,   0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ layerf,       x+w, y   ], normal, tangent, uv: [ 0.0, 0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ layerf,       x,   y   ], normal, tangent, uv: [ 0.0, w   ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf,       x,   y+h ], normal, tangent, uv: [ h,   w   ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf,       x+w, y+h ], normal, tangent, uv: [ h,   0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf,       x+w, y   ], normal, tangent, uv: [ 0.0, 0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf,       x,   y   ], normal, tangent, uv: [ 0.0, w   ] });
                     },
                     QuadFacing::Right => {
                         let normal   = [ 1.0,  0.0,  0.0 ];
                         let tangent  = [ 0.0,  0.0, -1.0 ];
                         //let binormal = [ 0.0, -1.0,  0.0 ];
-                        vertices.push(PBRPipelineVertex { position: [ layerf + 1.0, x+w, y+h ], normal, tangent, uv: [ 0.0, 0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ layerf + 1.0, x,   y+h ], normal, tangent, uv: [ 0.0, w   ] });
-                        vertices.push(PBRPipelineVertex { position: [ layerf + 1.0, x,   y   ], normal, tangent, uv: [ h,   w   ] });
-                        vertices.push(PBRPipelineVertex { position: [ layerf + 1.0, x+w, y   ], normal, tangent, uv: [ h,   0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf + 1.0, x+w, y+h ], normal, tangent, uv: [ 0.0, 0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf + 1.0, x,   y+h ], normal, tangent, uv: [ 0.0, w   ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf + 1.0, x,   y   ], normal, tangent, uv: [ h,   w   ] });
+                        vertices.push(DeferredShadingVertex { position: [ layerf + 1.0, x+w, y   ], normal, tangent, uv: [ h,   0.0 ] });
                     },
                     QuadFacing::Bottom => {
                         let normal   = [  0.0, -1.0, 0.0 ];
                         let tangent  = [ -1.0,  0.0, 0.0 ];
                         //let binormal = [  0.0,  0.0, 1.0 ];
-                        vertices.push(PBRPipelineVertex { position: [ x+w, layerf,       y+h ], normal, tangent, uv: [ 0.0, h   ] });
-                        vertices.push(PBRPipelineVertex { position: [ x,   layerf,       y+h ], normal, tangent, uv: [ w,   h   ] });
-                        vertices.push(PBRPipelineVertex { position: [ x,   layerf,       y   ], normal, tangent, uv: [ w,   0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x+w, layerf,       y   ], normal, tangent, uv: [ 0.0, 0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, layerf,       y+h ], normal, tangent, uv: [ 0.0, h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   layerf,       y+h ], normal, tangent, uv: [ w,   h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   layerf,       y   ], normal, tangent, uv: [ w,   0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, layerf,       y   ], normal, tangent, uv: [ 0.0, 0.0 ] });
                     },
                     QuadFacing::Top => {
                         let normal   = [  0.0, 1.0,  0.0 ];
                         let tangent  = [ -1.0, 0.0,  0.0 ];
                         //let binormal = [  0.0, 0.0, -1.0 ];
-                        vertices.push(PBRPipelineVertex { position: [ x,   layerf + 1.0, y+h ], normal, tangent, uv: [ w,   0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x+w, layerf + 1.0, y+h ], normal, tangent, uv: [ 0.0, 0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x+w, layerf + 1.0, y   ], normal, tangent, uv: [ 0.0, h   ] });
-                        vertices.push(PBRPipelineVertex { position: [ x,   layerf + 1.0, y   ], normal, tangent, uv: [ w,   h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   layerf + 1.0, y+h ], normal, tangent, uv: [ w,   0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, layerf + 1.0, y+h ], normal, tangent, uv: [ 0.0, 0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, layerf + 1.0, y   ], normal, tangent, uv: [ 0.0, h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   layerf + 1.0, y   ], normal, tangent, uv: [ w,   h   ] });
                     },
                     QuadFacing::Back => {
                         let normal   = [  0.0,  0.0, -1.0 ];
                         let tangent  = [ -1.0,  0.0,  0.0 ];
                         //let binormal = [  0.0, -1.0,  0.0 ];
-                        vertices.push(PBRPipelineVertex { position: [ x,   y+h, layerf       ], normal, tangent, uv: [ w,   0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x+w, y+h, layerf       ], normal, tangent, uv: [ 0.0, 0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x+w, y,   layerf       ], normal, tangent, uv: [ 0.0, h   ] });
-                        vertices.push(PBRPipelineVertex { position: [ x,   y,   layerf       ], normal, tangent, uv: [ w,   h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   y+h, layerf       ], normal, tangent, uv: [ w,   0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, y+h, layerf       ], normal, tangent, uv: [ 0.0, 0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, y,   layerf       ], normal, tangent, uv: [ 0.0, h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   y,   layerf       ], normal, tangent, uv: [ w,   h   ] });
                     },
                     QuadFacing::Front => {
                         let normal   = [ 0.0,  0.0, 1.0 ];
                         let tangent  = [ 1.0,  0.0, 0.0 ];
                         //let binormal = [ 0.0, -1.0, 0.0 ];
-                        vertices.push(PBRPipelineVertex { position: [ x+w, y+h, layerf + 1.0 ], normal, tangent, uv: [ w,   0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x,   y+h, layerf + 1.0 ], normal, tangent, uv: [ 0.0, 0.0 ] });
-                        vertices.push(PBRPipelineVertex { position: [ x,   y,   layerf + 1.0 ], normal, tangent, uv: [ 0.0, h   ] });
-                        vertices.push(PBRPipelineVertex { position: [ x+w, y,   layerf + 1.0 ], normal, tangent, uv: [ w,   h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, y+h, layerf + 1.0 ], normal, tangent, uv: [ w,   0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   y+h, layerf + 1.0 ], normal, tangent, uv: [ 0.0, 0.0 ] });
+                        vertices.push(DeferredShadingVertex { position: [ x,   y,   layerf + 1.0 ], normal, tangent, uv: [ 0.0, h   ] });
+                        vertices.push(DeferredShadingVertex { position: [ x+w, y,   layerf + 1.0 ], normal, tangent, uv: [ w,   h   ] });
                     },
                 }
                 indices.push(0+o); indices.push(1+o); indices.push(2+o);
@@ -316,7 +316,7 @@ pub fn generate_mesh(chunk: &mut Chunk, device: Arc<Device>, memory_pool: Xalloc
                 o += 4;
             }
         }
-        mesh.vertex_groups.push(Arc::new(VertexGroup::new(vertices, indices, *id, device.clone(), memory_pool.clone())));
+        mesh.vertex_groups.push(Arc::new(VertexGroup::new(vertices.into_iter(), indices.into_iter(), *id, device.clone(), memory_pool.clone())));
     }
 
 

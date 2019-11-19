@@ -5,7 +5,7 @@ use std::sync::Arc;
 use vulkano::device::Device;
 
 use crate::geometry::{Mesh, VertexPositionObjectId};
-use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode};
+use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode, SubdivNode, SubdivVoxelSource};
 use crate::world::{CHUNK_SIZE_F32, CHUNK_SCALE};
 use crate::memory::xalloc::XallocMemoryPool;
 use crate::voxel::subdivmath::{OctPos, Scale};
@@ -47,6 +47,7 @@ impl Chunk {
 
     /// Generates a mesh for the chunk, using [self::chunk_mesher].
     pub fn generate_mesh(&mut self, device: Arc<Device>, memory_pool: XallocMemoryPool) {
+        info!(Mesher, "Generating mesh for chunk {}", self.id);
         crate::chunk_mesher::generate_mesh(self, device, memory_pool);
     }
 
@@ -59,7 +60,16 @@ impl Chunk {
         )
     }
 
-    pub fn generate_occlusion_mesh(&mut self, min_scale: Scale) {
+    pub fn generate_occlusion_mesh(&mut self, mut min_scale: Scale) {
+        match self.data.get(opos!((0, 0, 0) @ CHUNK_SCALE)).unwrap() {
+            SubdivNode::Leaf(l) => {
+                if l == 0 {
+                    return; // air-only chunk
+                }
+            }
+            _ => {}
+        }
+
         if self.cached_occluder_verts.is_none() {
             let mut verts = Vec::new();
 
@@ -67,23 +77,35 @@ impl Chunk {
             let base_y = self.position.1 as f32 * CHUNK_SIZE_F32;
             let base_z = self.position.2 as f32 * CHUNK_SIZE_F32;
 
-            self.data.root.traverse_to_depth(opos!((0, 0, 0) @ CHUNK_SCALE), &mut |opos: OctPos<u32>, leaf: u8| {
-                if leaf == 0 { return; }
+            while min_scale > 0 {
+                self.data.root.traverse_to_depth(opos!((0, 0, 0) @ CHUNK_SCALE), &mut |opos: OctPos<u32>, leaf: u8| {
+                    if leaf == 0 { return; }
 
-                let s = (2u32.pow(opos.scale as u32)) as f32;
-                let x = base_x + opos.pos.x as f32;
-                let y = base_y + opos.pos.y as f32;
-                let z = base_z + opos.pos.z as f32;
+                    let s = (2u32.pow(opos.scale as u32)) as f32;
+                    let x = base_x + opos.pos.x as f32;
+                    let y = base_y + opos.pos.y as f32;
+                    let z = base_z + opos.pos.z as f32;
 
-                verts.push(VertexPositionObjectId { position: [ x,   y,   z   ], id: self.id }); // - - -  0
-                verts.push(VertexPositionObjectId { position: [ x,   y,   z+s ], id: self.id }); // - - +  1
-                verts.push(VertexPositionObjectId { position: [ x,   y+s, z   ], id: self.id }); // - + -  2
-                verts.push(VertexPositionObjectId { position: [ x,   y+s, z+s ], id: self.id }); // - + +  3
-                verts.push(VertexPositionObjectId { position: [ x+s, y,   z   ], id: self.id }); // + - -  4
-                verts.push(VertexPositionObjectId { position: [ x+s, y,   z+s ], id: self.id }); // + - +  5
-                verts.push(VertexPositionObjectId { position: [ x+s, y+s, z   ], id: self.id }); // + + -  6
-                verts.push(VertexPositionObjectId { position: [ x+s, y+s, z+s ], id: self.id }); // + + +  7
-            }, min_scale);
+                    verts.push(VertexPositionObjectId { position: [ x,   y,   z   ], id: self.id }); // - - -  0
+                    verts.push(VertexPositionObjectId { position: [ x,   y,   z+s ], id: self.id }); // - - +  1
+                    verts.push(VertexPositionObjectId { position: [ x,   y+s, z   ], id: self.id }); // - + -  2
+                    verts.push(VertexPositionObjectId { position: [ x,   y+s, z+s ], id: self.id }); // - + +  3
+                    verts.push(VertexPositionObjectId { position: [ x+s, y,   z   ], id: self.id }); // + - -  4
+                    verts.push(VertexPositionObjectId { position: [ x+s, y,   z+s ], id: self.id }); // + - +  5
+                    verts.push(VertexPositionObjectId { position: [ x+s, y+s, z   ], id: self.id }); // + + -  6
+                    verts.push(VertexPositionObjectId { position: [ x+s, y+s, z+s ], id: self.id }); // + + +  7
+                }, min_scale);
+
+                if verts.len() > 0 {
+                    // geometry generated!
+                    break;
+                }
+                else {
+                    // no full voxels found at this scale, search finer
+                    min_scale -= 1;
+                }
+            }
+
 
             self.cached_occluder_verts = Some(verts);
         }
