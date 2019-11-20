@@ -44,7 +44,13 @@ generational-arena = { version = "0.2.6", features = ["serde"] }
 # ---- Crates used by network subsystem: ----
 sodiumoxide = "0.2"
 base16 = "0.2"
-
+futures = "0.3"
+tokio = "0.1"
+quinn = "0.4"
+semver = "0.9"
+rcgen = "0.7"
+rustls = { version = "0.16", features = ["dangerous_configuration"] }
+webpki = "*"
 
 #TODO: Rewrite VoxelArray to use compile-time size.
 #typenum = "1.10.0"

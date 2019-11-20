@@ -7,6 +7,7 @@
 extern crate cgmath;
 extern crate fine_grained;
 extern crate fnv;
+extern crate futures;
 extern crate noise;
 extern crate rand;
 extern crate smallvec;
@@ -21,11 +22,15 @@ extern crate hashbrown;
 extern crate parking_lot;
 extern crate clap;
 extern crate num;
+extern crate rustls;
 extern crate rusttype;
 extern crate image;
+extern crate rcgen;
 extern crate rgb;
 extern crate sodiumoxide;
+extern crate tokio;
 extern crate vulkano_shaders;
+extern crate webpki;
 
 // modules
 
@@ -58,14 +63,7 @@ use game::Game;
 
 use sodiumoxide::crypto::sign;
 
-
-#[derive(PartialEq)]
-pub enum NetworkRole {
-    Server = 0,
-    Client = 1,
-    Offline = 2
-}
-
+use network::NetworkRole;
 
 pub fn main() {
     match util::logger::init_logger() {
@@ -84,7 +82,7 @@ pub fn main() {
         },
     };
 
-    let our_identity = match network::SelfIdentity::init() {
+    let our_identity = match network::IdentitySelf::init() {
         Ok(ident) => ident,
         Err(e) => {
             error!("Could not initialize our cryptographic identity! Reason: {}", e);
