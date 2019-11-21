@@ -25,12 +25,14 @@ extern crate swsurface;
 extern crate toml;
 extern crate vek;
 extern crate phosphor;
+extern crate clipboard;
 
 // modules
 
 #[macro_use] pub mod voxel;
 
 pub mod client;
+pub mod clipboard_backend;
 pub mod chunk_mesher;
 pub mod entity;
 pub mod game;

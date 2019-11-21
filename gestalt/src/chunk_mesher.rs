@@ -4,7 +4,7 @@ use std::sync::Arc;
 use cgmath::Point3;
 use hashbrown::HashSet;
 use toolbox::Transform;
-use phosphor::renderer::Renderer;
+use phosphor::renderer::RenderInfo;
 use phosphor::geometry::{Mesh, DeferredShadingVertex, VertexGroup, Material};
 
 use crate::world::Chunk;
@@ -204,7 +204,7 @@ fn generate_slice(ids: &[u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE], facing: QuadFaci
 
 /// Given a reference to a chunk, generate a mesh for it and assign it to the chunk.
 /// TODO: make this work for different kinds of data than octrees (?)
-pub fn generate_mesh(chunk: &mut Chunk, renderer: &Renderer) {
+pub fn generate_mesh(chunk: &mut Chunk, info: &RenderInfo) {
     let mut mesh = Mesh::new();
 
     let mut ids = [0u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
@@ -315,7 +315,7 @@ pub fn generate_mesh(chunk: &mut Chunk, renderer: &Renderer) {
                 o += 4;
             }
         }
-        mesh.vertex_groups.push(Arc::new(VertexGroup::new(vertices.into_iter(), indices.into_iter(), *id, renderer.info.device.clone(), renderer.info.memory_pool.clone())));
+        mesh.vertex_groups.push(Arc::new(VertexGroup::new(vertices.into_iter(), indices.into_iter(), *id, info.device.clone(), info.memory_pool.clone())));
     }
 
     mesh.transform = Transform::from_position(Point3::new(chunk.position.0 as f32 * CHUNK_SIZE_F32,

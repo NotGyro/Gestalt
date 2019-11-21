@@ -5,19 +5,20 @@ use std::sync::atomic::{Ordering, AtomicU64};
 use std::thread;
 
 use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
-use winit::{Event, WindowEvent, DeviceEvent, ElementState, EventsLoop, VirtualKeyCode};
+use winit::{Event, WindowEvent, DeviceEvent, ElementState, EventsLoop, VirtualKeyCode, MouseButton};
+use winit::dpi::LogicalSize;
 
-use phosphor::pipeline::text::TextData;
 use phosphor::geometry::VertexGroup;
 use phosphor::renderer::Renderer;
 use toolbox::{view_to_frustum, aabb_frustum_intersection};
 
 use crate::input::InputState;
 use crate::world::dimension::DimensionRegistry;
-use crate::metrics::FrameMetrics;
+use crate::metrics::{FrameMetrics, ChunkMetrics};
 use crate::player::Player;
 use crate::world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_MESHING, CHUNK_STATE_CLEAN, CHUNK_STATE_GENERATING};
+use imgui::{FontSource, FontConfig, FontGlyphRanges, Condition, ImString, im_str};
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
@@ -29,6 +30,7 @@ pub struct Game {
     event_loop: EventsLoop,
     renderer: Renderer,
     frame_metrics: FrameMetrics,
+    chunk_metrics: ChunkMetrics,
     input_state: InputState,
     player: Player,
     dimension_registry: DimensionRegistry,
@@ -36,14 +38,44 @@ pub struct Game {
     chunk_meshing_threads: Arc<std::sync::atomic::AtomicU32>,
     visible_ids: [bool; 65536],
     tick: Arc<AtomicU64>,
+    imgui: imgui::Context
 }
 
 
 impl Game {
     /// Creates a new `Game`.
     pub fn new() -> Game {
+        let mut imgui = imgui::Context::create();
+        imgui.set_ini_filename(None);
+
+        if let Some(backend) = crate::clipboard_backend::init() {
+            imgui.set_clipboard_backend(Box::new(backend));
+        } else {
+            eprintln!("Failed to initialize clipboard");
+        }
+
+        let font_size = 13.0;
+        imgui.fonts().add_font(&[
+            FontSource::DefaultFontData {
+                config: Some(FontConfig {
+                    size_pixels: font_size,
+                    ..FontConfig::default()
+                }),
+            },
+            FontSource::TtfData {
+                data: include_bytes!("../../fonts/mplus-1p-regular.ttf"),
+                size_pixels: font_size,
+                config: Some(FontConfig {
+                    rasterizer_multiply: 1.75,
+                    glyph_ranges: FontGlyphRanges::japanese(),
+                    ..FontConfig::default()
+                }),
+            },
+        ]);
+
         let event_loop = EventsLoop::new();
-        let renderer = Renderer::new(&event_loop);
+        let renderer = Renderer::new(&event_loop)
+            .with_imgui(&mut imgui);
 
         let input_state = InputState::new();
 
@@ -60,6 +92,7 @@ impl Game {
             event_loop,
             renderer,
             frame_metrics: FrameMetrics::new(),
+            chunk_metrics: ChunkMetrics::default(),
             input_state,
             player,
             dimension_registry,
@@ -67,6 +100,7 @@ impl Game {
             chunk_meshing_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             visible_ids: [false; 65536],
             tick: Arc::new(AtomicU64::new(0)),
+            imgui
         }
     }
 
@@ -108,6 +142,22 @@ impl Game {
                         WindowEvent::KeyboardInput { input, .. } => {
                             self.input_state.update_key(input);
                         },
+                        WindowEvent::CursorMoved { position, .. } => {
+                            self.imgui.io_mut().mouse_pos = [position.x as f32, position.y as f32];
+                        },
+                        WindowEvent::MouseInput { state, button, .. } => {
+                            let pressed = state == ElementState::Pressed;
+                            match button {
+                                MouseButton::Left => self.imgui.io_mut().mouse_down[0] = pressed,
+                                MouseButton::Right => self.imgui.io_mut().mouse_down[1] = pressed,
+                                MouseButton::Middle => self.imgui.io_mut().mouse_down[2] = pressed,
+                                MouseButton::Other(idx @ 0..=4) => self.imgui.io_mut().mouse_down[idx as usize] = pressed,
+                                _ => (),
+                            }
+                        },
+                        WindowEvent::Resized(LogicalSize { width, height }) => {
+                            self.imgui.io_mut().display_size = [width as f32, height as f32];
+                        }
                         _ => {}
                     }
                 },
@@ -170,35 +220,6 @@ impl Game {
         }
 
         {
-            let mut lock = self.renderer.info.render_queues.write().unwrap();
-            (*lock).text.clear();
-            lock.text.append(&mut self.frame_metrics.get_text((5, 5)));
-            lock.text.push(TextData {
-                text: format!("Player pos: x: {}, y: {}, z: {}",
-                              (self.player.position.x * 10.0).round() / 10.0,
-                              (self.player.position.y * 10.0).round() / 10.0,
-                              (self.player.position.z * 10.0).round() / 10.0),
-                position: (5, 140),
-                ..TextData::default()
-            });
-            let debug_vis_text = match self.renderer.info.debug_visualize_setting {
-                phosphor::renderer::DEBUG_VISUALIZE_DISABLED => "Disabled",
-                phosphor::renderer::DEBUG_VISUALIZE_POSITION_BUFFER => "Position Buffer",
-                phosphor::renderer::DEBUG_VISUALIZE_NORMAL_BUFFER => "Normal Buffer",
-                phosphor::renderer::DEBUG_VISUALIZE_ALBEDO_BUFFER => "Albedo Buffer",
-                phosphor::renderer::DEBUG_VISUALIZE_ROUGHNESS_BUFFER => "Roughness Buffer",
-                phosphor::renderer::DEBUG_VISUALIZE_METALLIC_BUFFER => "Metallic Buffer",
-                phosphor::renderer::DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY => "Deferred Lighting Only",
-                phosphor::renderer::DEBUG_VISUALIZE_NO_POST_PROCESSING => "No Post Processing",
-                phosphor::renderer::DEBUG_VISUALIZE_OCCLUSION_BUFFER => "Occlusion Buffer",
-                _ => unreachable!()
-            };
-            lock.text.push(TextData {
-                text: format!("Debug visualization: {}", debug_vis_text),
-                position: (5, 165),
-                ..TextData::default()
-            });
-
             // line queue (disabled)
 
 //            let line_queue = &mut lock.lines;
@@ -245,18 +266,17 @@ impl Game {
                                 self.chunk_meshing_threads.fetch_add(1, Ordering::Relaxed);
                                 state.store(CHUNK_STATE_MESHING, Ordering::Relaxed);
                                 let chunk_arc = chunk.clone();
-                                let device_arc = self.renderer.info.device.clone();
-                                let memory_pool_arc = self.renderer.info.memory_pool.clone();
                                 let state_arc = state.clone();
                                 let thread_count_clone = self.chunk_meshing_threads.clone();
+                                let info = self.renderer.info.clone();
                                 thread::spawn(move || {
                                     let mut chunk_lock = chunk_arc.write().unwrap();
 
                                     // TODO: fix this
-                                    //(*chunk_lock).generate_mesh(&self.renderer);
+                                    (*chunk_lock).generate_mesh(&info);
 
-//                                    let chunk_center = Chunk::chunk_pos_to_center_ws(chunk_pos);
-//                                    let dist = Point3::distance(Point3::new(chunk_center.0, chunk_center.1, chunk_center.2), player_pos);
+                                    //let chunk_center = Chunk::chunk_pos_to_center_ws(chunk_pos);
+                                    //let dist = Point3::distance(Point3::new(chunk_center.0, chunk_center.1, chunk_center.2), player_pos);
                                     let occluder_scale = 2;
 //                                    if dist > 128.0 {
 //                                        occluder_scale = 3;
@@ -279,22 +299,13 @@ impl Game {
 
         {
             let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
-            let mut num_generated = 0;
+            self.chunk_metrics.generated = 0;
 
             for (_, (_, state))  in chunks.iter() {
                 let status = state.load(Ordering::Relaxed);
                 if status != CHUNK_STATE_GENERATING {
-                    num_generated += 1;
+                    self.chunk_metrics.generated += 1;
                 }
-            }
-
-            {
-                let mut lock = self.renderer.info.render_queues.write().unwrap();
-                lock.text.push(TextData {
-                    text: format!("Chunks generated: {}", num_generated),
-                    position: (5, 80),
-                    ..TextData::default()
-                });
             }
         }
 
@@ -324,7 +335,7 @@ impl Game {
         let mut occlusion_indices = Vec::new();
         let mut offset = 0;
         {
-            let mut num_chunks_before_culling = 0;
+            self.chunk_metrics.meshed = 0;
             let chunks = self.dimension_registry.get(0).unwrap().chunks.read().unwrap();
             let frustum = view_to_frustum(self.player.pitch, self.player.yaw, self.player.camera.fov, 4.0/3.0, 1.0, 10000.0);
 
@@ -334,7 +345,7 @@ impl Game {
                 let status = state.load(Ordering::Relaxed);
                 let is_ready = status == CHUNK_STATE_CLEAN;
                 if is_ready {
-                    num_chunks_before_culling += 1;
+                    self.chunk_metrics.meshed += 1;
                 }
                 let is_in_view = aabb_frustum_intersection(aabb_min, aabb_max, frustum.clone());
                 if status == CHUNK_STATE_CLEAN {
@@ -365,19 +376,56 @@ impl Game {
                     }
                 }
             }
-            let mut lock = self.renderer.info.render_queues.write().unwrap();
-            lock.text.push(TextData {
-                text: format!("Chunks meshed: {}", num_chunks_before_culling),
-                position: (5, 95),
-                ..TextData::default()
-            });
-            lock.occluders.vertex_group = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, self.renderer.info.device.clone(), self.renderer.info.memory_pool.clone()));
+            let mut queue_lock = self.renderer.info.render_queues.write().unwrap();
+            queue_lock.occluders.vertex_group = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, self.renderer.info.device.clone(), self.renderer.info.memory_pool.clone()));
         }
 
         self.frame_metrics.end_game();
 
+        {
+            self.chunk_metrics.drawing = self.renderer.info.render_queues.read().unwrap().meshes.len() as u32;
+        }
+
+        let debug_vis_text = match self.renderer.info.debug_visualize_setting {
+            phosphor::renderer::DEBUG_VISUALIZE_DISABLED => "Disabled",
+            phosphor::renderer::DEBUG_VISUALIZE_POSITION_BUFFER => "Position Buffer",
+            phosphor::renderer::DEBUG_VISUALIZE_NORMAL_BUFFER => "Normal Buffer",
+            phosphor::renderer::DEBUG_VISUALIZE_ALBEDO_BUFFER => "Albedo Buffer",
+            phosphor::renderer::DEBUG_VISUALIZE_ROUGHNESS_BUFFER => "Roughness Buffer",
+            phosphor::renderer::DEBUG_VISUALIZE_METALLIC_BUFFER => "Metallic Buffer",
+            phosphor::renderer::DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY => "Deferred Lighting Only",
+            phosphor::renderer::DEBUG_VISUALIZE_NO_POST_PROCESSING => "No Post Processing",
+            phosphor::renderer::DEBUG_VISUALIZE_OCCLUSION_BUFFER => "Occlusion Buffer",
+            _ => unreachable!()
+        };
+
+        let metrics = self.frame_metrics.last_frame_text.clone();
+        let chunk_metrics = self.chunk_metrics.clone();
+        let pos = self.player.position;
+        let mut ui = self.imgui.frame();
+        let run_ui = |ui: &mut imgui::Ui| {
+            imgui::Window::new(im_str!("Metrics"))
+                .size([200.0, 200.0], Condition::Appearing)
+                .position([0.0, 0.0], Condition::Appearing)
+                .build(&ui, || {
+                    ui.text(ImString::new(metrics.fps.clone()));
+                    ui.text(ImString::new(metrics.game_time.clone()));
+                    ui.text(ImString::new(metrics.draw_time.clone()));
+                    ui.text(ImString::new(metrics.gpu_time.clone()));
+                    ui.separator();
+                    ui.text(ImString::new(format!("Chunks generated: {}", chunk_metrics.generated)));
+                    ui.text(ImString::new(format!("Chunks meshed:    {}", chunk_metrics.meshed)));
+                    ui.text(ImString::new(format!("Chunks drawing:   {}", chunk_metrics.drawing)));
+                    ui.separator();
+                    ui.text(ImString::new(format!("Position: {:3.1}, {:3.1}, {:3.1}", pos.x, pos.y, pos.z)));
+                    ui.text(ImString::new(format!("Visualization: {}", debug_vis_text)));
+                });
+        };
+        run_ui(&mut ui);
+
         match self.renderer.draw(&self.player.camera, self.player.get_transform()) {
             Ok(img_future) => {
+                self.renderer.draw_imgui(ui);
                 self.frame_metrics.end_draw();
                 self.renderer.submit(img_future);
             },

@@ -37,6 +37,9 @@ euc = "0.4.2"
 
 flame = "0.2.2"
 
+imgui = "0.2.1"
+clipboard = "0.5"
+
 lumberjack = { path = "../lumberjack" }
 phosphor = { path = "../phosphor" }
 toolbox = { path = "../toolbox" }

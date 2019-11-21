@@ -6,6 +6,15 @@ use phosphor::pipeline::text::TextData;
 const AVG_SAMPLE_COUNT: usize = 20;
 
 
+#[derive(Default, Clone)]
+pub struct MetricsText {
+    pub fps: String,
+    pub game_time: String,
+    pub draw_time: String,
+    pub gpu_time: String
+}
+
+
 pub struct FrameMetrics {
     // timestamps of completed frames, for fps. entries > 1 sec ago are removed
     completed_frames: Vec<Instant>,
@@ -14,6 +23,7 @@ pub struct FrameMetrics {
     game_end_time: Instant,
     draw_end_time: Instant,
     gpu_end_time: Instant,
+    pub last_frame_text: MetricsText,
     // text data from previous frame
     last_frame_text_data: Vec<TextData>,
     // timestamp to rate-limit display
@@ -32,6 +42,7 @@ impl FrameMetrics {
             game_end_time: Instant::now(),
             draw_end_time: Instant::now(),
             gpu_end_time: Instant::now(),
+            last_frame_text: MetricsText::default(),
             last_frame_text_data: Vec::new(),
             last_text_update: Instant::now(),
             game_time_samples: VecDeque::new(),
@@ -40,7 +51,7 @@ impl FrameMetrics {
         }
     }
 
-    pub fn get_text(&mut self, pos: (i32, i32)) -> Vec<TextData> {
+    pub fn get_textdata(&mut self, pos: (i32, i32)) -> Vec<TextData> {
         self.last_frame_text_data.iter().enumerate().clone()
             .map(|(idx, text)| TextData {
                 position: (pos.0, pos.1 + (15 * idx as i32)),
@@ -104,31 +115,44 @@ impl FrameMetrics {
 
         let fps = self.completed_frames.len();
         self.last_frame_text_data.clear();
-        self.last_frame_text_data.push(TextData {
-            text: format!("{} FPS", fps),
-            position: (5, 5),
-            ..TextData::default()
-        });
-        self.last_frame_text_data.push(TextData {
-            text: format!("game:{:>5.1}ms /{:>5.1}ms", game_time, game_time_avg),
-            position: (5, 20),
-            family: "Fira Mono".into(),
-            size: 16.0,
-            ..TextData::default()
-        });
-        self.last_frame_text_data.push(TextData {
-            text: format!("draw:{:>5.1}ms /{:>5.1}ms", draw_time, draw_time_avg),
-            position: (5, 35),
-            family: "Fira Mono".into(),
-            size: 16.0,
-            ..TextData::default()
-        });
-        self.last_frame_text_data.push(TextData {
-            text: format!(" gpu:{:>5.1}ms /{:>5.1}ms", gpu_time, gpu_time_avg),
-            position: (5, 50),
-            family: "Fira Mono".into(),
-            size: 16.0,
-            ..TextData::default()
-        });
+//        self.last_frame_text_data.push(TextData {
+//            text: format!("{} FPS", fps),
+//            position: (5, 5),
+//            ..TextData::default()
+//        });
+//        self.last_frame_text_data.push(TextData {
+//            text: format!("game:{:>5.1}ms /{:>5.1}ms", game_time, game_time_avg),
+//            position: (5, 20),
+//            family: "Fira Mono".into(),
+//            size: 16.0,
+//            ..TextData::default()
+//        });
+//        self.last_frame_text_data.push(TextData {
+//            text: format!("draw:{:>5.1}ms /{:>5.1}ms", draw_time, draw_time_avg),
+//            position: (5, 35),
+//            family: "Fira Mono".into(),
+//            size: 16.0,
+//            ..TextData::default()
+//        });
+//        self.last_frame_text_data.push(TextData {
+//            text: format!(" gpu:{:>5.1}ms /{:>5.1}ms", gpu_time, gpu_time_avg),
+//            position: (5, 50),
+//            family: "Fira Mono".into(),
+//            size: 16.0,
+//            ..TextData::default()
+//        });
+
+        self.last_frame_text.fps = format!("{} FPS", fps);
+        self.last_frame_text.game_time = format!("game:{:>5.1}ms /{:>5.1}ms", game_time, game_time_avg);
+        self.last_frame_text.draw_time = format!("draw:{:>5.1}ms /{:>5.1}ms", draw_time, draw_time_avg);
+        self.last_frame_text.gpu_time = format!(" gpu:{:>5.1}ms /{:>5.1}ms", gpu_time, gpu_time_avg);
     }
+}
+
+
+#[derive(Default, Clone)]
+pub struct ChunkMetrics {
+    pub generated: u32,
+    pub meshed: u32,
+    pub drawing: u32
 }

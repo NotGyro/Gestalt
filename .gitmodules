@@ -1,3 +1,6 @@
 [submodule "phosphor"]
 	path = phosphor
 	url = https://github.com/trashbyte/phosphor
+[submodule "lumberjack"]
+	path = lumberjack
+	url = https://github.com/trashbyte/lumberjack

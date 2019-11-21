@@ -1,7 +1,7 @@
 //! A single chunk of blocks.
 
 use phosphor::geometry::{Mesh, VertexPositionObjectId};
-use phosphor::renderer::Renderer;
+use phosphor::renderer::RenderInfo;
 
 use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode, SubdivNode, SubdivVoxelSource};
 use crate::world::{CHUNK_SIZE_F32, CHUNK_SCALE};
@@ -43,9 +43,9 @@ impl Chunk {
     }
 
     /// Generates a mesh for the chunk, using [self::chunk_mesher].
-    pub fn generate_mesh(&mut self, renderer: &Renderer) {
+    pub fn generate_mesh(&mut self, info: &RenderInfo) {
         info!(Mesher, "Generating mesh for chunk {}", self.id);
-        crate::chunk_mesher::generate_mesh(self, renderer);
+        crate::chunk_mesher::generate_mesh(self, info);
     }
 
     /// convert a position in chunks to a world space position for the center of that chunk
