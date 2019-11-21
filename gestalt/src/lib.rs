@@ -1,8 +1,6 @@
 // External crates
 
 #[macro_use] extern crate lazy_static;
-//#[macro_use] extern crate log;
-#[macro_use] extern crate vulkano;
 #[macro_use] extern crate lumberjack;
 
 extern crate cgmath;
@@ -11,8 +9,6 @@ extern crate crossbeam;
 extern crate euc;
 extern crate fine_grained;
 extern crate flame;
-extern crate fnv;
-extern crate half;
 extern crate hashbrown;
 extern crate image;
 extern crate linear_map;
@@ -21,7 +17,6 @@ extern crate num;
 extern crate parking_lot;
 extern crate rand;
 extern crate rgb;
-extern crate rusttype;
 extern crate serde;
 extern crate serde_json;
 extern crate smallvec;
@@ -29,33 +24,21 @@ extern crate string_cache;
 extern crate swsurface;
 extern crate toml;
 extern crate vek;
-extern crate vulkano_shaders;
-extern crate winit;
-extern crate xalloc;
+extern crate phosphor;
 
 // modules
 
 #[macro_use] pub mod voxel;
 
-pub mod buffer;
-pub mod chunk_mesher;
 pub mod client;
-pub mod cpu_pool;
+pub mod chunk_mesher;
 pub mod entity;
 pub mod game;
-pub mod geometry;
 pub mod input;
-pub mod memory;
 pub mod metrics;
 pub mod player;
-pub mod pipeline;
-pub mod registry;
-pub mod renderer;
-pub mod renderpass;
-pub mod shader;
 pub mod network;
 pub mod util;
-pub mod vulkano_win;
 pub mod world;
 
 // imports
@@ -77,8 +60,6 @@ pub mod lumberjack_scopes {
         pub static ref Mesher:   u32 = lumberjack::register_scope(Scope::new("Mesher"));
     }
 }
-
-
 
 
 #[derive(PartialEq)]

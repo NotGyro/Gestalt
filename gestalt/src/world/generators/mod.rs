@@ -4,7 +4,7 @@ use cgmath::{Vector3, MetricSpace};
 
 use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode, SubdivVoxelDrain};
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SCALE};
-use crate::util::noise::OctavePerlinNoise;
+use toolbox::noise::OctavePerlinNoise;
 
 
 /// Trait for world voxel generators.

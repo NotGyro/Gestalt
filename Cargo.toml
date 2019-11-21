@@ -1,7 +1,10 @@
 [workspace]
 
 members = [
+    "toolbox",
     "lumberjack",
+    "phosphor",
     "gestalt",
     "gestalt_bin",
+    "vulkano-shaders",
 ]

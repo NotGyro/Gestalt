@@ -5,21 +5,19 @@ use std::sync::atomic::{Ordering, AtomicU64};
 use std::thread;
 
 use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
-use vulkano::instance::Instance;
-use vulkano::swapchain::Surface;
-use winit::{Event, WindowEvent, DeviceEvent, ElementState, Window, WindowBuilder, EventsLoop, VirtualKeyCode};
+use winit::{Event, WindowEvent, DeviceEvent, ElementState, EventsLoop, VirtualKeyCode};
 
-use crate::vulkano_win::VkSurfaceBuild;
-use crate::geometry::VertexGroup;
-use crate::renderer::Renderer;
+use phosphor::pipeline::text::TextData;
+use phosphor::geometry::VertexGroup;
+use phosphor::renderer::Renderer;
+use toolbox::{view_to_frustum, aabb_frustum_intersection};
+
 use crate::input::InputState;
-use crate::registry::DimensionRegistry;
+use crate::world::dimension::DimensionRegistry;
 use crate::metrics::FrameMetrics;
 use crate::player::Player;
 use crate::world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_MESHING, CHUNK_STATE_CLEAN, CHUNK_STATE_GENERATING};
-use crate::util::{view_to_frustum, aabb_frustum_intersection};
-use crate::pipeline::text::TextData;
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
@@ -29,7 +27,6 @@ const MAX_CHUNK_MESH_THREADS: u32 = 2;
 /// Main type for the game. `Game::new().run()` runs the game.
 pub struct Game {
     event_loop: EventsLoop,
-    surface: Arc<Surface<Window>>,
     renderer: Renderer,
     frame_metrics: FrameMetrics,
     input_state: InputState,
@@ -46,9 +43,7 @@ impl Game {
     /// Creates a new `Game`.
     pub fn new() -> Game {
         let event_loop = EventsLoop::new();
-        let instance = Instance::new(None, &crate::vulkano_win::required_extensions(), None).expect("failed to create instance");
-        let surface = WindowBuilder::new().build_vk_surface(&event_loop, instance.clone()).unwrap();
-        let renderer = Renderer::new(instance.clone(), surface.clone());
+        let renderer = Renderer::new(&event_loop);
 
         let input_state = InputState::new();
 
@@ -63,7 +58,6 @@ impl Game {
 
         Game {
             event_loop,
-            surface,
             renderer,
             frame_metrics: FrameMetrics::new(),
             input_state,
@@ -121,11 +115,11 @@ impl Game {
                     let delta = (delta.0 as f32, delta.1 as f32);
                     self.input_state.add_mouse_delta(delta);
                     if self.input_state.right_mouse_pressed {
-                        let dimensions = match self.surface.window().get_inner_size() {
+                        let dimensions = match self.renderer.surface.window().get_inner_size() {
                             Some(logical_size) => [logical_size.width as u32, logical_size.height as u32],
                             None => [800, 600]
                         };
-                        match self.surface.window().set_cursor_position(::winit::dpi::LogicalPosition::new(dimensions[0] as f64 / 2.0, dimensions[1] as f64 / 2.0)) {
+                        match self.renderer.surface.window().set_cursor_position(::winit::dpi::LogicalPosition::new(dimensions[0] as f64 / 2.0, dimensions[1] as f64 / 2.0)) {
                             Ok(_) => {},
                             Err(err) => { warn!(Game, "Couldn't set cursor position: {:?}", err); }
                         }
@@ -135,11 +129,11 @@ impl Game {
                     if button == 3 {
                         match state {
                             ElementState::Pressed => {
-                                self.surface.window().hide_cursor(true);
+                                self.renderer.surface.window().hide_cursor(true);
                                 self.input_state.right_mouse_pressed = true;
                             },
                             ElementState::Released => {
-                                self.surface.window().hide_cursor(false);
+                                self.renderer.surface.window().hide_cursor(false);
                                 self.input_state.right_mouse_pressed = false;
                             }
                         }
@@ -154,7 +148,7 @@ impl Game {
         if self.input_state.get_key_just_pressed(&VirtualKeyCode::V) {
             if self.input_state.get_key_down(&VirtualKeyCode::LShift) {
                 if self.renderer.info.debug_visualize_setting == 0 {
-                    self.renderer.info.debug_visualize_setting = crate::renderer::DEBUG_VISUALIZE_MAX - 1;
+                    self.renderer.info.debug_visualize_setting = phosphor::renderer::DEBUG_VISUALIZE_MAX - 1;
                 }
                 else {
                     self.renderer.info.debug_visualize_setting -= 1;
@@ -162,7 +156,7 @@ impl Game {
             }
             else {
                 self.renderer.info.debug_visualize_setting += 1;
-                if self.renderer.info.debug_visualize_setting == crate::renderer::DEBUG_VISUALIZE_MAX {
+                if self.renderer.info.debug_visualize_setting == phosphor::renderer::DEBUG_VISUALIZE_MAX {
                     self.renderer.info.debug_visualize_setting = 0;
                 }
             }
@@ -188,15 +182,15 @@ impl Game {
                 ..TextData::default()
             });
             let debug_vis_text = match self.renderer.info.debug_visualize_setting {
-                crate::renderer::DEBUG_VISUALIZE_DISABLED => "Disabled",
-                crate::renderer::DEBUG_VISUALIZE_POSITION_BUFFER => "Position Buffer",
-                crate::renderer::DEBUG_VISUALIZE_NORMAL_BUFFER => "Normal Buffer",
-                crate::renderer::DEBUG_VISUALIZE_ALBEDO_BUFFER => "Albedo Buffer",
-                crate::renderer::DEBUG_VISUALIZE_ROUGHNESS_BUFFER => "Roughness Buffer",
-                crate::renderer::DEBUG_VISUALIZE_METALLIC_BUFFER => "Metallic Buffer",
-                crate::renderer::DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY => "Deferred Lighting Only",
-                crate::renderer::DEBUG_VISUALIZE_NO_POST_PROCESSING => "No Post Processing",
-                crate::renderer::DEBUG_VISUALIZE_OCCLUSION_BUFFER => "Occlusion Buffer",
+                phosphor::renderer::DEBUG_VISUALIZE_DISABLED => "Disabled",
+                phosphor::renderer::DEBUG_VISUALIZE_POSITION_BUFFER => "Position Buffer",
+                phosphor::renderer::DEBUG_VISUALIZE_NORMAL_BUFFER => "Normal Buffer",
+                phosphor::renderer::DEBUG_VISUALIZE_ALBEDO_BUFFER => "Albedo Buffer",
+                phosphor::renderer::DEBUG_VISUALIZE_ROUGHNESS_BUFFER => "Roughness Buffer",
+                phosphor::renderer::DEBUG_VISUALIZE_METALLIC_BUFFER => "Metallic Buffer",
+                phosphor::renderer::DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY => "Deferred Lighting Only",
+                phosphor::renderer::DEBUG_VISUALIZE_NO_POST_PROCESSING => "No Post Processing",
+                phosphor::renderer::DEBUG_VISUALIZE_OCCLUSION_BUFFER => "Occlusion Buffer",
                 _ => unreachable!()
             };
             lock.text.push(TextData {
@@ -258,7 +252,8 @@ impl Game {
                                 thread::spawn(move || {
                                     let mut chunk_lock = chunk_arc.write().unwrap();
 
-                                    (*chunk_lock).generate_mesh(device_arc, memory_pool_arc);
+                                    // TODO: fix this
+                                    //(*chunk_lock).generate_mesh(&self.renderer);
 
 //                                    let chunk_center = Chunk::chunk_pos_to_center_ws(chunk_pos);
 //                                    let dist = Point3::distance(Point3::new(chunk_center.0, chunk_center.1, chunk_center.2), player_pos);
@@ -381,8 +376,18 @@ impl Game {
 
         self.frame_metrics.end_game();
 
-        self.renderer.draw(&self.player.camera, self.player.get_transform(), &mut self.frame_metrics);
+        match self.renderer.draw(&self.player.camera, self.player.get_transform()) {
+            Ok(img_future) => {
+                self.frame_metrics.end_draw();
+                self.renderer.submit(img_future);
+            },
+            Err(e) => {
+                error!(Renderer, "{:?}", e);
+                self.frame_metrics.end_draw();
+            }
+        }
 
+        self.frame_metrics.end_gpu();
         self.frame_metrics.end_frame();
 
         keep_running

@@ -10,7 +10,7 @@ use crate::world::{
     Chunk, CHUNK_SIZE_F32,
     generators::ChunkGenerator,
 };
-use crate::renderer::RenderInfo;
+use phosphor::renderer::RenderInfo;
 
 
 /// A dimension.
@@ -134,5 +134,26 @@ impl Dimension {
             let mut lock = info.render_queues.write().unwrap();
             lock.lines.chunks_changed = true;
         }
+    }
+}
+
+
+/// Global dimension registry.
+pub struct DimensionRegistry {
+    pub dimensions: HashMap<u32, Dimension>
+}
+
+
+impl DimensionRegistry {
+    pub fn new() -> DimensionRegistry {
+        DimensionRegistry {
+            dimensions: HashMap::new()
+        }
+    }
+
+
+    /// Gets the dimension with the given id, or None if one couldn't be found.
+    pub fn get(&mut self, id: u32) -> Option<&mut Dimension> {
+        self.dimensions.get_mut(&id)
     }
 }

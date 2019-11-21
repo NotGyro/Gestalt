@@ -1,6 +1,6 @@
 use std::time::Instant;
 use std::collections::VecDeque;
-use crate::pipeline::text::TextData;
+use phosphor::pipeline::text::TextData;
 
 
 const AVG_SAMPLE_COUNT: usize = 20;

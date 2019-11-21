@@ -1,0 +1,27 @@
+[package]
+name = "vulkano-shaders"
+version = "0.16.0"
+edition = "2018"
+authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>", "The vulkano contributors"]
+repository = "https://github.com/vulkano-rs/vulkano"
+description = "Shaders rust code generation macro"
+license = "MIT/Apache-2.0"
+documentation = "https://docs.rs/vulkano"
+homepage = "https://vulkano.rs"
+keywords = ["vulkan", "bindings", "graphics", "gpu", "rendering"]
+categories = ["rendering::graphics-api"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+shaderc = "0.6"
+syn = "1.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+
+[dev-dependencies]
+vulkano = "0.16"
+
+[features]
+shaderc-build-from-source = ["shaderc/build-from-source"]

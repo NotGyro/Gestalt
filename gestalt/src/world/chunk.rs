@@ -1,13 +1,10 @@
 //! A single chunk of blocks.
 
-use std::sync::Arc;
+use phosphor::geometry::{Mesh, VertexPositionObjectId};
+use phosphor::renderer::Renderer;
 
-use vulkano::device::Device;
-
-use crate::geometry::{Mesh, VertexPositionObjectId};
 use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode, SubdivNode, SubdivVoxelSource};
 use crate::world::{CHUNK_SIZE_F32, CHUNK_SCALE};
-use crate::memory::xalloc::XallocMemoryPool;
 use crate::voxel::subdivmath::{OctPos, Scale};
 
 
@@ -46,9 +43,9 @@ impl Chunk {
     }
 
     /// Generates a mesh for the chunk, using [self::chunk_mesher].
-    pub fn generate_mesh(&mut self, device: Arc<Device>, memory_pool: XallocMemoryPool) {
+    pub fn generate_mesh(&mut self, renderer: &Renderer) {
         info!(Mesher, "Generating mesh for chunk {}", self.id);
-        crate::chunk_mesher::generate_mesh(self, device, memory_pool);
+        crate::chunk_mesher::generate_mesh(self, renderer);
     }
 
     /// convert a position in chunks to a world space position for the center of that chunk

@@ -12,11 +12,9 @@ rand = "0.7.2"
 noise = "0.6.0"
 fine_grained = "0.1.2"
 smallvec = "0.6.12"
-fnv = "1.0.6"
 
 parking_lot = "0.9.0"
 crossbeam = "0.7.2"
-# log = "0.4.8"
 chrono = "0.4.9"
 lazy_static = "1.4.0"
 num = "0.2.0"
@@ -32,21 +30,16 @@ rgb = "0.8.14"
 hashbrown = "0.6.2"
 
 image = "0.22.3"
-vek = "0.9.9"
 winit = "0.19.4"
+vek = "0.9.9"
 swsurface = "0.1.2"
 euc = "0.4.2"
 
-vulkano = "0.16.0"
-vulkano-shaders = "0.16.0"
-rusttype = { version = "0.8.1", features = ["gpu_cache"] }
-
 flame = "0.2.2"
 
-xalloc = "0.2.6"
-half = "1.4.0"
-
 lumberjack = { path = "../lumberjack" }
+phosphor = { path = "../phosphor" }
+toolbox = { path = "../toolbox" }
 
 #tramp = "*"
 
@@ -54,5 +47,3 @@ lumberjack = { path = "../lumberjack" }
 #typenum = "1.10.0"
 #generic-array = "0.13.2"
 
-[build-dependencies]
-rerun_except = "0.1.0"
