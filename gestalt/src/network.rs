@@ -344,7 +344,8 @@ impl ClientNet {
         }
     }
     pub fn connect(&mut self, server_addr: SocketAddr) -> Result<(), Box<dyn Error>> {
-        let mut socket = Socket::bind_any()?;
+        let local_addr : IpAddr = "0.0.0.0".parse().unwrap();
+        let mut socket = Socket::bind(SocketAddr::from((local_addr, server_addr.port())))?;
         
         // Describe our instance and come up with a random nonce so that we can announce ourselves to the server,
         // and also have something they can verify themselves with that can't be copied by an observer.
@@ -413,8 +414,6 @@ impl ClientNet {
                     }
                 }
             }
-
-            socket.manual_poll(Instant::now());
 
             // Timeout
             if Instant::now() - start_connect >= Duration::from_secs(4) {
