@@ -1,12 +1,12 @@
 extern crate serde;
 extern crate linear_map;
 extern crate std;
-extern crate crossbeam;
+extern crate crossbeam_channel;
 
 use std::fmt;
 use std::fmt::Debug;
 //use serde::{Serialize, Deserialize};
-use self::crossbeam::crossbeam_channel::{unbounded, Sender, Receiver}; // RecvError, TryRecvError};
+use self::crossbeam_channel::{unbounded, Sender, Receiver}; // RecvError, TryRecvError};
 use self::linear_map::LinearMap;
 use std::result::Result;
 use std::error::Error;

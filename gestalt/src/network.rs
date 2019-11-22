@@ -9,25 +9,40 @@ use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::Path;
 use std::result::Result;
-use std::sync::{Mutex, Arc};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+use hashbrown::{HashSet, HashMap};
+use parking_lot::Mutex;
 
 use base16;
 use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::sign::{PublicKey, SecretKey, Signature};
 use sodiumoxide::crypto::sign::ed25519::*;
 
-use futures::{StreamExt, TryFutureExt};
-use tokio::runtime::current_thread::Runtime;
-use quinn::{Certificate, ClientConfig, ClientConfigBuilder, Endpoint, EndpointDriver, Incoming, ServerConfig, ServerConfigBuilder};
-use crossbeam::crossbeam_channel::{unbounded, Sender, Receiver}; 
-use hashbrown::HashSet;
+//use tokio::{net::TcpListener, net::TcpStream, stream::Stream, stream::StreamExt, io::AsyncWriteExt, io::AsyncReadExt, runtime::Runtime};
+
+use laminar::{SocketEvent, Socket, Packet};
+
+use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError}; 
+
+use serde::{Serialize, Deserialize};
+use bincode::serialize;
+use bincode::deserialize;
 
 use crate::entity::EntityID;
-use crate::voxel::subdivmath::OctPos;
+
+//lazy_static! {
+    // This is an example for using doc comment attributes
+    // static ref TOKIO_RT: Mutex<Runtime> = Mutex::new(Runtime::new().unwrap());
+//}
+
+/*use crate::voxel::subdivmath::OctPos;
 use crate::voxel::subdivmath::Scale;
 use crate::voxel::voxelmath::VoxelCoord;
 use crate::voxel::voxelstorage::Voxel;
-use crate::world::CHUNK_SCALE;
+use crate::world::CHUNK_SCALE;*/
 
 // A chunk has to be requested by a client (or peer server) before it is sent. So, a typical flow would go like this: 
 // 1. Client: My revision number on chunk (15, -8, 24) is 732. Can you give me the new stuff if there is any?
@@ -42,7 +57,7 @@ lazy_static! {
 // A client can initiate a connection to a server,
 // and a server can initiate a connection to a server (federation, public shared resources, etc),
 // but a server should never initiate a connection to a client.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum NetworkRole {
     Server = 0,
@@ -64,7 +79,7 @@ pub static PROTOCOL_VERSION: &str = "0.0.1";
 // Identity verification is performed, and if our public key verifies the signature of version_bytes.append(random_bytes),
 // this connection and this public key are authenticated.
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 struct HandshakeMessage {
     role: NetworkRole,
     public_key: PublicKey,
@@ -76,7 +91,7 @@ struct HandshakeMessage {
 }
 
 impl HandshakeMessage {
-    pub fn new(ident: IdentitySelf, role: NetworkRole) -> Result<Self, Box<dyn Error>> { 
+    pub fn new(ident: SelfIdentity, role: NetworkRole) -> Result<Self, Box<dyn Error>> { 
         let nonce: [u8; 32] = rand::random();
         let mut buf: Vec<u8> = Vec::new();
         let version = semver::Version::parse(PROTOCOL_VERSION)?;
@@ -170,12 +185,13 @@ impl Error for LoadKeyError {
 
 pub type Identity = PublicKey;
 
-pub struct IdentitySelf {
+#[derive(Clone)]
+pub struct SelfIdentity {
     pub public_key: PublicKey,
     secret_key: SecretKey,
 }
 
-impl IdentitySelf {
+impl SelfIdentity {
     /// Loads or generates a new identity.
     pub fn init() -> Result<Self, Box<dyn Error>> {
         let dir = Path::new("./keys/");
@@ -209,8 +225,7 @@ impl IdentitySelf {
                 let sk_bytes = base16::decode(&sk_string)?;
                 info!("Loaded identity. Your public key is: \n {}", pk_string);
 
-                Ok(IdentitySelf
-                 {
+                Ok(SelfIdentity {
                     public_key: PublicKey::from_slice(&pk_bytes).ok_or(LoadKeyError::Public)?,
                     secret_key: SecretKey::from_slice(&sk_bytes).ok_or(LoadKeyError::Secret)?,
                 })
@@ -240,8 +255,7 @@ impl IdentitySelf {
 
                 info!("Generated identity. Your public key is: \n {}", pk_string);
 
-                Ok(IdentitySelf
-                {
+                Ok(SelfIdentity {
                     public_key: pk,
                     secret_key: sk,
                 })
@@ -255,7 +269,8 @@ impl IdentitySelf {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub enum ConnectionState { 
+pub enum ConnectionState {
+    /// Connection has just been initiated.
     Handshake,
     /// This state should only be reachable for incoming connections with role=Client.
     PlayerSetup,
@@ -275,15 +290,16 @@ impl ConnectionState {
 
 pub struct ClientInfo {
     pub identity: PublicKey,
-    pub player_entity: EntityID,
+    //pub player_entity: Option<EntityID>,
     pub ip: SocketAddr,
     // TODO: Move name and attention radius to the Entity Component System when it exists.
-    pub name: String,
-    /// This describes a (PREFERRED) radius (at scale 0 - 1.0 = 1 meter) around the player, 
-    /// usually corresponding to draw distance or clientside loaded chunk distance,
-    /// so that they can be notified when voxel events or entity updates occur within.
-    pub attention_radius: f64,
+    // pub name: String,
+    // This describes a (PREFERRED) radius (at scale 0 - 1.0 = 1 meter) around the player, 
+    // usually corresponding to draw distance or clientside loaded chunk distance,
+    // so that they can be notified when voxel events or entity updates occur within.
+    // pub attention_radius: f64,
     state: ConnectionState,
+    pub name: String,
 }
 
 impl ClientInfo {
@@ -301,66 +317,125 @@ pub enum ClientSetupMessage {
     HelloWorld,
 }
 
-/// Dummy verifier for Quinn networking - we will be verifying identity on our side rather than through 
-/// QUIC's TLS integration. This is a federated game, servers should be able to live on bare IP
-/// addresses (no domain name), and they should not need a certificate authority.
-struct DummyCertVerifier;
+pub struct ClientNet {
+    keys: SelfIdentity,
+    state: ConnectionState,
+    //addr: SocketAddr,
+}
 
-impl rustls::ServerCertVerifier for DummyCertVerifier {
-    fn verify_server_cert(
-        &self,
-        _roots: &rustls::RootCertStore,
-        _presented_certs: &[rustls::Certificate],
-        _dns_name: webpki::DNSNameRef,
-        _ocsp_response: &[u8],
-    ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
-        Ok(rustls::ServerCertVerified::assertion())
+impl ClientNet {
+    pub fn new(identity: &SelfIdentity/*, addr: SocketAddr*/) -> Self { 
+        ClientNet {
+            keys: identity.clone(),
+            state: ConnectionState::Handshake,
+            //addr: addr,
+        }
+    }
+    pub fn connect(&mut self, server_addr: SocketAddr) -> Result<(), Box<dyn Error>> {
+        let mut socket = Socket::bind_any()?;
+        let handshake_message = HandshakeMessage::new(self.keys.clone(),NetworkRole::Client)?;
+        
+        let (sender, receiver) : (Sender<Packet>,Receiver<SocketEvent>) 
+                                  = (socket.get_packet_sender(), socket.get_event_receiver());
+        let _thread = thread::spawn(move || socket.start_polling());
+        
+        sender.send(Packet::reliable_unordered(server_addr, serialize(&handshake_message)?))?;
+        sender.send(Packet::reliable_unordered(server_addr, b"Hello, world!".to_vec()))?;
+
+        Ok(())
     }
 }
 
-pub fn make_client_endpoint<A: ToSocketAddrs>(bind_addr: A,) -> Result<(Endpoint, EndpointDriver), Box<dyn Error>> {
-    // Configure client to ignore certificate / certificate authority system.
-    let mut cfg = ClientConfigBuilder::default().build();
-    let tls_cfg: &mut rustls::ClientConfig = Arc::get_mut(&mut cfg.crypto).unwrap();
-    tls_cfg.dangerous().set_certificate_verifier(Arc::new(DummyCertVerifier{}));
-
-    // Okay, now do the real work of building an endpoint.
-    let mut endpoint_builder = Endpoint::builder();
-    endpoint_builder.default_client_config(cfg);
-    let (driver, endpoint, _incoming) =
-        endpoint_builder.bind(&bind_addr.to_socket_addrs().unwrap().next().unwrap())?;
-    Ok((endpoint, driver))
+pub struct ServerNet {
+    keys: SelfIdentity,
+    pub clients: HashMap<SocketAddr, ClientInfo>,
+    pub client_identities: HashMap<Identity, SocketAddr>,
+    unauth_clients: HashSet<SocketAddr>, 
+    pub our_address: SocketAddr,
+    sender: Sender<Packet>,
+    incoming: Receiver<SocketEvent>,
 }
 
-pub fn make_server_endpoint<A: ToSocketAddrs>(bind_addr: A,) 
-        -> Result<(EndpointDriver, Incoming, Certificate), Box<dyn Error>> {
-    // Continue dummying out certificate functionality rabidly, 
-    // by generating a self-signed certificate we don't store anywhere.
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let cert_der = cert.serialize_der().unwrap();
-    let priv_key = cert.serialize_private_key_der();
-    let priv_key = quinn::PrivateKey::from_der(&priv_key)?;
+impl ServerNet { 
+    pub fn new(identity: &SelfIdentity, our_address: SocketAddr) -> Result<Self, Box<dyn Error>> { 
 
-    // Simple default settings for transport.
-    let server_config = ServerConfig {
-        transport: Arc::new(quinn::TransportConfig {
-            stream_window_uni: 0,
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
+        let mut socket = Socket::bind(our_address)?;
 
-    let mut cfg_builder = ServerConfigBuilder::new(server_config.clone());
-    let cert = Certificate::from_der(&cert_der)?;
-    cfg_builder.certificate(quinn::CertificateChain::from_certs(vec![cert.clone()]), priv_key)?;
+        let (sender, receiver) : (Sender<Packet>,Receiver<SocketEvent>) 
+                                  = (socket.get_packet_sender(), socket.get_event_receiver());
+        let _thread = thread::spawn(move || socket.start_polling());
+        
+        info!("Initiating server on {:?}", our_address);
+        Ok(ServerNet {
+            keys: identity.clone(),
+            clients: HashMap::new(),
+            client_identities: HashMap::new(),
+            unauth_clients: HashSet::new(),
+            our_address:our_address,
+            sender:sender,
+            incoming:receiver,
+        })
+    }
 
-    // Endpoint
-    let mut endpoint_builder = Endpoint::builder();
-    endpoint_builder.listen(server_config);
-    let (driver, _endpoint, incoming) =
-        endpoint_builder.bind(&bind_addr.to_socket_addrs().unwrap().next().unwrap())?;
+    pub fn poll(&mut self) -> Result<(), Box<dyn Error>> {
+        // Check for a packet. 
+        loop { 
+            match self.incoming.try_recv() {
+                Ok(event) => match event { 
+                    SocketEvent::Packet(packet) => {
+                        if IP_BANS.lock().contains(&packet.addr().ip()) {
+                            //Deny connection somehow. 
+                            info!("A client attempted to connect from {}, but that IP is banned.", packet.addr().ip());
+                        }
+                        else if self.unauth_clients.contains(&packet.addr()) {
+                            let handshake : HandshakeMessage = deserialize(packet.payload())?;
+                            if handshake.verify() { 
+                                info!("Successfully verified client! Identity is: {}", 
+                                            base16::encode_upper(handshake.public_key.as_ref()) );
+                                self.unauth_clients.remove(&packet.addr());
+                                // Client has been verified as having a legit handshake packet,
+                                // add to our list of active clients.
+                                self.clients.insert(packet.addr().clone(),
+                                    ClientInfo { identity: handshake.public_key.clone(), 
+                                                    ip: packet.addr().clone(), 
+                                                    state: ConnectionState::PlayerSetup,
+                                                    name: String::from("") });
+                                self.client_identities.insert(handshake.public_key.clone(), packet.addr().clone());
+                            }
+                        }
+                        else if self.clients.contains_key(&packet.addr()) {
+                            let msg = packet.payload();
 
-    Ok((driver, incoming, cert))
+                            let msg = String::from_utf8_lossy(msg);
+                            let ip = packet.addr().ip();
+                            info!("Received {:?} from {:?}", msg, ip);
+                        }
+                        else {
+                            warn!("Abnormal packet from {:?}", packet.addr());
+                        }
+                    },
+                    SocketEvent::Connect(client_address) => { 
+                        info!("Incoming connection from {:?}!", client_address);
+                        //Is this a NEW connection? Laminar seems to fire this event on every
+                        //new message.
+                        if !self.clients.contains_key(&client_address) {
+                            info!("Queueing client {:?} for authorization.", client_address);
+                            self.unauth_clients.insert(client_address);
+                        }
+                    },
+                    SocketEvent::Timeout(client_address) => {
+                        info!("Client timed out: {:?}", client_address);
+                    },
+                },
+                Err(TryRecvError::Empty) => { 
+                    break; 
+                },
+                Err(e) => {
+                    error!("Other TryRecvError: {:?}", e);
+                    return Err(Box::new(e));
+                },
+            }
+        }
+        Ok(())
+    }
 }
-
-

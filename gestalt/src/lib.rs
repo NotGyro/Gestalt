@@ -4,6 +4,7 @@
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 
+extern crate bincode;
 extern crate cgmath;
 extern crate fine_grained;
 extern crate fnv;
@@ -13,8 +14,9 @@ extern crate rand;
 extern crate smallvec;
 extern crate winit;
 extern crate string_cache;
+extern crate laminar;
 extern crate linear_map;
-extern crate crossbeam;
+extern crate crossbeam_channel;
 extern crate serde;
 extern crate serde_json;
 extern crate toml;
@@ -22,15 +24,12 @@ extern crate hashbrown;
 extern crate parking_lot;
 extern crate clap;
 extern crate num;
-extern crate rustls;
 extern crate rusttype;
 extern crate image;
-extern crate rcgen;
 extern crate rgb;
 extern crate sodiumoxide;
-extern crate tokio;
+//extern crate tokio;
 extern crate vulkano_shaders;
-extern crate webpki;
 
 // modules
 
@@ -57,13 +56,12 @@ pub mod world;
 
 // imports
 
+use std::net::SocketAddr;
 use clap::{Arg, App};
-
 use game::Game;
-
 use sodiumoxide::crypto::sign;
-
-use network::NetworkRole;
+use network::{NetworkRole, ClientNet, ServerNet};
+use std::time::{Duration, Instant};
 
 pub fn main() {
     match util::logger::init_logger() {
@@ -73,7 +71,7 @@ pub fn main() {
             return;
         }
     }
-
+    
     match sodiumoxide::init() {
         Ok(()) => {},
         Err(()) => {
@@ -82,7 +80,7 @@ pub fn main() {
         },
     };
 
-    let our_identity = match network::IdentitySelf::init() {
+    let our_identity = match network::SelfIdentity::init() {
         Ok(ident) => ident,
         Err(e) => {
             error!("Could not initialize our cryptographic identity! Reason: {}", e);
@@ -113,18 +111,21 @@ pub fn main() {
     // network roles (currently unused)
     let net_role: NetworkRole = if matches.is_present("server") {
         NetworkRole::Server
-    } else {
+    } 
+    else if matches.is_present("join") {
+        NetworkRole::Client
+    }
+    else {
         NetworkRole::Offline
     };
 
-//    let server_ip = matches.value_of("server");
-//
-//    let join_ip = matches.value_of("join");
-//    if join_ip.is_some() && net_role == NetworkRole::Server {
-//        println!("Cannot host a server that also joins a server.");
-//        return;
-//    }
-//
+    let server_ip = matches.value_of("server");
+
+    let join_ip = matches.value_of("join");
+        if join_ip.is_some() && net_role == NetworkRole::Server {
+        println!("Cannot host a server that also joins a server. (yet)");
+        return;
+    }
 //    //let mut mode = game::GameMode::Singleplayer;
 //    if let Some(ip) = server_ip {
 //        //mode = game::GameMode::Server(ip.parse().unwrap());
@@ -133,8 +134,21 @@ pub fn main() {
 //        //mode = game::GameMode::JoinServer(join_ip.unwrap().parse().unwrap());
 //    }
 
+    //let mut rt = tokio::runtime::Runtime::new().unwrap();
+    let start_time = Instant::now();
     if net_role == NetworkRole::Client {
-        unimplemented!();
+        let join_ip_inner : SocketAddr = join_ip.unwrap().parse().unwrap();
+        let mut client_net = ClientNet::new(&our_identity);
+        client_net.connect(join_ip_inner).unwrap();
+        Game::new().run();
+    }
+    else if net_role == NetworkRole::Server {
+        let server_ip_inner : SocketAddr = server_ip.unwrap().parse().unwrap();
+        let mut server_net = ServerNet::new(&our_identity, server_ip_inner).unwrap();
+        //Early development - just to test.
+        while Instant::now() - start_time < Duration::from_secs(30) {
+            server_net.poll();
+        }
     }
     else if net_role == NetworkRole::Offline {
         Game::new().run();

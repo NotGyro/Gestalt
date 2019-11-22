@@ -2,14 +2,14 @@ extern crate log;
 extern crate lazy_static;
 extern crate std;
 extern crate chrono;
-extern crate crossbeam;
+extern crate crossbeam_channel;
 extern crate parking_lot;
 
 use self::log::{SetLoggerError, Level, LevelFilter, Record, Metadata};
 //use std::collections::vec_deque::VecDeque;
 use self::parking_lot::Mutex;
 
-use self::crossbeam::{unbounded, Sender, Receiver};
+use self::crossbeam_channel::{unbounded, Sender, Receiver};
 
 pub struct GameLoggerState {
     pub filter_print : LevelFilter,
