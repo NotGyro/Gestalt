@@ -79,20 +79,40 @@ pub static PROTOCOL_VERSION: &str = "0.0.1";
 // Identity verification is performed, and if our public key verifies the signature of version_bytes.append(random_bytes),
 // this connection and this public key are authenticated.
 
+
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-struct HandshakeMessage {
-    role: NetworkRole,
-    public_key: PublicKey,
-    // Major, minor, and patch.
-    version: (u64, u64, u64),
-    nonce: [u8; 32],
-    /// Signature to verify authorship on a buffer of version.0, version.1, version.2, and nonce.
+struct HandshakePrelude {
+    pub role: NetworkRole,
+    pub public_key: PublicKey,
+    pub version: (u64, u64, u64),
+    // This is the nonce we're asking THEM to sign.
+    pub please_sign: [u8; 32],
+}
+
+impl HandshakePrelude {
+    pub fn new(public_key: PublicKey, role: NetworkRole) -> Result<Self, Box<dyn Error>> {
+        let version = semver::Version::parse(PROTOCOL_VERSION)?;
+        Ok(HandshakePrelude {
+            role: role,
+            public_key: public_key,
+            version: (version.major, version.minor, version.patch),
+            please_sign: rand::random(),
+        })
+    }
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+struct HandshakeSignature {
     sig: Signature,
 }
 
-impl HandshakeMessage {
-    pub fn new(ident: SelfIdentity, role: NetworkRole) -> Result<Self, Box<dyn Error>> { 
-        let nonce: [u8; 32] = rand::random();
+impl HandshakeSignature {
+    pub fn reply_to(ident: SelfIdentity, role: NetworkRole, their_prelude: &HandshakePrelude) -> Result<Self, Box<dyn Error>> {
+        let version = semver::Version::parse(PROTOCOL_VERSION)?;
+        HandshakeSignature::new(ident, role, &their_prelude.please_sign.to_vec(), (version.major, version.minor, version.patch))
+    }
+    pub fn new(ident: SelfIdentity, role: NetworkRole, nonce: &Vec<u8>, version: (u64, u64, u64)) -> Result<Self, Box<dyn Error>> { 
+
         let mut buf: Vec<u8> = Vec::new();
         let version = semver::Version::parse(PROTOCOL_VERSION)?;
         // Write version to a temporary buffer to generate signature.
@@ -106,41 +126,37 @@ impl HandshakeMessage {
             buf.push(*byte);
         }
         // Write the nonce to a temporary buffer to generate our signature.
-        for byte in &nonce {
+        for byte in nonce {
             buf.push(*byte);
         }
         // Now, produce a signature matching all of this.
         let sig = sign_detached(buf.as_slice(), &ident.secret_key);
-        Ok(HandshakeMessage {
-            role: role,
-            public_key: ident.public_key.clone(),
-            version: (version.major, version.minor, version.patch),
-            nonce: nonce,
+        Ok(HandshakeSignature {
             sig: sig,
         })
     }
-    pub fn verify(&self) -> bool {
+    pub fn verify(&self, key: PublicKey, nonce: &Vec<u8>, version: (u64, u64, u64)) -> bool {
         let mut buf: Vec<u8> = Vec::new();
         // Write version to a temporary buffer to generate signature.
-        for byte in &self.version.0.to_le_bytes() {
+        for byte in &version.0.to_le_bytes() {
             buf.push(*byte);
         }
-        for byte in &self.version.1.to_le_bytes() {
+        for byte in &version.1.to_le_bytes() {
             buf.push(*byte);
         }
-        for byte in &self.version.2.to_le_bytes() {
+        for byte in &version.2.to_le_bytes() {
             buf.push(*byte);
         }
         // Write the nonce to a temporary buffer to generate our signature.
-        for byte in &self.nonce {
+        for byte in nonce {
             buf.push(*byte);
         }
-        // Now, produce a signature matching all of this.
-        verify_detached(&self.sig, buf.as_slice(), &self.public_key)
+        // Verify this signs the data.
+        verify_detached(&self.sig, buf.as_slice(), &key)
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum HandshakeResponse {
     Accepted = 0,
@@ -159,6 +175,13 @@ pub enum HandshakeResponse {
 enum LoadKeyError {
     Public,
     Secret,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+enum HandshakeMessage {
+    Prelude(HandshakePrelude), 
+    Signature(HandshakeSignature),
+    Response(HandshakeResponse),
 }
 
 impl fmt::Display for LoadKeyError {
@@ -268,46 +291,6 @@ impl SelfIdentity {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
-pub enum ConnectionState {
-    /// Connection has just been initiated.
-    Handshake,
-    /// This state should only be reachable for incoming connections with role=Client.
-    PlayerSetup,
-    //This state should only be reachable for incoming connections with role=Server.
-    //PeerSetup,
-    /// Connection is ready to process gamestate.
-    Active,
-}
-
-impl Default for ConnectionState { 
-    fn default() -> Self { ConnectionState::Handshake }
-}
-
-impl ConnectionState {
-    fn new() -> Self { ConnectionState::Handshake }
-}
-
-pub struct ClientInfo {
-    pub identity: PublicKey,
-    //pub player_entity: Option<EntityID>,
-    pub ip: SocketAddr,
-    // TODO: Move name and attention radius to the Entity Component System when it exists.
-    // pub name: String,
-    // This describes a (PREFERRED) radius (at scale 0 - 1.0 = 1 meter) around the player, 
-    // usually corresponding to draw distance or clientside loaded chunk distance,
-    // so that they can be notified when voxel events or entity updates occur within.
-    // pub attention_radius: f64,
-    state: ConnectionState,
-    pub name: String,
-}
-
-impl ClientInfo {
-    pub fn is_ready(&self) -> bool {
-        self.state == ConnectionState::Active
-    }
-}
-
 /// A message from a client to the server to set up player properties - i.e. name, attention radius, etc.
 #[derive(Clone, PartialEq)]
 pub enum ClientSetupMessage {
@@ -317,9 +300,38 @@ pub enum ClientSetupMessage {
     HelloWorld,
 }
 
+#[derive(Debug, Clone)]
+pub enum ClientConnectError {
+    HandshakeTimeout,
+    Rejected(HandshakeResponse),
+    CouldNotVerifyServer
+}
+impl fmt::Display for ClientConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self {
+            ClientConnectError::HandshakeTimeout => write!(f, "Server did not complete handshake in expected time."),
+            ClientConnectError::Rejected(response) => write!(f, "Server rejected our connection attempt with response {:?}", response),
+            ClientConnectError::CouldNotVerifyServer => write!(f, "Server provided invalid or corrupt handshake and signature."),
+        }
+    }
+}
+impl Error for ClientConnectError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        // Generic error, underlying cause isn't tracked.
+        None
+    }
+}
+
+pub struct ConnectionToServer { 
+    pub addr: SocketAddr,
+    pub identity: PublicKey,
+    pub sender: Sender<Packet>,
+    pub receiver: Receiver<SocketEvent>,
+}
+
 pub struct ClientNet {
     keys: SelfIdentity,
-    state: ConnectionState,
+    pub servers: HashMap<SocketAddr, ConnectionToServer>, 
     //addr: SocketAddr,
 }
 
@@ -327,30 +339,187 @@ impl ClientNet {
     pub fn new(identity: &SelfIdentity/*, addr: SocketAddr*/) -> Self { 
         ClientNet {
             keys: identity.clone(),
-            state: ConnectionState::Handshake,
+            servers: HashMap::new(),
             //addr: addr,
         }
     }
     pub fn connect(&mut self, server_addr: SocketAddr) -> Result<(), Box<dyn Error>> {
         let mut socket = Socket::bind_any()?;
-        let handshake_message = HandshakeMessage::new(self.keys.clone(),NetworkRole::Client)?;
         
+        // Describe our instance and come up with a random nonce so that we can announce ourselves to the server,
+        // and also have something they can verify themselves with that can't be copied by an observer.
+        let our_prelude = HandshakePrelude::new(self.keys.public_key.clone(),NetworkRole::Client)?;
+        socket.send(Packet::reliable_unordered(server_addr, serialize(&HandshakeMessage::Prelude(our_prelude))?))?;
+
+        // This will become Some() later if we get a prelude from them.
+        let mut server_prelude : Option<HandshakePrelude> = None;
+        // This will become Some() later if we get a sig from them. 
+        let mut server_sig : Option<HandshakeSignature> = None;
+
+        let mut server_is_valid = false;
+        let mut server_accepted_us = false;
+
+        // In a loop, poll the socket for handshake packets - until timeout.
+        let start_connect = Instant::now();
+        loop {
+            socket.manual_poll(Instant::now());
+            match socket.recv() {
+                Some(event) => {
+                    match event {
+                        SocketEvent::Packet(packet) => {
+                            let message : HandshakeMessage = deserialize(packet.payload())?;
+                            info!("Got another handshake message from {:?}! \n Its contents are: {:?}", packet.addr(), message);
+                            match message {
+                                HandshakeMessage::Prelude(their_prelude) => { 
+                                    info!("Received server's handshake, sending our signature.");
+                                    let sig = HandshakeSignature::reply_to(self.keys.clone(), NetworkRole::Client, &their_prelude)?;
+                                    socket.send(Packet::reliable_unordered(server_addr, serialize(&HandshakeMessage::Signature(sig))?))?;
+                                    server_prelude = Some(their_prelude);
+                                },
+                                HandshakeMessage::Signature(their_sig) => { 
+                                    // Store prelude and sig for later in case they come in the wrong order.
+                                    server_sig = Some(their_sig);
+                                },
+                                HandshakeMessage::Response(response) => match response {
+                                    //Handshake accepted! We're good to go.
+                                    HandshakeResponse::Accepted => {
+                                        server_accepted_us = true;
+                                    },
+                                    _ => return Err(Box::new(ClientConnectError::Rejected(response))),
+                                },
+                            };
+                        },
+                        _ => {},
+                    };
+                },
+                _ => {},
+            }
+            // Don't keep trying to send "Accepted" forever.
+            if !server_is_valid {
+                //If they have sent us both a prelude and a sig, try to verify.
+                if let Some(their_prelude) = server_prelude {
+                    if let Some(their_sig) = server_sig {
+                        if their_sig.verify(their_prelude.public_key, &our_prelude.please_sign.to_vec(), their_prelude.version) {
+                            let response = HandshakeMessage::Response(HandshakeResponse::Accepted);
+                            socket.send(Packet::reliable_unordered(server_addr, serialize(&response)?))?;
+                            server_is_valid = true;
+                        }
+                        else {
+                            //The sig they sent does not verify.
+                            let response = HandshakeMessage::Response(HandshakeResponse::DeniedCannotVerify);
+                            socket.send(Packet::reliable_unordered(server_addr, serialize(&response)?))?;
+                            return Err(Box::new(ClientConnectError::CouldNotVerifyServer));
+                        }
+                    }
+                }
+            }
+
+            socket.manual_poll(Instant::now());
+
+            // Timeout
+            if Instant::now() - start_connect >= Duration::from_secs(4) {
+                return Err(Box::new(ClientConnectError::HandshakeTimeout));
+            }
+            // Is handshake successful?
+            if server_is_valid && server_accepted_us {
+                break;
+            }
+        }
         let (sender, receiver) : (Sender<Packet>,Receiver<SocketEvent>) 
                                   = (socket.get_packet_sender(), socket.get_event_receiver());
+
+        // If we got this far, the server verifies and has good identity.
+        if server_is_valid { 
+            info!("Connection to server completed!");
+            let their_prelude = server_prelude.unwrap();
+            self.servers.insert(server_addr, ConnectionToServer { 
+                addr: server_addr,
+                identity: their_prelude.public_key,
+                sender: sender.clone(),
+                receiver: receiver,
+            });
+        }
         let _thread = thread::spawn(move || socket.start_polling());
         
-        sender.send(Packet::reliable_unordered(server_addr, serialize(&handshake_message)?))?;
         sender.send(Packet::reliable_unordered(server_addr, b"Hello, world!".to_vec()))?;
 
         Ok(())
     }
 }
 
+pub struct ConnectionToClient {
+    pub identity: PublicKey,
+    //pub player_entity: Option<EntityID>,
+    pub addr: SocketAddr,
+    // TODO: Move name and attention radius to the Entity Component System when it exists.
+    // pub name: String,
+    // This describes a (PREFERRED) radius (at scale 0 - 1.0 = 1 meter) around the player, 
+    // usually corresponding to draw distance or clientside loaded chunk distance,
+    // so that they can be notified when voxel events or entity updates occur within.
+    // pub attention_radius: f64,
+    pub name: String,
+}
+
+struct IncompleteClient { 
+    addr: SocketAddr,
+    /// Client sends prelude first so this doesn't need to be an option type.
+    clients_prelude: HandshakePrelude, 
+    our_prelude_to_client: HandshakePrelude,
+    they_accepted_us: bool, 
+    we_accepted_them: bool,
+}
+
+impl IncompleteClient { 
+    fn new(addr: SocketAddr, clients_prelude: HandshakePrelude, our_prelude_to_client: HandshakePrelude) -> Self {
+        IncompleteClient {
+            addr:addr,
+            clients_prelude: clients_prelude, 
+            our_prelude_to_client: our_prelude_to_client,
+            they_accepted_us: false, 
+            we_accepted_them: false,
+        }
+    }
+    /// Returns Ok(true) if this client is ready to go.
+    fn process(&mut self, message: HandshakeMessage, packet_sender: Sender<Packet>) -> Result<bool, Box<dyn Error>> {
+        match message {
+            HandshakeMessage::Signature(their_sig) => { 
+                // Store prelude and sig for later in case they come in the wrong order.
+                if their_sig.verify(self.clients_prelude.public_key, &self.our_prelude_to_client.please_sign.to_vec(), self.clients_prelude.version) {
+                    let response = HandshakeMessage::Response(HandshakeResponse::Accepted);
+                    packet_sender.send(Packet::reliable_unordered(self.addr, serialize(&response)?))?;
+                    self.we_accepted_them = true;
+                }
+            },
+            HandshakeMessage::Response(response) => match response {
+                //Handshake accepted! We're good to go.
+                HandshakeResponse::Accepted => {
+                    self.they_accepted_us = true;
+                },
+                _ => return Err(Box::new(ClientConnectError::Rejected(response))),
+            },
+            _ => {},
+        };
+        if self.they_accepted_us && self.we_accepted_them {
+            // Both identities have been confirmed.
+            return Ok(true);
+        }
+        Ok(false)
+    }
+    fn complete(&self) -> ConnectionToClient { 
+        ConnectionToClient {
+            identity: self.clients_prelude.public_key,
+            addr: self.addr,
+            name: String::from(""),
+        }
+    }
+}
+
 pub struct ServerNet {
     keys: SelfIdentity,
-    pub clients: HashMap<SocketAddr, ClientInfo>,
+    pub clients: HashMap<SocketAddr, ConnectionToClient>,
     pub client_identities: HashMap<Identity, SocketAddr>,
-    unauth_clients: HashSet<SocketAddr>, 
+    preauth_clients: HashSet<SocketAddr>, 
+    handshake_clients: HashMap<SocketAddr, IncompleteClient>, 
     pub our_address: SocketAddr,
     sender: Sender<Packet>,
     incoming: Receiver<SocketEvent>,
@@ -370,11 +539,64 @@ impl ServerNet {
             keys: identity.clone(),
             clients: HashMap::new(),
             client_identities: HashMap::new(),
-            unauth_clients: HashSet::new(),
+            preauth_clients: HashSet::new(), 
+            handshake_clients: HashMap::new(),
             our_address:our_address,
             sender:sender,
             incoming:receiver,
         })
+    }
+
+    fn process_packet(&mut self, packet: &Packet) -> Result<(), Box<dyn Error>> {
+        if IP_BANS.lock().contains(&packet.addr().ip()) {
+            //Deny connection somehow. 
+            info!("A client attempted to connect from {}, but that IP is banned.", packet.addr().ip());
+        }
+        //They have been recorded as "Connecting" but have not yet sent a package.
+        else if self.preauth_clients.contains(&packet.addr()) {
+            let handshake_message : HandshakeMessage = deserialize(packet.payload())?;
+            //They have to send us a prelude *first*. 
+            if let HandshakeMessage::Prelude(prelude) = handshake_message {
+                //We got a prelude, now send them one of our own.
+                let our_prelude = HandshakePrelude::new(self.keys.public_key.clone(),NetworkRole::Server)?;
+                self.sender.send(Packet::reliable_unordered(packet.addr().clone(), 
+                    serialize(&HandshakeMessage::Prelude(our_prelude))?))?;
+                //Also, we can pretty much immediately send them a signature on our version and the nonce they sent us.
+                let our_sig = HandshakeSignature::reply_to(self.keys.clone(), NetworkRole::Server, &prelude)?;
+                self.sender.send(Packet::reliable_unordered(packet.addr().clone(), 
+                    serialize(&HandshakeMessage::Signature(our_sig))?))?;
+                //Do bookkeeping - client is now in the auth phase.
+                self.preauth_clients.remove(&packet.addr());
+                self.handshake_clients.insert(packet.addr(), 
+                    IncompleteClient::new(packet.addr(), prelude, our_prelude));
+            }
+        }
+        else if self.handshake_clients.contains_key(&packet.addr()) {
+            let handshake_message : HandshakeMessage = deserialize(packet.payload())?;
+            info!("Got another handshake message from {:?}! \n Its contents are: {:?}", packet.addr(), handshake_message);
+            // Safe to unwrap - look at the if block we're in.
+            let is_done = self.handshake_clients.get_mut(&packet.addr()).unwrap().process(handshake_message, self.sender.clone())?;
+            
+            // This handshake process completed, add it to the real clients list.
+            if is_done { 
+                info!("{:?} is now authorized.", packet.addr());
+                let client = self.handshake_clients.get(&packet.addr()).unwrap().complete();
+                self.clients.insert(packet.addr(), client);
+                self.handshake_clients.remove(&packet.addr());
+            }
+        }
+        else if self.clients.contains_key(&packet.addr()) {
+            //This is the block where we handle traffic from already-authenticated clients.
+            let msg = packet.payload();
+
+            let msg = String::from_utf8_lossy(msg);
+            let ip = packet.addr().ip();
+            info!("Received {:?} from {:?}", msg, ip);
+        }
+        else {
+            warn!("Abnormal packet from {:?}", packet.addr());
+        }
+        Ok(())
     }
 
     pub fn poll(&mut self) -> Result<(), Box<dyn Error>> {
@@ -382,49 +604,48 @@ impl ServerNet {
         loop { 
             match self.incoming.try_recv() {
                 Ok(event) => match event { 
-                    SocketEvent::Packet(packet) => {
-                        if IP_BANS.lock().contains(&packet.addr().ip()) {
-                            //Deny connection somehow. 
-                            info!("A client attempted to connect from {}, but that IP is banned.", packet.addr().ip());
-                        }
-                        else if self.unauth_clients.contains(&packet.addr()) {
-                            let handshake : HandshakeMessage = deserialize(packet.payload())?;
-                            if handshake.verify() { 
-                                info!("Successfully verified client! Identity is: {}", 
-                                            base16::encode_upper(handshake.public_key.as_ref()) );
-                                self.unauth_clients.remove(&packet.addr());
-                                // Client has been verified as having a legit handshake packet,
-                                // add to our list of active clients.
-                                self.clients.insert(packet.addr().clone(),
-                                    ClientInfo { identity: handshake.public_key.clone(), 
-                                                    ip: packet.addr().clone(), 
-                                                    state: ConnectionState::PlayerSetup,
-                                                    name: String::from("") });
-                                self.client_identities.insert(handshake.public_key.clone(), packet.addr().clone());
-                            }
-                        }
-                        else if self.clients.contains_key(&packet.addr()) {
-                            let msg = packet.payload();
-
-                            let msg = String::from_utf8_lossy(msg);
-                            let ip = packet.addr().ip();
-                            info!("Received {:?} from {:?}", msg, ip);
-                        }
-                        else {
-                            warn!("Abnormal packet from {:?}", packet.addr());
-                        }
-                    },
                     SocketEvent::Connect(client_address) => { 
                         info!("Incoming connection from {:?}!", client_address);
                         //Is this a NEW connection? Laminar seems to fire this event on every
                         //new message.
-                        if !self.clients.contains_key(&client_address) {
+                        if (!self.clients.contains_key(&client_address) 
+                                && !self.preauth_clients.contains(&client_address))
+                                && !self.handshake_clients.contains_key(&client_address) {
                             info!("Queueing client {:?} for authorization.", client_address);
-                            self.unauth_clients.insert(client_address);
+                            self.preauth_clients.insert(client_address);
+                        }
+                    },
+                    SocketEvent::Packet(packet) => {
+                        match self.process_packet(&packet) {
+                            // If we got an error, drop the client rather than breaking our net system.
+                            Err(e) => {
+                                error!("Got an error while processing a packet from {:?}. \n The error is: {}" , packet.addr(), e);
+                                //Encounter an error, get rid of all corresponding entries.
+                                if self.preauth_clients.contains(&packet.addr()) {
+                                    self.preauth_clients.remove(&packet.addr());
+                                }
+                                if self.handshake_clients.contains_key(&packet.addr()) {
+                                    self.handshake_clients.remove(&packet.addr());
+                                }
+                                if self.clients.contains_key(&packet.addr()) {
+                                    self.clients.remove(&packet.addr());
+                                }
+
+                            },
+                            Ok(_) => {},
                         }
                     },
                     SocketEvent::Timeout(client_address) => {
                         info!("Client timed out: {:?}", client_address);
+                        if self.preauth_clients.contains(&client_address) {
+                            self.preauth_clients.remove(&client_address);
+                        }
+                        if self.handshake_clients.contains_key(&client_address) {
+                            self.handshake_clients.remove(&client_address);
+                        }
+                        if self.clients.contains_key(&client_address) {
+                            self.clients.remove(&client_address);
+                        }
                     },
                 },
                 Err(TryRecvError::Empty) => { 
