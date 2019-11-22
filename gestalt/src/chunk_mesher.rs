@@ -315,7 +315,7 @@ pub fn generate_mesh(chunk: &mut Chunk, info: &RenderInfo) {
                 o += 4;
             }
         }
-        mesh.vertex_groups.push(Arc::new(VertexGroup::new(vertices.into_iter(), indices.into_iter(), *id, info.device.clone(), info.memory_pool.clone())));
+        mesh.vertex_groups.push(Arc::new(VertexGroup::new(vertices.into_iter(), indices.into_iter(), *id, info.device.clone())));
     }
 
     mesh.transform = Transform::from_position(Point3::new(chunk.position.0 as f32 * CHUNK_SIZE_F32,

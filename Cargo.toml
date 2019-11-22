@@ -7,4 +7,5 @@ members = [
     "gestalt",
     "gestalt_bin",
     "vulkano-shaders",
+    "make_names",
 ]

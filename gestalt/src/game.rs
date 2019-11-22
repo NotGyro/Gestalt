@@ -377,7 +377,7 @@ impl Game {
                 }
             }
             let mut queue_lock = self.renderer.info.render_queues.write().unwrap();
-            queue_lock.occluders.vertex_group = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, self.renderer.info.device.clone(), self.renderer.info.memory_pool.clone()));
+            queue_lock.occluders.vertex_group = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, self.renderer.info.device.clone()));
         }
 
         self.frame_metrics.end_game();

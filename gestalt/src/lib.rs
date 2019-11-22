@@ -2,6 +2,7 @@
 
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate lumberjack;
+extern crate make_names;
 
 extern crate cgmath;
 extern crate clap;
@@ -30,6 +31,7 @@ extern crate clipboard;
 // modules
 
 #[macro_use] pub mod voxel;
+#[macro_use] mod names;
 
 pub mod client;
 pub mod clipboard_backend;
