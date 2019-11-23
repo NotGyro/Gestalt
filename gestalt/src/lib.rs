@@ -1,5 +1,3 @@
-// External crates
-
 #[macro_use] extern crate vulkano;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
@@ -43,7 +41,7 @@ pub mod geometry;
 pub mod input;
 pub mod memory;
 pub mod chunk_mesher;
-pub mod network;
+#[macro_use] pub mod network;
 pub mod player;
 pub mod pipeline;
 pub mod registry;
@@ -60,8 +58,24 @@ use std::net::SocketAddr;
 use clap::{Arg, App};
 use game::Game;
 use sodiumoxide::crypto::sign;
-use network::{NetworkRole, ClientNet, ServerNet};
+use network::{NetworkRole, ClientNet, ServerNet, NetMsg, PacketGuarantees, StreamSelector, ServerToClient, ClientToServer};
 use std::time::{Duration, Instant};
+use serde::{Serialize,Deserialize};
+
+#[derive(Clone, Serialize, Deserialize)]
+struct HelloMessage {
+    pub hello: String,
+}
+impl HelloMessage { 
+    pub fn new() -> Self {
+        HelloMessage {
+            hello: "Hello, friendo!".to_owned(),
+        }
+    }
+}
+
+impl_netmsg!(HelloMessage, ClientToServer, 1, ReliableUnordered, 1);
+impl_netmsg!(HelloMessage, ServerToClient, 4, ReliableUnordered, 1);
 
 pub fn main() {
     match util::logger::init_logger() {
@@ -140,14 +154,41 @@ pub fn main() {
         let join_ip_inner : SocketAddr = join_ip.unwrap().parse().unwrap();
         let mut client_net = ClientNet::new(&our_identity);
         client_net.connect(join_ip_inner).unwrap();
+        let listener = client_net.listen_from_servers::<HelloMessage>().unwrap();
+        let hello = HelloMessage::new();
+        client_net.send_to_server(&hello).unwrap();
+        //Early development - just to test.
+        while Instant::now() - start_time < Duration::from_secs(45) {
+            client_net.process().unwrap();
+            match listener.poll() { 
+                Ok(tuple) => {
+                    println!("Server said: {}", tuple.0.hello);
+                },
+                Err(_) => {},
+            }
+        }
         Game::new().run();
     }
     else if net_role == NetworkRole::Server {
         let server_ip_inner : SocketAddr = server_ip.unwrap().parse().unwrap();
         let mut server_net = ServerNet::new(&our_identity, server_ip_inner).unwrap();
+        let listener = server_net.listen_from_clients::<HelloMessage>().unwrap();
+        let new_client_listener = server_net.listen_new_clients();
         //Early development - just to test.
-        while Instant::now() - start_time < Duration::from_secs(30) {
-            server_net.poll();
+        while Instant::now() - start_time < Duration::from_secs(45) {
+            server_net.process().unwrap();
+            match new_client_listener.try_recv() {
+                Ok(event) => {
+                    server_net.send_to_client(&HelloMessage::new(), &event.identity).unwrap();
+                },
+                Err(_) => {},
+            }
+            match listener.poll() {
+                Ok(tuple) => {
+                    println!("Client said: {}", tuple.0.hello);
+                },
+                Err(_) => {},
+            }
         }
     }
     else if net_role == NetworkRole::Offline {

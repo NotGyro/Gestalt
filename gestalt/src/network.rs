@@ -27,7 +27,7 @@ use laminar::{SocketEvent, Socket, Packet};
 
 use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError}; 
 
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use bincode::serialize;
 use bincode::deserialize;
 
@@ -78,7 +78,6 @@ pub static PROTOCOL_VERSION: &str = "0.0.1";
 // (This may get more permissive later, to accept minor-version differences, but naturally that won't be backwards-compatible.)
 // Identity verification is performed, and if our public key verifies the signature of version_bytes.append(random_bytes),
 // this connection and this public key are authenticated.
-
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 struct HandshakePrelude {
@@ -291,6 +290,271 @@ impl SelfIdentity {
     }
 }
 
+
+/// Describes what kind of ordering guarantees are made about a packet.
+/// Directly inspired by (and currently maps to!) Laminar's reliability types.
+pub enum PacketGuarantees { 
+    /// No guarantees - it'll get there when it gets there. 
+    UnreliableUnordered,
+    /// Not guaranteed that it'll get there, and if an older packet arrives after a newer one it will be discarded.
+    UnreliableSequenced,
+    /// Guaranteed it will get there (resend if we don't get ack), but no guarantees about the order.
+    ReliableUnordered,
+    /// It is guaranteed it will get there, and in the right order. Do not send next packet before getting ack.
+    /// TCP-like.
+    ReliableOrdered,
+    /// Guaranteed it will get there (resend if we don't get ack), 
+    /// and if an older packet arrives after a newer one it will be discarded.
+    ReliableSequenced,
+}
+
+/// Which "stream" is this on? 
+/// A stream in this context must be a u8-identified separate channel of packets
+pub enum StreamSelector {
+    Any,
+    Specific(u8),
+}
+
+/// What context should this show up in?
+pub enum NetContext {
+    Any,
+    ClientToServer,
+    ServerToClient,
+    ServerToServer,
+}
+
+pub struct NetMsgReceiver<T: NetMsg<S>, S: NetMessageSchema> { 
+    pub receiver: Receiver<(Vec<u8>, Identity)>,
+    pub convert: Box<dyn Fn(Vec<u8>)
+                         -> Result<T, Box<dyn Error>>>,
+    hack: Option<S>,
+}
+impl<T, S> NetMsgReceiver<T, S> where T : NetMsg<S>, S: NetMessageSchema {
+    pub fn new< F: 'static + Fn(Vec<u8>)
+                        -> Result<T, Box<dyn Error>> 
+                >(receiver: Receiver<(Vec<u8>, Identity)>, func: F) 
+                                                                    -> Self {
+        NetMsgReceiver {
+            receiver: receiver,
+            convert: Box::new(func),
+            hack: None,
+        }
+    }
+    pub fn poll(&self) -> Result<(T, Identity), Box<dyn Error>> {
+        let tuple = self.receiver.try_recv()?;
+        Ok(((*self.convert)(tuple.0)?, tuple.1))
+    }
+}
+
+pub trait NetMessageSchema : Sized{
+    // Associated type for an enum which can represent any one of our message types;
+
+    // Required hack so that the NetMesg trait thinks we need to know what our schema type is.
+    fn phantom_function() -> () {()}
+
+    fn construct_packet<T: NetMsg<Self>>(message: &T, send_to: SocketAddr) -> Result<Packet, Box<dyn Error>> {
+        message.construct_packet(send_to)
+    }
+
+    fn new() -> Self;
+    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>>;
+
+    fn get_receiver<T: NetMsg<Self>>(&mut self)
+        -> Result<NetMsgReceiver<T, Self>, Box<dyn Error>> {
+        Ok(NetMsgReceiver::new( self.get_raw_receiver(T::packet_type_id())?, |buf| {
+            Ok(bincode::deserialize(&buf)?)
+        }))
+    }
+    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>>;
+}
+
+/// A NetMsg is a trait with enough information in its impl to send the 
+/// struct it's implemented on over the network, no other details required.
+/// The idea is to declaratively describe which kind of packets need which 
+pub trait NetMsg<T:NetMessageSchema> : Sized + Serialize + DeserializeOwned + Clone { 
+    #[inline(always)]
+    fn packet_type_id() -> u8;
+    #[inline(always)]
+    fn required_guarantees() -> PacketGuarantees;
+    #[inline(always)]
+    fn which_stream() -> StreamSelector;
+
+    fn construct_packet(&self, send_to: SocketAddr) -> Result<Packet, Box<dyn Error>> {
+        // Pretend we're using type T.
+        let _nil = T::phantom_function();
+
+        // Start by writing our tag.
+        let mut encoded: Vec<u8> = Self::packet_type_id().to_le_bytes().to_vec();
+
+        // Then, write our data.
+        {
+            encoded.append(&mut bincode::serialize(&self)?);
+        }
+
+        // Branch on our message properties to figure out what kind of packet to construct.
+        Ok(match Self::required_guarantees() {
+            PacketGuarantees::UnreliableUnordered => {
+                Packet::unreliable(send_to, encoded)
+            },
+            PacketGuarantees::UnreliableSequenced => {
+                match Self::which_stream() {
+                    StreamSelector::Any => Packet::unreliable_sequenced(send_to, encoded, None),
+                    StreamSelector::Specific(id) => Packet::unreliable_sequenced(send_to, encoded, Some(id)),
+                }
+            },
+            PacketGuarantees::ReliableUnordered => {
+                Packet::reliable_unordered(send_to, encoded)
+            },
+            PacketGuarantees::ReliableOrdered => {
+                match Self::which_stream() {
+                    StreamSelector::Any => Packet::reliable_ordered(send_to, encoded, None),
+                    StreamSelector::Specific(id) => Packet::reliable_ordered(send_to, encoded, Some(id)),
+                }
+            },
+            PacketGuarantees::ReliableSequenced => {
+                match Self::which_stream() {
+                    StreamSelector::Any => Packet::reliable_sequenced(send_to, encoded, None),
+                    StreamSelector::Specific(id) => Packet::reliable_sequenced(send_to, encoded, Some(id)),
+                }
+            },
+        })
+    }
+}
+
+macro_rules! impl_netmsg {
+    ($message:ident, $schema:ty, $id:expr, $guarantee:ident) => {
+        impl NetMsg<$schema> for $message { 
+            #[inline(always)]
+            fn packet_type_id() -> u8 { $id }
+            #[inline(always)]
+            fn required_guarantees() -> PacketGuarantees { PacketGuarantees::$guarantee }
+            #[inline(always)]
+            fn which_stream() -> StreamSelector { StreamSelector::Any }
+        }
+    };
+    ($message:ident, $schema:ty, $id:expr, $guarantee:ident, $stream:expr) => {
+        impl NetMsg<$schema> for $message { 
+            #[inline(always)]
+            fn packet_type_id() -> u8 { $id }
+            #[inline(always)]
+            fn required_guarantees() -> PacketGuarantees { PacketGuarantees::$guarantee }
+            #[inline(always)]
+            fn which_stream() -> StreamSelector { StreamSelector::Specific($stream) }
+        }
+    };
+}
+
+#[allow(dead_code)]
+struct TestSchema {}
+impl NetMessageSchema for TestSchema {
+    fn new() -> Self {
+        TestSchema{}
+    }
+    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
+        unimplemented!()
+    }
+    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
+        unimplemented!()
+    }
+}
+
+#[allow(dead_code)]
+struct TestSchema2 {}
+impl NetMessageSchema for TestSchema2 {
+    fn new() -> Self {
+        TestSchema2{}
+    }
+    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
+        unimplemented!()
+    }
+    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
+        unimplemented!()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct TestMacroCompiles {
+    field: u8,
+}
+
+impl_netmsg!(TestMacroCompiles, TestSchema, 1, ReliableOrdered, 27);
+impl_netmsg!(TestMacroCompiles, TestSchema2, 50, UnreliableUnordered);
+
+#[test]
+fn test_schema_separation() {
+    let addr: SocketAddr = "0.0.0.0:5000".parse().unwrap();
+    let message = TestMacroCompiles{field:143};
+    assert_ne!(TestSchema::construct_packet(&message, addr).unwrap(), 
+                TestSchema2::construct_packet(&message, addr).unwrap());
+}
+
+/// General-purpose implementation to be wrapped by ClientMessage, ServerMessage, etc. 
+struct SchemaInner { 
+    channels: Vec<(Sender<(Vec<u8>, Identity)>, Receiver<(Vec<u8>, Identity)>)>,
+}
+impl NetMessageSchema for SchemaInner {
+    fn new() -> Self {
+        let mut channels: Vec<(Sender<(Vec<u8>, Identity)>, Receiver<(Vec<u8>, Identity)>)> = Vec::with_capacity(256);
+        for i in 0..256 { 
+            channels.push(bounded(1024));
+        }
+        SchemaInner{
+            channels:channels,
+        }
+    }
+    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
+        Ok(self.channels.get(id as usize).unwrap().1.clone())
+    }
+    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
+        if buf.len() == 0 {
+            //TODO: error here.
+            return Ok(());
+        }
+        // Interpret the first byte as a packet type.
+        let split_buf = buf.split_first().unwrap();
+        let ty : u8 = *split_buf.0;
+
+        self.channels[ty as usize].0.send((split_buf.1.to_vec(), client))?;
+        Ok(())
+    }
+}
+
+// ------ Actual concrete NetMsg schemas we will use start here. ------
+
+pub struct ServerToClient { 
+    inner: SchemaInner,
+}
+impl NetMessageSchema for ServerToClient {
+    fn new() -> Self {
+        ServerToClient {
+            inner: SchemaInner::new(),
+        }
+    }
+    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
+        self.inner.get_raw_receiver(id)
+    }
+    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
+        self.inner.process_incoming(buf, client)
+    }
+}
+
+pub struct ClientToServer { 
+    inner: SchemaInner,
+}
+impl NetMessageSchema for ClientToServer {
+    fn new() -> Self {
+        ClientToServer {
+            inner: SchemaInner::new(),
+        }
+    }
+    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
+        self.inner.get_raw_receiver(id)
+    }
+    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
+        self.inner.process_incoming(buf, client)
+    }
+}
+
 /// A message from a client to the server to set up player properties - i.e. name, attention radius, etc.
 #[derive(Clone, PartialEq)]
 pub enum ClientSetupMessage {
@@ -331,7 +595,9 @@ pub struct ConnectionToServer {
 
 pub struct ClientNet {
     keys: SelfIdentity,
-    pub servers: HashMap<SocketAddr, ConnectionToServer>, 
+    pub servers: HashMap<SocketAddr, ConnectionToServer>,
+    pub incoming_schema: ServerToClient,
+    pub outgoing_schema: ClientToServer, 
     //addr: SocketAddr,
 }
 
@@ -340,6 +606,8 @@ impl ClientNet {
         ClientNet {
             keys: identity.clone(),
             servers: HashMap::new(),
+            incoming_schema: ServerToClient::new(),
+            outgoing_schema: ClientToServer::new(), 
             //addr: addr,
         }
     }
@@ -440,9 +708,62 @@ impl ClientNet {
         }
         let _thread = thread::spawn(move || socket.start_polling());
         
-        sender.send(Packet::reliable_unordered(server_addr, b"Hello, world!".to_vec()))?;
+        //sender.send(Packet::reliable_unordered(server_addr, b"Hello, world!".to_vec()))?;
 
         Ok(())
+    }
+    
+    pub fn process(&mut self) -> Result<(), Box<dyn Error>> {
+        let mut to_remove : Vec<SocketAddr> = Vec::new();
+        // Check for packets.
+        for serv in self.servers.iter() {
+            loop {
+                // Check for packets.
+                match serv.1.receiver.try_recv() {
+                    Ok(event) => match event {
+                        SocketEvent::Packet(packet) => {
+                            let msg = packet.payload();
+                            //Test stuff
+                            let text = String::from_utf8_lossy(msg);
+                            let ip = packet.addr().ip();
+                            info!("Received {:?} from {:?}", text, ip);
+                            //Actually process the packet.
+                            self.incoming_schema.process_incoming(&msg.to_vec(), 
+                                                                    serv.1.identity.clone())?;
+                        },
+                        SocketEvent::Timeout(server_address) => {
+                            info!("Server timed out: {:?}", server_address);
+                            to_remove.push(server_address);
+                        },
+                        SocketEvent::Connect(server_address) => {
+                        },
+                    },
+                    Err(TryRecvError::Empty) => { 
+                        break; 
+                    },
+                    Err(e) => {
+                        error!("Other TryRecvError: {:?}", e);
+                        return Err(Box::new(e));
+                    },
+                }
+            }
+        }
+        for addr in to_remove {
+            self.servers.remove(&addr);
+        }
+        Ok(())
+    }
+    pub fn send_to_server<T:NetMsg<ClientToServer>>(&mut self, message: &T) -> Result<(), Box<dyn Error>> {
+        for serv in self.servers.iter() {
+            let packet = ClientToServer::construct_packet(message, *serv.0)?;
+            serv.1.sender.send(packet)?;
+        }
+        Ok(())
+    }
+    pub fn listen_from_servers<T>(&mut self)
+                -> Result< NetMsgReceiver<T, ServerToClient>, Box<dyn Error>> 
+                                                where T: NetMsg<ServerToClient> { 
+        self.incoming_schema.get_receiver::<T>()
     }
 }
 
@@ -459,16 +780,16 @@ pub struct ConnectionToClient {
     pub name: String,
 }
 
-struct IncompleteClient { 
+struct IncompleteClient {
     addr: SocketAddr,
     /// Client sends prelude first so this doesn't need to be an option type.
-    clients_prelude: HandshakePrelude, 
+    clients_prelude: HandshakePrelude,
     our_prelude_to_client: HandshakePrelude,
-    they_accepted_us: bool, 
+    they_accepted_us: bool,
     we_accepted_them: bool,
 }
 
-impl IncompleteClient { 
+impl IncompleteClient {
     fn new(addr: SocketAddr, clients_prelude: HandshakePrelude, our_prelude_to_client: HandshakePrelude) -> Self {
         IncompleteClient {
             addr:addr,
@@ -513,6 +834,11 @@ impl IncompleteClient {
     }
 }
 
+pub struct NewClientEvent {
+    pub identity: PublicKey,
+    pub addr: SocketAddr,
+}
+
 pub struct ServerNet {
     keys: SelfIdentity,
     pub clients: HashMap<SocketAddr, ConnectionToClient>,
@@ -522,15 +848,21 @@ pub struct ServerNet {
     pub our_address: SocketAddr,
     sender: Sender<Packet>,
     incoming: Receiver<SocketEvent>,
+    from_client_schema: ClientToServer,
+    to_client_schema: ServerToClient, 
+    pub new_client_receiver: Receiver<NewClientEvent>,
+    new_client_sender: Sender<NewClientEvent>,
 }
 
-impl ServerNet { 
+impl ServerNet {
     pub fn new(identity: &SelfIdentity, our_address: SocketAddr) -> Result<Self, Box<dyn Error>> { 
 
         let mut socket = Socket::bind(our_address)?;
 
         let (sender, receiver) : (Sender<Packet>,Receiver<SocketEvent>) 
                                   = (socket.get_packet_sender(), socket.get_event_receiver());
+        let (new_client_sender, new_client_receiver) : (Sender<NewClientEvent>,Receiver<NewClientEvent>) 
+                                    = crossbeam_channel::unbounded();
         let _thread = thread::spawn(move || socket.start_polling());
         
         info!("Initiating server on {:?}", our_address);
@@ -543,6 +875,10 @@ impl ServerNet {
             our_address:our_address,
             sender:sender,
             incoming:receiver,
+            from_client_schema: ClientToServer::new(),
+            to_client_schema: ServerToClient::new(),
+            new_client_receiver: new_client_receiver,
+            new_client_sender: new_client_sender,
         })
     }
 
@@ -580,17 +916,23 @@ impl ServerNet {
             if is_done { 
                 info!("{:?} is now authorized.", packet.addr());
                 let client = self.handshake_clients.get(&packet.addr()).unwrap().complete();
+                let ident = client.identity.clone();
+                self.client_identities.insert(client.identity, packet.addr());
                 self.clients.insert(packet.addr(), client);
                 self.handshake_clients.remove(&packet.addr());
+                self.new_client_sender.send(NewClientEvent{identity: ident, addr: packet.addr()})?;
             }
         }
         else if self.clients.contains_key(&packet.addr()) {
             //This is the block where we handle traffic from already-authenticated clients.
             let msg = packet.payload();
-
-            let msg = String::from_utf8_lossy(msg);
+            //Test stuff
+            let text = String::from_utf8_lossy(msg);
             let ip = packet.addr().ip();
-            info!("Received {:?} from {:?}", msg, ip);
+            info!("Received {:?} from {:?}", text, ip);
+            //Actually process the packet.
+            self.from_client_schema.process_incoming(&msg.to_vec(), 
+                                                        self.clients.get(&packet.addr()).unwrap().identity.clone())?;
         }
         else {
             warn!("Abnormal packet from {:?}", packet.addr());
@@ -598,7 +940,7 @@ impl ServerNet {
         Ok(())
     }
 
-    pub fn poll(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn process(&mut self) -> Result<(), Box<dyn Error>> {
         // Check for a packet. 
         loop { 
             match self.incoming.try_recv() {
@@ -657,5 +999,25 @@ impl ServerNet {
             }
         }
         Ok(())
+    }
+    pub fn send_to_client<T:NetMsg<ServerToClient>>(&mut self, message: &T, client: &Identity) -> Result<(), Box<dyn Error>> {
+        let packet = ServerToClient::construct_packet(message, *self.client_identities.get(client).unwrap())?;
+        self.sender.send(packet)?;
+        Ok(())
+    }
+    pub fn broadcast_to_clients<T:NetMsg<ServerToClient>>(&mut self, message: &T) -> Result<(), Box<dyn Error>> {
+        for client in self.clients.iter() {
+            let packet = ServerToClient::construct_packet(message, *client.0)?;
+            self.sender.send(packet)?;
+        }
+        Ok(())
+    }
+    pub fn listen_from_clients<T>(&mut self)
+                -> Result< NetMsgReceiver<T, ClientToServer>, Box<dyn Error>> 
+                                                where T: NetMsg<ClientToServer> { 
+        self.from_client_schema.get_receiver::<T>()
+    }
+    pub fn listen_new_clients(&mut self) -> Receiver<NewClientEvent> { 
+        self.new_client_receiver.clone()
     }
 }
