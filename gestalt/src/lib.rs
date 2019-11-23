@@ -155,11 +155,17 @@ pub fn main() {
         let mut client_net = ClientNet::new(&our_identity);
         client_net.connect(join_ip_inner).unwrap();
         let listener = client_net.listen_from_servers::<HelloMessage>().unwrap();
-        let hello = HelloMessage::new();
-        client_net.send_to_server(&hello).unwrap();
+
+        let mut sent_test_message = false;
         //Early development - just to test.
         while Instant::now() - start_time < Duration::from_secs(45) {
             client_net.process().unwrap();
+            if !sent_test_message && Instant::now() - start_time >= Duration::from_secs(5) {
+                let hello = HelloMessage::new();
+                client_net.send_to_server(&hello).unwrap();
+                sent_test_message = true
+            }
+
             match listener.poll() { 
                 Ok(tuple) => {
                     println!("Server said: {}", tuple.0.hello);

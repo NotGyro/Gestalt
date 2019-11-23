@@ -2,14 +2,12 @@ use std::boxed::Box;
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::result::Result;
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -30,8 +28,6 @@ use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use bincode::serialize;
 use bincode::deserialize;
-
-use crate::entity::EntityID;
 
 //lazy_static! {
     // This is an example for using doc comment attributes
@@ -110,7 +106,7 @@ impl HandshakeSignature {
         let version = semver::Version::parse(PROTOCOL_VERSION)?;
         HandshakeSignature::new(ident, role, &their_prelude.please_sign.to_vec(), (version.major, version.minor, version.patch))
     }
-    pub fn new(ident: SelfIdentity, role: NetworkRole, nonce: &Vec<u8>, version: (u64, u64, u64)) -> Result<Self, Box<dyn Error>> { 
+    pub fn new(ident: SelfIdentity, _role: NetworkRole, nonce: &Vec<u8>, _version: (u64, u64, u64)) -> Result<Self, Box<dyn Error>> { 
 
         let mut buf: Vec<u8> = Vec::new();
         let version = semver::Version::parse(PROTOCOL_VERSION)?;
@@ -327,7 +323,7 @@ pub struct NetMsgReceiver<T: NetMsg<S>, S: NetMessageSchema> {
     pub receiver: Receiver<(Vec<u8>, Identity)>,
     pub convert: Box<dyn Fn(Vec<u8>)
                          -> Result<T, Box<dyn Error>>>,
-    hack: Option<S>,
+    _hack: Option<S>,
 }
 impl<T, S> NetMsgReceiver<T, S> where T : NetMsg<S>, S: NetMessageSchema {
     pub fn new< F: 'static + Fn(Vec<u8>)
@@ -337,7 +333,7 @@ impl<T, S> NetMsgReceiver<T, S> where T : NetMsg<S>, S: NetMessageSchema {
         NetMsgReceiver {
             receiver: receiver,
             convert: Box::new(func),
-            hack: None,
+            _hack: None,
         }
     }
     pub fn poll(&self) -> Result<(T, Identity), Box<dyn Error>> {
@@ -444,50 +440,6 @@ macro_rules! impl_netmsg {
     };
 }
 
-#[allow(dead_code)]
-struct TestSchema {}
-impl NetMessageSchema for TestSchema {
-    fn new() -> Self {
-        TestSchema{}
-    }
-    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
-        unimplemented!()
-    }
-    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
-        unimplemented!()
-    }
-}
-
-#[allow(dead_code)]
-struct TestSchema2 {}
-impl NetMessageSchema for TestSchema2 {
-    fn new() -> Self {
-        TestSchema2{}
-    }
-    fn get_raw_receiver(&mut self, id: u8) -> Result<Receiver<(Vec<u8>, Identity)>, Box<dyn Error>> {
-        unimplemented!()
-    }
-    fn process_incoming(&mut self, buf: &Vec<u8>, client: Identity) -> Result<(), Box<dyn Error>> {
-        unimplemented!()
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct TestMacroCompiles {
-    field: u8,
-}
-
-impl_netmsg!(TestMacroCompiles, TestSchema, 1, ReliableOrdered, 27);
-impl_netmsg!(TestMacroCompiles, TestSchema2, 50, UnreliableUnordered);
-
-#[test]
-fn test_schema_separation() {
-    let addr: SocketAddr = "0.0.0.0:5000".parse().unwrap();
-    let message = TestMacroCompiles{field:143};
-    assert_ne!(TestSchema::construct_packet(&message, addr).unwrap(), 
-                TestSchema2::construct_packet(&message, addr).unwrap());
-}
-
 /// General-purpose implementation to be wrapped by ClientMessage, ServerMessage, etc. 
 struct SchemaInner { 
     channels: Vec<(Sender<(Vec<u8>, Identity)>, Receiver<(Vec<u8>, Identity)>)>,
@@ -495,7 +447,7 @@ struct SchemaInner {
 impl NetMessageSchema for SchemaInner {
     fn new() -> Self {
         let mut channels: Vec<(Sender<(Vec<u8>, Identity)>, Receiver<(Vec<u8>, Identity)>)> = Vec::with_capacity(256);
-        for i in 0..256 { 
+        for _ in 0..256 { 
             channels.push(bounded(1024));
         }
         SchemaInner{
@@ -618,6 +570,7 @@ impl ClientNet {
         // Describe our instance and come up with a random nonce so that we can announce ourselves to the server,
         // and also have something they can verify themselves with that can't be copied by an observer.
         let our_prelude = HandshakePrelude::new(self.keys.public_key.clone(),NetworkRole::Client)?;
+        thread::sleep(Duration::from_millis(5));
         socket.send(Packet::reliable_unordered(server_addr, serialize(&HandshakeMessage::Prelude(our_prelude))?))?;
 
         // This will become Some() later if we get a prelude from them.
@@ -627,6 +580,8 @@ impl ClientNet {
 
         let mut server_is_valid = false;
         let mut server_accepted_us = false;
+
+        info!("Connecting to {:?}", server_addr);
 
         // In a loop, poll the socket for handshake packets - until timeout.
         let start_connect = Instant::now();
@@ -639,19 +594,21 @@ impl ClientNet {
                             let message : HandshakeMessage = deserialize(packet.payload())?;
                             info!("Got another handshake message from {:?}! \n Its contents are: {:?}", packet.addr(), message);
                             match message {
-                                HandshakeMessage::Prelude(their_prelude) => { 
+                                HandshakeMessage::Prelude(their_prelude) => {
                                     info!("Received server's handshake, sending our signature.");
                                     let sig = HandshakeSignature::reply_to(self.keys.clone(), NetworkRole::Client, &their_prelude)?;
                                     socket.send(Packet::reliable_unordered(server_addr, serialize(&HandshakeMessage::Signature(sig))?))?;
                                     server_prelude = Some(their_prelude);
                                 },
-                                HandshakeMessage::Signature(their_sig) => { 
+                                HandshakeMessage::Signature(their_sig) => {
+                                    info!("Got a signature from the server.");
                                     // Store prelude and sig for later in case they come in the wrong order.
                                     server_sig = Some(their_sig);
                                 },
                                 HandshakeMessage::Response(response) => match response {
                                     //Handshake accepted! We're good to go.
                                     HandshakeResponse::Accepted => {
+                                        info!("Server accepted our connection!");
                                         server_accepted_us = true;
                                     },
                                     _ => return Err(Box::new(ClientConnectError::Rejected(response))),
@@ -667,29 +624,33 @@ impl ClientNet {
             if !server_is_valid {
                 //If they have sent us both a prelude and a sig, try to verify.
                 if let Some(their_prelude) = server_prelude {
+                    info!("We do have a server prelude");
                     if let Some(their_sig) = server_sig {
+                        info!("We do have a server signature");
                         if their_sig.verify(their_prelude.public_key, &our_prelude.please_sign.to_vec(), their_prelude.version) {
                             let response = HandshakeMessage::Response(HandshakeResponse::Accepted);
                             socket.send(Packet::reliable_unordered(server_addr, serialize(&response)?))?;
+                            info!("Server's sig verified data! Setting server_is_valid = true");
                             server_is_valid = true;
                         }
                         else {
                             //The sig they sent does not verify.
                             let response = HandshakeMessage::Response(HandshakeResponse::DeniedCannotVerify);
                             socket.send(Packet::reliable_unordered(server_addr, serialize(&response)?))?;
+                            error!("Server's sig did not verify data.");
                             return Err(Box::new(ClientConnectError::CouldNotVerifyServer));
                         }
                     }
                 }
             }
 
-            // Timeout
-            if Instant::now() - start_connect >= Duration::from_secs(4) {
-                return Err(Box::new(ClientConnectError::HandshakeTimeout));
-            }
             // Is handshake successful?
             if server_is_valid && server_accepted_us {
                 break;
+            }
+            // Timeout
+            if Instant::now() - start_connect >= Duration::from_secs(4) {
+                return Err(Box::new(ClientConnectError::HandshakeTimeout));
             }
         }
         let (sender, receiver) : (Sender<Packet>,Receiver<SocketEvent>) 
@@ -735,7 +696,7 @@ impl ClientNet {
                             info!("Server timed out: {:?}", server_address);
                             to_remove.push(server_address);
                         },
-                        SocketEvent::Connect(server_address) => {
+                        SocketEvent::Connect(_) => {
                         },
                     },
                     Err(TryRecvError::Empty) => { 
@@ -800,7 +761,7 @@ impl IncompleteClient {
         }
     }
     /// Returns Ok(true) if this client is ready to go.
-    fn process(&mut self, message: HandshakeMessage, packet_sender: Sender<Packet>) -> Result<bool, Box<dyn Error>> {
+    fn process(&mut self, message: HandshakeMessage, packet_sender: &Sender<Packet>) -> Result<bool, Box<dyn Error>> {
         match message {
             HandshakeMessage::Signature(their_sig) => { 
                 // Store prelude and sig for later in case they come in the wrong order.
@@ -849,7 +810,7 @@ pub struct ServerNet {
     sender: Sender<Packet>,
     incoming: Receiver<SocketEvent>,
     from_client_schema: ClientToServer,
-    to_client_schema: ServerToClient, 
+    _to_client_schema: ServerToClient, 
     pub new_client_receiver: Receiver<NewClientEvent>,
     new_client_sender: Sender<NewClientEvent>,
 }
@@ -876,7 +837,7 @@ impl ServerNet {
             sender:sender,
             incoming:receiver,
             from_client_schema: ClientToServer::new(),
-            to_client_schema: ServerToClient::new(),
+            _to_client_schema: ServerToClient::new(),
             new_client_receiver: new_client_receiver,
             new_client_sender: new_client_sender,
         })
@@ -890,8 +851,9 @@ impl ServerNet {
         //They have been recorded as "Connecting" but have not yet sent a package.
         else if self.preauth_clients.contains(&packet.addr()) {
             let handshake_message : HandshakeMessage = deserialize(packet.payload())?;
-            //They have to send us a prelude *first*. 
+            //They have to send us a prelude *first*.
             if let HandshakeMessage::Prelude(prelude) = handshake_message {
+                info!("Got a handshake message from client!");
                 //We got a prelude, now send them one of our own.
                 let our_prelude = HandshakePrelude::new(self.keys.public_key.clone(),NetworkRole::Server)?;
                 self.sender.send(Packet::reliable_unordered(packet.addr().clone(), 
@@ -904,13 +866,14 @@ impl ServerNet {
                 self.preauth_clients.remove(&packet.addr());
                 self.handshake_clients.insert(packet.addr(), 
                     IncompleteClient::new(packet.addr(), prelude, our_prelude));
+                info!("Putting client {:?} into handshake stage.", packet.addr());
             }
         }
         else if self.handshake_clients.contains_key(&packet.addr()) {
             let handshake_message : HandshakeMessage = deserialize(packet.payload())?;
             info!("Got another handshake message from {:?}! \n Its contents are: {:?}", packet.addr(), handshake_message);
             // Safe to unwrap - look at the if block we're in.
-            let is_done = self.handshake_clients.get_mut(&packet.addr()).unwrap().process(handshake_message, self.sender.clone())?;
+            let is_done = self.handshake_clients.get_mut(&packet.addr()).unwrap().process(handshake_message, &self.sender)?;
             
             // This handshake process completed, add it to the real clients list.
             if is_done { 
