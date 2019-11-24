@@ -591,21 +591,27 @@ impl Iterator for VoxelAxisIter {
 //VoxelAxis::NegaY => 4,
 //VoxelAxis::NegaZ => 5,
 
+#[allow(unused_macros)]
 macro_rules! posi_x_index {
     () => { 0 }
 }
+#[allow(unused_macros)]
 macro_rules! posi_y_index {
     () => { 1 }
 }
+#[allow(unused_macros)]
 macro_rules! posi_z_index {
     () => { 2 }
 }
+#[allow(unused_macros)]
 macro_rules! nega_x_index {
     () => { 3 }
 }
+#[allow(unused_macros)]
 macro_rules! nega_y_index {
     () => { 4 }
 }
+#[allow(unused_macros)]
 macro_rules! nega_z_index {
     () => { 5 }
 }

@@ -3,7 +3,7 @@
 use phosphor::geometry::{Mesh, VertexPositionObjectId};
 use phosphor::renderer::RenderInfo;
 
-use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode, SubdivNode, SubdivVoxelSource};
+use crate::voxel::subdivstorage::{NaiveVoxelOctree, SubdivNode};
 use crate::world::{CHUNK_SIZE_F32, CHUNK_SCALE};
 use crate::voxel::subdivmath::{OctPos, Scale};
 
@@ -33,7 +33,7 @@ impl Chunk {
     /// Constructs a new (empty) chunk.
     pub fn new(id: u32, position: (i32, i32, i32), dimension_id: u32) -> Chunk {
         Chunk {
-            data: NaiveVoxelOctree{scale : CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(0)},
+            data: NaiveVoxelOctree::new(0, CHUNK_SCALE),
             position,
             dimension_id,
             mesh: Mesh::new(),
@@ -57,14 +57,14 @@ impl Chunk {
         )
     }
 
-    pub fn generate_occlusion_mesh(&mut self, mut min_scale: Scale) {
-        match self.data.get(opos!((0, 0, 0) @ CHUNK_SCALE)).unwrap() {
-            SubdivNode::Leaf(l) => {
-                if l == 0 {
+    pub fn generate_occlusion_mesh(&mut self, _min_scale: Scale) {
+        match self.data.root {
+            SubdivNode::Leaf(leaf) => {
+                if leaf == 0 {
                     return; // air-only chunk
                 }
             }
-            _ => {}
+            SubdivNode::Branch(_) => {}
         }
 
         if self.cached_occluder_verts.is_none() {
@@ -74,8 +74,8 @@ impl Chunk {
             let base_y = self.position.1 as f32 * CHUNK_SIZE_F32;
             let base_z = self.position.2 as f32 * CHUNK_SIZE_F32;
 
-            while min_scale > 0 {
-                self.data.root.traverse_to_depth(opos!((0, 0, 0) @ CHUNK_SCALE), &mut |opos: OctPos<u32>, leaf: u8| {
+            //while min_scale > 0 {
+                self.data.traverse(opos!((0, 0, 0) @ CHUNK_SCALE), &mut |opos: OctPos<u32>, leaf: u8| {
                     if leaf == 0 { return; }
 
                     let s = (2u32.pow(opos.scale as u32)) as f32;
@@ -91,17 +91,18 @@ impl Chunk {
                     verts.push(VertexPositionObjectId { position: [ x+s, y,   z+s ], id: self.id }); // + - +  5
                     verts.push(VertexPositionObjectId { position: [ x+s, y+s, z   ], id: self.id }); // + + -  6
                     verts.push(VertexPositionObjectId { position: [ x+s, y+s, z+s ], id: self.id }); // + + +  7
-                }, min_scale);
+                });
 
-                if verts.len() > 0 {
-                    // geometry generated!
-                    break;
-                }
-                else {
-                    // no full voxels found at this scale, search finer
-                    min_scale -= 1;
-                }
-            }
+//                if verts.len() > 0 {
+//                    println!("fuck");
+//                    // geometry generated!
+//                    break;
+//                }
+//                else {
+//                    // no full voxels found at this scale, search finer
+//                    min_scale -= 1;
+//                }
+//            }
 
 
             self.cached_occluder_verts = Some(verts);

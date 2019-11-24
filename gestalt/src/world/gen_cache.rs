@@ -6,8 +6,8 @@ use std::fs::{File, create_dir_all};
 use std::io::{Write, Read};
 use std::path::Path;
 
-use crate::world::{Chunk, CHUNK_SIZE};
-use crate::voxel::subdivstorage::{SubdivVoxelSource, NaiveVoxelOctree, NaiveOctreeNode, SubdivVoxelDrain};
+use crate::world::{Chunk, CHUNK_SIZE, CHUNK_SCALE};
+use crate::voxel::subdivstorage::{SubdivSource, NaiveVoxelOctree, SubdivDrain};
 use crate::voxel::subdivstorage::SubdivNode::Leaf;
 
 
@@ -43,7 +43,7 @@ pub fn load_chunk_from_disk(seed: u32, pos: (i32, i32, i32)) -> Option<NaiveVoxe
         let mut file = File::open(path+&filename).unwrap();
         let mut data = [0u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
         file.read(&mut data).unwrap();
-        let mut tree = NaiveVoxelOctree { scale: 6 , root: NaiveOctreeNode::new_leaf(0) };
+        let mut tree = NaiveVoxelOctree::new(0, CHUNK_SCALE);
         for x in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {

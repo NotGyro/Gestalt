@@ -9,7 +9,7 @@ use phosphor::geometry::{Mesh, DeferredShadingVertex, VertexGroup, Material};
 
 use crate::world::Chunk;
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32};
-use crate::voxel::subdivstorage::{SubdivVoxelSource, SubdivNode};
+use crate::voxel::subdivstorage::{SubdivSource, SubdivNode};
 
 
 /// Struct used internally to represent unoptimized quads.

@@ -2,7 +2,7 @@
 
 use cgmath::{Vector3, MetricSpace};
 
-use crate::voxel::subdivstorage::{NaiveVoxelOctree, NaiveOctreeNode, SubdivVoxelDrain};
+use crate::voxel::subdivstorage::{NaiveVoxelOctree, SubdivDrain};
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SCALE};
 use toolbox::noise::OctavePerlinNoise;
 
@@ -40,7 +40,7 @@ impl SphereGenerator {
 #[allow(dead_code)]
 impl ChunkGenerator for SphereGenerator {
     fn generate(&self, _pos: (i32, i32, i32)) -> NaiveVoxelOctree<u8, ()> {
-        let mut tree = NaiveVoxelOctree{scale: CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(0)};
+        let mut tree = NaiveVoxelOctree::new(0, CHUNK_SCALE);
 
         let center = Vector3::new(CHUNK_SIZE_F32 / 2.0, CHUNK_SIZE_F32 / 2.0, CHUNK_SIZE_F32 / 2.0);
 
@@ -89,7 +89,7 @@ const GRASS_ID: u8 = 3;
 impl ChunkGenerator for PerlinGenerator {
     /// See [ChunkGenerator]
     fn generate(&self, pos: (i32, i32, i32)) -> NaiveVoxelOctree<u8, ()> {
-        let mut tree = NaiveVoxelOctree{scale : CHUNK_SCALE , root: NaiveOctreeNode::new_leaf(0)};
+        let mut tree = NaiveVoxelOctree::new(0, CHUNK_SCALE);
 
         const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
 
