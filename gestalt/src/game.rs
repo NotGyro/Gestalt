@@ -5,7 +5,7 @@ use std::sync::atomic::{Ordering, AtomicU64};
 use std::thread;
 
 use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
-use winit::{Event, WindowEvent, DeviceEvent, ElementState, EventsLoop, VirtualKeyCode, MouseButton};
+use winit::{Event, WindowEvent, DeviceEvent, ElementState, EventsLoop, VirtualKeyCode, MouseButton, KeyboardInput};
 use winit::dpi::LogicalSize;
 
 use phosphor::geometry::VertexGroup;
@@ -18,7 +18,7 @@ use crate::metrics::{FrameMetrics, ChunkMetrics};
 use crate::player::Player;
 use crate::world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_MESHING, CHUNK_STATE_CLEAN, CHUNK_STATE_GENERATING};
-use imgui::{FontSource, FontConfig, FontGlyphRanges, Condition, ImString, im_str};
+use imgui::{FontSource, FontConfig, FontGlyphRanges, Condition, ImString, im_str, WindowFlags, StyleColor};
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
@@ -47,6 +47,8 @@ impl Game {
     pub fn new() -> Game {
         let mut imgui = imgui::Context::create();
         imgui.set_ini_filename(None);
+        imgui.io_mut().config_flags |= imgui::ConfigFlags::DOCKING_ENABLE;
+        imgui.io_mut().docking_with_shift = true;
 
         if let Some(backend) = crate::clipboard_backend::init() {
             imgui.set_clipboard_backend(Box::new(backend));
@@ -187,6 +189,18 @@ impl Game {
                                 self.input_state.right_mouse_pressed = false;
                             }
                         }
+                    }
+                },
+                Event::DeviceEvent { event: DeviceEvent::Key(KeyboardInput { state, virtual_keycode: Some(key), .. }), .. } => {
+                    let io = self.imgui.io_mut();
+                    let pressed = state == ElementState::Pressed;
+                    io.keys_down[key as usize] = pressed;
+                    match key {
+                        VirtualKeyCode::LShift | VirtualKeyCode::RShift => io.key_shift = pressed,
+                        VirtualKeyCode::LControl | VirtualKeyCode::RControl => io.key_ctrl = pressed,
+                        VirtualKeyCode::LAlt | VirtualKeyCode::RAlt => io.key_alt = pressed,
+                        VirtualKeyCode::LWin | VirtualKeyCode::RWin => io.key_super = pressed,
+                        _ => (),
                     }
                 },
                 _ => {}
@@ -399,14 +413,45 @@ impl Game {
             _ => unreachable!()
         };
 
+        // TODO: fix imgui mutable borrow issue?
         let metrics = self.frame_metrics.last_frame_text.clone();
         let chunk_metrics = self.chunk_metrics.clone();
         let pos = self.player.position;
+        let tonemap_info = self.renderer.info.tonemapping_info.clone();
+        let mut histogram_values = [0f32; 128];
+        for (i, u) in self.renderer.info.histogram_compute.lock().bins.iter().enumerate() {
+            histogram_values[i] = *u as f32;
+        }
+        let mut exp_adj_slider_val = tonemap_info.exposure_adjustment;
+        //let dimensions = [self.renderer.info.dimensions[0] as f32, self.renderer.info.dimensions[1] as f32];
         let mut ui = self.imgui.frame();
-        let run_ui = |ui: &mut imgui::Ui| {
+        let mut run_ui = |ui: &mut imgui::Ui| {
+//            {
+//                let tokens = vec![
+//                    ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0])),
+//                    ui.push_style_var(StyleVar::WindowRounding(0.0)),
+//                    ui.push_style_var(StyleVar::WindowBorderSize(0.0)),
+//                ];
+//                imgui::Window::new(im_str!("DockSpace"))
+//                    .position([0.0, 0.0], Condition::Always)
+//                    .size(dimensions, Condition::Always)
+//                    .flags(WindowFlags::NO_DOCKING | WindowFlags::NO_TITLE_BAR | WindowFlags::NO_COLLAPSE | WindowFlags::NO_RESIZE
+//                           | WindowFlags::NO_MOVE | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS | WindowFlags::NO_NAV_FOCUS)
+//                    .build(&ui, || {
+//                        let dockspace_id = imgui::get_id_str(im_str!("DockSpace"));
+//                        match dockspace_id {
+//                            imgui::Id::Int(i) => { println!("{}", i); },
+//                            _ => {}
+//                        }
+//                        imgui::dock_space(dockspace_id, [0.0, 0.0], imgui::ImGuiDockNodeFlags::PASSTHRU_CENTRAL_NODE);
+//                    });
+//                for t in tokens { t.pop(ui) }
+//            }
+
             imgui::Window::new(im_str!("Metrics"))
-                .size([200.0, 200.0], Condition::Appearing)
-                .position([0.0, 0.0], Condition::Appearing)
+                .size([200.0, 350.0], Condition::FirstUseEver)
+                .position([0.0, 0.0], Condition::FirstUseEver)
+                .flags(WindowFlags::empty())
                 .build(&ui, || {
                     ui.text(ImString::new(metrics.fps.clone()));
                     ui.text(ImString::new(metrics.game_time.clone()));
@@ -417,13 +462,82 @@ impl Game {
                     ui.text(ImString::new(format!("Chunks meshed:    {}", chunk_metrics.meshed)));
                     ui.text(ImString::new(format!("Chunks drawing:   {}", chunk_metrics.drawing)));
                     ui.separator();
+                    ui.text(ImString::new(format!("Scene luma avg:  {:>5.2}", tonemap_info.avg_scene_luma)));
+                    ui.text(ImString::new(format!("Scene EV100:     {:>5.2}", tonemap_info.scene_ev100)));
+                    ui.text(ImString::new(format!("Exposure:        {:>5.2}", tonemap_info.exposure)));
+                    ui.text(ImString::new(format!("Exposure adjust: {:>5.2}", tonemap_info.exposure_adjustment)));
+                    ui.drag_float(im_str!("Exp Adj"), &mut exp_adj_slider_val)
+                        .min(-2.0)
+                        .max(2.0)
+                        .speed(0.05)
+                        .build();
+                    ui.text(ImString::new(format!("Adjust speed:    {:>5.2}", tonemap_info.adjust_speed)));
+                    ui.separator();
                     ui.text(ImString::new(format!("Position: {:3.1}, {:3.1}, {:3.1}", pos.x, pos.y, pos.z)));
                     ui.text(ImString::new(format!("Visualization: {}", debug_vis_text)));
+                });
+
+            const HISTOGRAM_BAR_WIDTH: f32 = 1190.0 / 128.0;
+
+            imgui::Window::new(im_str!("Histogram"))
+                .size([1200.0, 180.0], Condition::FirstUseEver)
+                .position([0.0, 590.0], Condition::FirstUseEver)
+                .flags(WindowFlags::empty())
+                .build(&ui, || {
+                    use std::f32::consts::E;
+
+                    ui.plot_histogram(&ImString::new(format!("histogram")), &histogram_values)
+                        .graph_size([1190.0, 145.0])
+                        .scale_min(0.0)
+                        .scale_max(20000.0)
+                        .build();
+
+                    let mut values = [0f32; 128];
+                    let a = tonemap_info.hist_low_percentile_bin;
+                    let b = tonemap_info.hist_high_percentile_bin;
+                    let h = (a + b) / 2.0;
+                    for (i, v) in values.iter_mut().enumerate() {
+                        let x = i as f32;
+                        let exp = ((x - h) / (b - a)) * -2.0;
+                        let value = 1.0 / (1.0 + E.powf(exp));
+                        *v = value;
+                    }
+                    let t = ui.push_style_color(StyleColor::FrameBg, [0.0, 0.0, 0.0, 0.0]);
+                    let t2 = ui.push_style_color(StyleColor::PlotLines, [1.0, 1.0, 1.0, 1.0]);
+                    ui.set_cursor_pos([0.0, 25.0]);
+                    ui.plot_lines(&ImString::new(format!("histogram")), &values)
+                        .graph_size([1190.0, 145.0])
+                        .scale_min(0.0)
+                        .scale_max(1.0)
+                        .build();
+                    t2.pop(ui);
+                    t.pop(ui);
+
+                    let draw_list = ui.get_window_draw_list();
+                    let [x, y] = ui.cursor_screen_pos();
+                    let middle = (tonemap_info.hist_low_percentile_bin + tonemap_info.hist_high_percentile_bin) / 2.0;
+                    draw_list.add_line::<[f32; 4]>([x + (tonemap_info.hist_low_percentile_bin * HISTOGRAM_BAR_WIDTH), y - 145.0],
+                                                   [x + (tonemap_info.hist_low_percentile_bin * HISTOGRAM_BAR_WIDTH), y],
+                                                   [0.5, 0.6, 1.0, 1f32].into())
+                        .thickness(2.0)
+                        .build();
+                    draw_list.add_line::<[f32; 4]>([x + (middle * HISTOGRAM_BAR_WIDTH), y - 145.0],
+                                                   [x + (middle * HISTOGRAM_BAR_WIDTH), y],
+                                                   [0.5, 1.0, 0.6, 1f32].into())
+                        .thickness(2.0)
+                        .build();
+                    draw_list.add_line::<[f32; 4]>([x + (tonemap_info.hist_high_percentile_bin as f32 * HISTOGRAM_BAR_WIDTH), y - 145.0],
+                                                   [x + (tonemap_info.hist_high_percentile_bin as f32 * HISTOGRAM_BAR_WIDTH), y],
+                                                   [1.0, 0.6, 0.5, 1f32].into())
+                        .thickness(2.0)
+                        .build();
                 });
         };
         run_ui(&mut ui);
 
-        match self.renderer.draw(&self.player.camera, self.player.get_transform()) {
+        self.renderer.info.tonemapping_info.exposure_adjustment = exp_adj_slider_val;
+
+        match self.renderer.draw(&self.player.camera, dt_clamped as f32, self.player.get_transform()) {
             Ok(img_future) => {
                 self.renderer.draw_imgui(ui);
                 self.frame_metrics.end_draw();
