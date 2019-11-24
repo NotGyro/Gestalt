@@ -21,6 +21,10 @@
 /target/map/
 /map/
 
+# Logs
+log.csv
+gestalt/log.csv
+
 # Other data generated at runtime.
 /keys/
 /target/keys/
