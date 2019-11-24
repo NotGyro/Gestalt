@@ -2,9 +2,9 @@
 
 use cgmath::{Vector3, MetricSpace};
 
-use crate::voxel::subdivstorage::{NaiveVoxelOctree, SubdivDrain, OctreeDrain};
-use crate::world::{CHUNK_SCALE, CHUNK_SIZE, CHUNK_SIZE_F32};
-use crate::util::noise::OctavePerlinNoise;
+use crate::voxel::subdivstorage::{NaiveVoxelOctree, SubdivDrain};
+use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SCALE};
+use toolbox::noise::OctavePerlinNoise;
 
 
 /// Trait for world voxel generators.

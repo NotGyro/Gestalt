@@ -1,0 +1,9 @@
+[package]
+name = "toolbox"
+version = "0.0.1"
+authors = ["trashbyte"]
+edition = "2018"
+
+[dependencies]
+cgmath = { version = "0.17.0", features = [ "swizzle" ] }
+noise = "0.6.0"

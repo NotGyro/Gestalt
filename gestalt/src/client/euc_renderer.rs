@@ -195,7 +195,7 @@ impl TextureManager {
         let path = Path::new(path_file.as_str());
 
         let image = image::open(path)?.to_rgba();
-        info!("Loaded texture: {}", path_file.clone());
+        info!(Test, "Loaded texture: {}", path_file.clone());
         return Ok(image);
     }
 }

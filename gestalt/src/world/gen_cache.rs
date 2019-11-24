@@ -7,7 +7,7 @@ use std::io::{Write, Read};
 use std::path::Path;
 
 use crate::world::{Chunk, CHUNK_SIZE, CHUNK_SCALE};
-use crate::voxel::subdivstorage::{SubdivSource, NaiveVoxelOctree, SubdivDrain, OctreeDrain};
+use crate::voxel::subdivstorage::{SubdivSource, NaiveVoxelOctree, SubdivDrain};
 use crate::voxel::subdivstorage::SubdivNode::Leaf;
 
 

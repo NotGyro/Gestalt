@@ -1,7 +1,6 @@
 extern crate std;
 extern crate num;
 use std::fmt::{Display, Debug};
-use std::default::Default;
 use std::fmt;
 use std::error;
 use std::error::Error;
@@ -20,7 +19,7 @@ pub enum VoxelErrorKind {
     InvalidValueAt,
     Other,
 }
-/// An error reported upon trying to get or set a voxel outside of our range. 
+/// An error reported upon trying to get or set a voxel outside of our range.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum VoxelError {
@@ -34,7 +33,7 @@ pub enum VoxelError {
 impl VoxelError {
     #[allow(dead_code)]
     fn kind(&self) -> VoxelErrorKind {
-        match self { 
+        match self {
             VoxelError::OutOfBounds(_,_) => VoxelErrorKind::OutOfBounds,
             VoxelError::NotYetLoaded(_) => VoxelErrorKind::NotYetLoaded,
             VoxelError::SetInvalidValue(_) => VoxelErrorKind::SetInvalidValue,
@@ -46,7 +45,7 @@ impl VoxelError {
 
 impl Display for VoxelError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self { 
+        match self {
             VoxelError::OutOfBounds(pos,sz) => write!(f, "Attempted to access a voxel at position {} on a storage with bounds {}", pos, sz),
             VoxelError::NotYetLoaded(pos) => write!(f, "Attempted to access a voxel position {}, which is not yet loaded.", pos),
             VoxelError::SetInvalidValue(pos) => write!(f, "Attempted to set voxel at {} to an invalid value.", pos),
@@ -148,7 +147,7 @@ impl<T> VoxelNeighborhood<T> where T : Voxel{
     ///Count how many cells are filled in this neighborhood.
     #[inline]
     #[allow(dead_code)]
-    pub fn count(&self) -> usize { 
+    pub fn count(&self) -> usize {
         let mut num = 1; //Start with 1 because center has to be a valid voxel.
         if self.posi_x.is_some() {num += 1};
         if self.nega_x.is_some() {num += 1};
@@ -180,7 +179,7 @@ impl<T> From<VoxelNeighborhoodFull<T>> for VoxelNeighborhood<T> where T: Voxel {
 /// Type arguments are type of element, type of position.
 ///
 /// (Type of positon must be an integer, but I'm still using
-/// genericism here because it should be possible to use 
+/// genericism here because it should be possible to use
 /// any bit length of integer, or even a bigint implementation
 ///
 /// For this trait, a single level of detail is assumed.
@@ -228,7 +227,7 @@ pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
         #[inline(always)]
         #[allow(dead_code)]
         fn filter_error<V>(r: Result<V, VoxelError>) -> Result<Option<V>, VoxelError> {
-            match r { 
+            match r {
                 Ok(vxl) => Ok(Some(vxl)),
                 Err(VoxelError::OutOfBounds(_,_)) => Ok(None),
                 Err(VoxelError::NotYetLoaded(_)) => Ok(None),
@@ -251,14 +250,14 @@ pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
 /// Must provide a valid voxel for any position within
 /// the range provided by get_bounds().
 /// Usually, this implies that the voxel storage is not paged.
-pub trait VoxelStorageBounded<T: Voxel, P: VoxelCoord> : VoxelStorage<T, P> { 
+pub trait VoxelStorageBounded<T: Voxel, P: VoxelCoord> : VoxelStorage<T, P> {
     fn get_bounds(&self) -> VoxelRange<P>;
 }
 
 /// Copy voxels from one storage to another.
 #[allow(dead_code)]
 pub fn voxel_blit<T: Voxel, P: VoxelCoord>(source_range : VoxelRange<P>, source: &dyn VoxelStorage<T, P>,
-                                                dest_origin: VoxelPos<P>, dest: &mut dyn VoxelStorage<T,P>)  -> Result<(), VoxelError> {
+                                           dest_origin: VoxelPos<P>, dest: &mut dyn VoxelStorage<T,P>)  -> Result<(), VoxelError> {
     for pos in source_range {
         let voxel = source.get(pos)?;
         let offset_pos = (pos - source_range.lower) + dest_origin;

@@ -1,14 +1,22 @@
 //! Input management.
 
 
-use std::collections::HashSet;
 use winit::{ElementState, VirtualKeyCode, KeyboardInput};
+use hashbrown::HashMap;
+
+
+#[derive(Clone)]
+struct KeyState {
+    pub held: bool,
+    /// true if this is the first frame a key is held
+    pub first_frame: bool,
+}
 
 
 /// Holds the current game input state.
 #[derive(Clone, Default)]
 pub struct InputState {
-    keys_held: HashSet<VirtualKeyCode>,
+    key_states: HashMap<VirtualKeyCode, KeyState>,
     pub mouse_delta: (f32, f32),
     pub right_mouse_pressed: bool
 }
@@ -17,16 +25,39 @@ pub struct InputState {
 impl InputState {
     pub fn new() -> InputState {
         InputState {
-            keys_held: HashSet::new(),
+            key_states: HashMap::new(),
             mouse_delta: (0.0, 0.0),
             right_mouse_pressed: false
         }
     }
 
 
+    pub fn update_keys(&mut self) {
+        for (_, v) in self.key_states.iter_mut() {
+            v.first_frame = false;
+        }
+    }
+
+
     /// Gets whether a key is currently pressed.
     pub fn get_key_down(&self, key: &VirtualKeyCode) -> bool {
-        self.keys_held.contains(key)
+        match self.key_states.get(key) {
+            Some(k) => {
+                k.held
+            },
+            None => false
+        }
+    }
+
+
+    /// Gets whether a key was pressed on this frame.
+    pub fn get_key_just_pressed(&self, key: &VirtualKeyCode) -> bool {
+        match self.key_states.get(key) {
+            Some(k) => {
+                k.first_frame
+            },
+            None => false
+        }
     }
 
 
@@ -35,12 +66,34 @@ impl InputState {
         match input.state {
             ElementState::Pressed => {
                 if let Some(keycode) = input.virtual_keycode {
-                    self.keys_held.insert(keycode);
+                    match self.key_states.get_mut(&keycode) {
+                        Some(s) => {
+                            s.held = true;
+                            s.first_frame = true;
+                        },
+                        None => {
+                            self.key_states.insert(keycode, KeyState {
+                                held: true,
+                                first_frame: true
+                            });
+                        }
+                    }
                 }
             },
             ElementState::Released => {
                 if let Some(keycode) = input.virtual_keycode {
-                    self.keys_held.remove(&keycode);
+                    match self.key_states.get_mut(&keycode) {
+                        Some(s) => {
+                            s.held = false;
+                            s.first_frame = false;
+                        },
+                        None => {
+                            self.key_states.insert(keycode, KeyState {
+                                held: false,
+                                first_frame: false
+                            });
+                        }
+                    }
                 }
             }
         }

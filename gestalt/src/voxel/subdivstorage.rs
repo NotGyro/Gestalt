@@ -29,11 +29,11 @@ pub enum SubdivError {
 
 impl Display for SubdivError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self { 
+        match self {
             SubdivError::OutOfBounds => write!(f, "Attempted to access a voxel from a storage, outside of that voxel storage's bounds."),
-            SubdivError::OutOfScale => 
+            SubdivError::OutOfScale =>
                 write!(f, "Attempted to access a voxel an invalid scale"),
-            SubdivError::DetailNotPresent => 
+            SubdivError::DetailNotPresent =>
                 write!(f, "Attempted to access a voxel at a level of detail doesn't exist at the provided position."),
             SubdivError::SplittingBranch => write!(f, "Attempted to split a leaf into a branch with child leaves, but this voxel is already a branch."),
             SubdivError::ReqLeafGotBranch => write!(f, "Tried to access a leaf value, but this voxel is a branch."),
@@ -68,7 +68,7 @@ pub enum SubdivNodeKind {
 impl<L: Voxel, B: Voxel> SubdivNode<L,B> {
     #[allow(dead_code)]
     pub fn kind(&self) -> SubdivNodeKind {
-        match self { 
+        match self {
             SubdivNode::Leaf(_) => SubdivNodeKind::Leaf,
             SubdivNode::Branch(_) => SubdivNodeKind::Leaf,
         }
@@ -99,7 +99,7 @@ pub enum NodeChildIndex {
 impl NodeChildIndex {
     #[allow(dead_code)]
     fn num_representation(&self) -> usize {
-        match self { 
+        match self {
             NodeChildIndex::X0_Y0_Z0 => 0,
             NodeChildIndex::X0_Y0_Z1 => 1,
             NodeChildIndex::X0_Y1_Z0 => 2,
@@ -129,18 +129,18 @@ impl NodeChildIndex {
 #[inline(always)]
 pub fn index_encode<T: VoxelCoord>(pos : VoxelPos<T>, scl : Scale) -> usize {
     let mut idx : usize = 0;
-    // Scale i is 2^(root scale - i) of coord.scale -sized cubes. 
+    // Scale i is 2^(root scale - i) of coord.scale -sized cubes.
     // Therefore, we're looking at the bit at index (root scale - i).
     let mask = T::one().unsigned_shl( scl as u32);
-    if pos.x.bitand(mask) != T::zero() { 
+    if pos.x.bitand(mask) != T::zero() {
         //x lives in the 4s place in a NodeChildIndex
         idx += 4
     }
-    if pos.y.bitand(mask) != T::zero() { 
+    if pos.y.bitand(mask) != T::zero() {
         //y lives in the 2s place in a NodeChildIndex
         idx += 2
     }
-    if pos.z.bitand(mask) != T::zero() { 
+    if pos.z.bitand(mask) != T::zero() {
         //z lives in the 1s place in a NodeChildIndex
         idx += 1
     }
@@ -159,9 +159,9 @@ pub fn index_encode<T: VoxelCoord>(pos : VoxelPos<T>, scl : Scale) -> usize {
 /// Type arguments are type of voxel, type of position.
 ///
 /// (Type of positon must be an integer, but I'm still using
-/// genericism here because it should be possible to use 
+/// genericism here because it should be possible to use
 /// any bit length of integer, or even a bigint implementation).
-/// 
+///
 /// This is for any voxel data source that does LOD - you could be sampling perlin noise, for example.
 pub trait SubdivSource<T: Voxel, P: VoxelCoord> {
     fn get(&self, coord: OctPos<P>) -> Result<T, SubdivError>;
@@ -174,9 +174,9 @@ pub trait SubdivSource<T: Voxel, P: VoxelCoord> {
 /// Type arguments are type of voxel, type of position.
 ///
 /// (Type of positon must be an integer, but I'm still using
-/// genericism here because it should be possible to use 
+/// genericism here because it should be possible to use
 /// any bit length of integer, or even a bigint implementation).
-/// 
+///
 /// This is for any voxel data source that does LOD - you could be sampling perlin noise, for example.
 pub trait SubdivDrain<T: Voxel, P: VoxelCoord> {
     fn set(&mut self, coord: OctPos<P>, value: T) -> Result<(), SubdivError>;
@@ -186,20 +186,20 @@ pub trait SubdivDrain<T: Voxel, P: VoxelCoord> {
 /// Must be able to store a valid voxel for any position within
 /// the range provided by get_bounds().
 /// Usually, this implies that the SubdivStorage is not paged.
-pub trait SubdivStorageBounded<P: VoxelCoord> { 
+pub trait SubdivStorageBounded<P: VoxelCoord> {
     fn get_bounds(&self) -> VoxelRange<P>;
 }
 
 /// A basic trait for any 3d grid data structure with level-of-detail / grid data.
 /// Type arguments are type of leaf element, type of branch (LOD) element, type of position.
-/// The term "Branch" here is used to differentiate between a deliberately-ambiguous Node type, 
+/// The term "Branch" here is used to differentiate between a deliberately-ambiguous Node type,
 /// which is any entry at a position and level of detail, and the Branch type, which is necessarily
 /// not a leaf.
 ///
 /// (Type of positon must be an integer, but I'm still using
-/// genericism here because it should be possible to use 
+/// genericism here because it should be possible to use
 /// any bit length of integer, or even a bigint implementation).
-/// 
+///
 /// This is for anything that acts like an Octree but it doesn't have to *be* an Octree.
 /// What this means is: This Voxel Storage must have a concept of "Branches", which themselves
 /// are not where the data lives but point to "Leaves" at smaller scale / higher detail.
@@ -212,7 +212,7 @@ pub trait OctreeSource<L: Voxel, D: Voxel, P: VoxelCoord> : SubdivSource<SubdivN
 
     /// Get information on all 8 of the smaller nodes that live inside the selected larger node.
     /// This is not a deep copy - hence, returns LOD information for branch nodes.
-    fn get_children(&self, coord: OctPos<P>) -> Result<[SubdivNode<L, D>; 8], SubdivError> { 
+    fn get_children(&self, coord: OctPos<P>) -> Result<[SubdivNode<L, D>; 8], SubdivError> {
         let small_pos = coord.scale_to(coord.scale - 1);
         // If this is a leaf it by definition does not have children.
         if let SubdivNodeKind::Leaf = self.get(coord)?.kind() {
@@ -230,14 +230,14 @@ pub trait OctreeSource<L: Voxel, D: Voxel, P: VoxelCoord> : SubdivSource<SubdivN
         let onex_zeroy_onez = OctPos{scale: small_pos.scale, pos: vpos!(small_pos.pos.x + P::one(), small_pos.pos.y, small_pos.pos.z + P::one())};
         let onex_oney_zeroz = OctPos{scale: small_pos.scale, pos: vpos!(small_pos.pos.x + P::one(), small_pos.pos.y + P::one(), small_pos.pos.z)};
         let onex_oney_onez = OctPos{scale: small_pos.scale, pos: vpos!(small_pos.pos.x + P::one(), small_pos.pos.y + P::one(), small_pos.pos.z + P::one())};
-        Ok([self.get(zerox_zeroy_zeroz)?, 
-        self.get(zerox_zeroy_onez)?, 
-        self.get(zerox_oney_zeroz)?, 
-        self.get(zerox_oney_onez)?, 
-        self.get(onex_zeroy_zeroz)?, 
-        self.get(onex_zeroy_onez)?,
-        self.get(onex_oney_zeroz)?, 
-        self.get(onex_oney_onez)?])
+        Ok([self.get(zerox_zeroy_zeroz)?,
+            self.get(zerox_zeroy_onez)?,
+            self.get(zerox_oney_zeroz)?,
+            self.get(zerox_oney_onez)?,
+            self.get(onex_zeroy_zeroz)?,
+            self.get(onex_zeroy_onez)?,
+            self.get(onex_oney_zeroz)?,
+            self.get(onex_oney_onez)?])
     }
     fn node_kind(&self, pos: OctPos<P>) -> Result<SubdivNodeKind, SubdivError> { Ok(self.get(pos)?.kind()) }
 }
@@ -254,7 +254,7 @@ pub trait OctreeDrain<L: Voxel, D: Voxel, P: VoxelCoord> : OctreeSource<L, D, P>
     /// Sets the branch data at a certain location.
     /// Will error if this location is or is below a leaf.
     fn set_branch_data(&mut self, coord: OctPos<P>, branch_val: D) -> Result<(), SubdivError>;
-    
+
     /// Sets branch-associated data at the specified location. If it's a leaf, do nothing.
     fn try_set_branch_data(&mut self, coord: OctPos<P>, branch_val: D) -> Result<(), SubdivError> {
         match self.set_branch_data(coord, branch_val) {
@@ -269,16 +269,16 @@ pub trait OctreeDrain<L: Voxel, D: Voxel, P: VoxelCoord> : OctreeSource<L, D, P>
 impl<L, D> NaiveOctreeBranch<L, D> where L: Voxel, D: Voxel {
     #[allow(dead_code)]
     fn rebuild_lod(&mut self, pool: &mut Arena<NaiveOctreeBranch<L,D>>) {
-        let value0 = match &mut self.children[0] { 
+        let value0 = match &mut self.children[0] {
             SubdivNode::Leaf(leaf_child) => D::represent(&leaf_child),
-            SubdivNode::Branch(branch_index) => { 
+            SubdivNode::Branch(branch_index) => {
                 let child = pool.get_mut(*branch_index).unwrap();
                 child.lod_data.clone()
             },
         };
-        let value1 = match &mut self.children[1] { 
+        let value1 = match &mut self.children[1] {
             SubdivNode::Leaf(leaf_child) => D::represent(&leaf_child),
-            SubdivNode::Branch(branch_index) => { 
+            SubdivNode::Branch(branch_index) => {
                 let child = pool.get_mut(*branch_index).unwrap();
                 child.lod_data.clone()
             },
@@ -310,8 +310,8 @@ type NaiveOctreeNode<L> = SubdivNode<L, ArenaIndex>;
 impl<L,D> NaiveOctreeBranch<L,D> where L: Voxel, D: Voxel {
     fn garbage_collect(&self, arena: &mut OctreePool<L, D>) {
         //Recursively delete all sub-nodes.
-        for node in self.children.iter() { 
-            if let SubdivNode::Branch(child_idx) = node { 
+        for node in self.children.iter() {
+            if let SubdivNode::Branch(child_idx) = node {
                 let arena_ref = arena.borrow();
                 let child_branch = arena_ref.get(*child_idx).unwrap().clone();
                 drop(arena_ref);
@@ -335,40 +335,77 @@ pub struct NaiveVoxelOctree<L, D> where L: Voxel, D: Voxel {
 
 impl<L,D> NaiveVoxelOctree<L,D> where L: Voxel, D: Voxel {
     pub fn new(starting_leaf: L, scale: Scale) -> Self {
-        NaiveVoxelOctree{scale : scale , root: SubdivNode::Leaf(starting_leaf), pool: 
-            RefCell::new(Arena::with_capacity(512))}
+        NaiveVoxelOctree{scale : scale , root: SubdivNode::Leaf(starting_leaf), pool:
+        RefCell::new(Arena::with_capacity(512))}
     }
-    /*
+
     #[allow(dead_code)]
-    pub fn traverse<F>(&self, pos: OctPos<u32>, func: &mut F) where F: FnMut(OctPos<u32>, L) {
-        match &self.root {
-            SubdivNode::Leaf(l) => {
-                func(pos, l.clone());
-            }
-            SubdivNode::Branch(b) => {
-                for (i, child) in self.pool.get(b).unwrap().children.iter().enumerate() {
-                    let idx = NodeChildIndex::from_num_representation(i);
-                    let s = 2u32.pow((pos.scale-1) as u32);
-                    let offset = match idx {
-                        NodeChildIndex::X0_Y0_Z0 => (0, 0, 0),
-                        NodeChildIndex::X0_Y0_Z1 => (0, 0, s),
-                        NodeChildIndex::X0_Y1_Z0 => (0, s, 0),
-                        NodeChildIndex::X0_Y1_Z1 => (0, s, s),
-                        NodeChildIndex::X1_Y0_Z0 => (s, 0, 0),
-                        NodeChildIndex::X1_Y0_Z1 => (s, 0, s),
-                        NodeChildIndex::X1_Y1_Z0 => (s, s, 0),
-                        NodeChildIndex::X1_Y1_Z1 => (s, s, s),
-                    };
-                    child.traverse(OctPos::from_four(
-                        pos.pos.x+offset.0,
-                        pos.pos.y+offset.1,
-                        pos.pos.z+offset.2,
-                        pos.scale - 1),
-                                   func);
-                }
-            }
-        }
-    }*/
+    pub fn traverse<F>(&self, _pos: OctPos<u32>, _func: &mut F) where F: FnMut(OctPos<u32>, L) {
+//        let node = &self.get(pos).unwrap();
+//        match node {
+//            SubdivNode::Leaf(l) => {
+//                func(pos, l.clone());
+//            }
+//            SubdivNode::Branch(b) => {
+//                if pos.scale > 0 {
+//                    for (i, _) in self.pool.borrow().get(*b).unwrap().children.iter().enumerate() {
+//                        let idx = NodeChildIndex::from_num_representation(i);
+//                        let s = 2u32.pow((pos.scale-1) as u32);
+//                        let offset = match idx {
+//                            NodeChildIndex::X0_Y0_Z0 => (0, 0, 0),
+//                            NodeChildIndex::X0_Y0_Z1 => (0, 0, s),
+//                            NodeChildIndex::X0_Y1_Z0 => (0, s, 0),
+//                            NodeChildIndex::X0_Y1_Z1 => (0, s, s),
+//                            NodeChildIndex::X1_Y0_Z0 => (s, 0, 0),
+//                            NodeChildIndex::X1_Y0_Z1 => (s, 0, s),
+//                            NodeChildIndex::X1_Y1_Z0 => (s, s, 0),
+//                            NodeChildIndex::X1_Y1_Z1 => (s, s, s),
+//                        };
+//                        self.traverse(OctPos::from_four(
+//                            pos.pos.x+offset.0,
+//                            pos.pos.y+offset.1,
+//                            pos.pos.z+offset.2,
+//                            pos.scale - 1),
+//                                       func);
+//                    }
+//                }
+//            }
+//        }
+    }
+
+//    #[allow(dead_code)]
+//    pub fn traverse_to_depth<F>(&self, pos: OctPos<u32>, func: &mut F, min_scale: Scale) where F: FnMut(OctPos<u32>, L) {
+//        match &self.root {
+//            SubdivNode::Leaf(l) => {
+//                func(pos, l.clone());
+//            }
+//            SubdivNode::Branch(b) => {
+//                if pos.scale <= min_scale {
+//                    return;
+//                }
+//                for (i, _) in self.pool.borrow().get(*b).unwrap().children.iter().enumerate() {
+//                    let idx = NodeChildIndex::from_num_representation(i);
+//                    let s = 2u32.pow((pos.scale-1) as u32);
+//                    let offset = match idx {
+//                        NodeChildIndex::X0_Y0_Z0 => (0, 0, 0),
+//                        NodeChildIndex::X0_Y0_Z1 => (0, 0, s),
+//                        NodeChildIndex::X0_Y1_Z0 => (0, s, 0),
+//                        NodeChildIndex::X0_Y1_Z1 => (0, s, s),
+//                        NodeChildIndex::X1_Y0_Z0 => (s, 0, 0),
+//                        NodeChildIndex::X1_Y0_Z1 => (s, 0, s),
+//                        NodeChildIndex::X1_Y1_Z0 => (s, s, 0),
+//                        NodeChildIndex::X1_Y1_Z1 => (s, s, s),
+//                    };
+//                    self.traverse_to_depth(OctPos::from_four(
+//                        pos.pos.x+offset.0,
+//                        pos.pos.y+offset.1,
+//                        pos.pos.z+offset.2,
+//                        pos.scale - 1),
+//                                   func, min_scale);
+//                }
+//            }
+//        }
+//    }
 }
 /*
 impl<L> NaiveOctreeNode<L> where L: Voxel {
@@ -401,7 +438,7 @@ impl<L, D, P> OctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D
             return Err( SubdivError::OutOfBounds);
         }
         //Make sure that root is not a leaf so we can do the algorithm properly.
-        match &self.root { 
+        match &self.root {
             SubdivNode::Leaf(l) => return Ok((SubdivNode::Leaf(l.clone()), self.scale)),
             SubdivNode::Branch(root_branch_index) => {
                 //Cool, we get to do our algorithm.
@@ -417,11 +454,11 @@ impl<L, D, P> OctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D
                     drop(pool_ref);
                     //Have we hit our target?
                     if current_scale == coord.scale {
-                        match current_node { 
+                        match current_node {
                             SubdivNode::Leaf(leaf_dat) => return Ok( (SubdivNode::Leaf(leaf_dat.clone()), current_scale)  ),
                             SubdivNode::Branch(branch_idx) => return Ok((SubdivNode::Branch(
                                 self.pool.borrow().get(branch_idx).unwrap()
-                                .branch_data.clone()), current_scale) )
+                                    .branch_data.clone()), current_scale) )
                             ,
                         }
                     }
@@ -432,7 +469,7 @@ impl<L, D, P> OctreeSource<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D
                             SubdivNode::Leaf(leaf_dat) => return Ok(  (SubdivNode::Leaf(leaf_dat.clone()), current_scale)  ),
                             SubdivNode::Branch(branch_index) => {
                                 parent_idx = branch_index;
-                                current_scale -= 1 
+                                current_scale -= 1
                             },
                         }
                     }
@@ -454,7 +491,7 @@ impl<L, D, P> SubdivSource<SubdivNode<L, D>, P> for NaiveVoxelOctree<L, D> where
 // Ok(bool) means true if we're still checking for consolidation on the way out, false means we've
 // already determined that we can't consolidate any more
 fn set_recurse<L: Voxel, D: Voxel + Default, P: VoxelCoord>
-        (node: &mut NaiveOctreeNode<L>, coord: OctPos<P>, 
+        (node: &mut NaiveOctreeNode<L>, coord: OctPos<P>,
             current_scale: Scale, target_scale: Scale, value: &L, arena: &mut OctreePool<L,D>)
         -> Result<bool, SubdivError> {
     if current_scale < target_scale {
@@ -528,18 +565,18 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
             //Selected node cannot possibly exist in our octree.
             return Err( SubdivError::OutOfBounds);
         }
-        if coord.scale == self.scale { 
-            match &self.root { 
-                SubdivNode::Leaf(l) => self.root = SubdivNode::Leaf(leaf_val),
+        if coord.scale == self.scale {
+            match &self.root {
+                SubdivNode::Leaf(_) => self.root = SubdivNode::Leaf(leaf_val),
                 SubdivNode::Branch(root_branch_index) => {
                     let pool_borrow = self.pool.borrow();
                     //Recursive garbage collect the old node.
                     let branch = pool_borrow.get(*root_branch_index).unwrap().clone();
                     drop(pool_borrow);
                     branch.garbage_collect(&mut self.pool);
-                    
+
                     let mut pool_borrow = self.pool.borrow_mut();
-                    
+
                     pool_borrow.remove(*root_branch_index);
 
                     self.root = SubdivNode::Leaf(leaf_val);
@@ -549,19 +586,19 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
         else {
             if let SubdivNode::Leaf(l) = &self.root {
                 let children : [NaiveOctreeNode<L>; 8] = [SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),
-                                                            SubdivNode::Leaf(l.clone()),];
+                    SubdivNode::Leaf(l.clone()),
+                    SubdivNode::Leaf(l.clone()),
+                    SubdivNode::Leaf(l.clone()),
+                    SubdivNode::Leaf(l.clone()),
+                    SubdivNode::Leaf(l.clone()),
+                    SubdivNode::Leaf(l.clone()),
+                    SubdivNode::Leaf(l.clone()),];
                 self.root = NaiveOctreeNode::Branch(self.pool.borrow_mut().insert(NaiveOctreeBranch {
                     children,
                     branch_data: D::default(),
-                    }));
+                }));
             }
-            match &self.root { 
+            match &self.root {
                 SubdivNode::Branch(root_branch_index) => {
                     let mut parent_idx = *root_branch_index;
                     let mut current_scale = self.scale-1;
@@ -570,7 +607,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
                         //Get a node - Borrow a reference to our current node.
                         let pool_borrow = self.pool.borrow();
                         let current_node_info = pool_borrow.get(parent_idx).unwrap()
-                                            .children[index_encode(coord.pos, current_scale-coord.scale)].clone();
+                            .children[index_encode(coord.pos, current_scale-coord.scale)].clone();
                         drop(pool_borrow);
                         //Have we hit our target?
                         if current_scale == coord.scale {
@@ -578,7 +615,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
                                 SubdivNode::Leaf(_) => {
                                     let mut pool_borrow = self.pool.borrow_mut();
                                     let current_node = &mut pool_borrow.get_mut(parent_idx).unwrap()
-                                            .children[index_encode(coord.pos, current_scale-coord.scale)];
+                                        .children[index_encode(coord.pos, current_scale-coord.scale)];
                                     *current_node = SubdivNode::Leaf(leaf_val);
                                     return Ok(());
                                 },
@@ -591,7 +628,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
 
                                     let mut pool_borrow = self.pool.borrow_mut();
                                     let current_node = &mut pool_borrow.get_mut(parent_idx).unwrap()
-                                            .children[index_encode(coord.pos, current_scale-coord.scale)];
+                                        .children[index_encode(coord.pos, current_scale-coord.scale)];
                                     *current_node = SubdivNode::Leaf(leaf_val);
 
                                     return Ok(());
@@ -603,21 +640,21 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
                             if let SubdivNode::Leaf(l) = current_node_info {
                                 //Target is below our scale. We will need to create a child node, and recurse on it.
                                 let children : [NaiveOctreeNode<L>; 8] = [SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),
-                                                                            SubdivNode::Leaf(l.clone()),];
+                                    SubdivNode::Leaf(l.clone()),
+                                    SubdivNode::Leaf(l.clone()),
+                                    SubdivNode::Leaf(l.clone()),
+                                    SubdivNode::Leaf(l.clone()),
+                                    SubdivNode::Leaf(l.clone()),
+                                    SubdivNode::Leaf(l.clone()),
+                                    SubdivNode::Leaf(l.clone()),];
                                 let mut pool_borrow = self.pool.borrow_mut();
                                 let idx = pool_borrow.insert(NaiveOctreeBranch {
                                     children,
                                     branch_data: D::default(),
-                                    }).clone();
+                                }).clone();
                                 drop(pool_borrow);
                                 let mut pool_ref = self.pool.borrow_mut();
-                                let mut elem = &mut pool_ref.get_mut(parent_idx).unwrap()
+                                let elem = &mut pool_ref.get_mut(parent_idx).unwrap()
                                     .children[index_encode(coord.pos, current_scale-coord.scale)];
                                 *elem = NaiveOctreeNode::Branch(idx);
                                 parent_idx = idx;
@@ -642,7 +679,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
 
     /// Sets a voxel in the octree, and also checks to see if its parent node can be merged.
     /// After that, checks recursively for nodes which can be combined.
-    fn set_and_merge(&mut self, coord: OctPos<P>, leaf_val: L) -> Result<(), SubdivError> {
+    fn set_and_merge(&mut self, _coord: OctPos<P>, _leaf_val: L) -> Result<(), SubdivError> {
         /*match set_recurse(&mut self.root, coord, self.scale, coord.scale, &leaf_val, &mut self.pool) {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
@@ -660,9 +697,9 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
             //Selected node cannot possibly exist in our octree.
             return Err( SubdivError::OutOfBounds);
         }
-        if coord.scale == self.scale { 
-            match &self.root { 
-                SubdivNode::Leaf(l) => return Err(SubdivError::ReqBranchGotLeaf),
+        if coord.scale == self.scale {
+            match &self.root {
+                SubdivNode::Leaf(_) => return Err(SubdivError::ReqBranchGotLeaf),
                 SubdivNode::Branch(root_branch_index) => {
                     let mut pool_ref = self.pool.borrow_mut();
                     let mut elem = &mut pool_ref.get_mut(*root_branch_index).unwrap();
@@ -672,7 +709,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
             }
         }
         else {
-            match &self.root { 
+            match &self.root {
                 SubdivNode::Branch(root_branch_index) => {
                     let mut parent_idx = *root_branch_index;
                     let mut current_scale = self.scale-1;
@@ -681,7 +718,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
                         //Get a node - Borrow a reference to our current node.
                         let pool_borrow = self.pool.borrow();
                         let current_node_info = pool_borrow.get(parent_idx).unwrap()
-                                            .children[index_encode(coord.pos, current_scale-coord.scale)].clone();
+                            .children[index_encode(coord.pos, current_scale-coord.scale)].clone();
                         drop(pool_borrow);
                         //Have we hit our target?
                         if current_scale == coord.scale {
@@ -699,7 +736,7 @@ impl<L, D, P> OctreeDrain<L, D, P> for NaiveVoxelOctree<L, D> where L: Voxel, D:
                                     parent_idx = branch_index;
                                     current_scale -= 1;
                                 },
-                                SubdivNode::Leaf(_) => return Err(SubdivError::ReqBranchGotLeaf), // Leaf is above us, no branch here. 
+                                SubdivNode::Leaf(_) => return Err(SubdivError::ReqBranchGotLeaf), // Leaf is above us, no branch here.
                             }
 
                         }
@@ -741,7 +778,7 @@ fn test_octree() {
     assert_eq!(tree.get(second_pos).unwrap(), SubdivNode::Leaf("Second!".to_owned()) );
     assert_eq!(tree.get(third_pos).unwrap(), SubdivNode::Leaf("Third!".to_owned()) );
     assert_eq!(tree.get(opos!((33, 2, 8)@ 0)).unwrap(), SubdivNode::Leaf("First!".to_owned()) );
-    
+
     tree.set_raw(fourth_pos, "Fourth!".to_owned() ).unwrap();
 
     //We are looking at a 16x16x16 node.

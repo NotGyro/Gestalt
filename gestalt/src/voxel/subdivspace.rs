@@ -16,7 +16,7 @@ use crate::voxel::{
 use crate::world::CHUNK_SCALE;
 
 
-/// An error reported upon trying to get or set a voxel which is not currently loaded. 
+/// An error reported upon trying to get or set a voxel which is not currently loaded.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum ChunkedSubdivError<T, S> where T : VoxelCoord, S : VoxelCoord {
@@ -40,7 +40,7 @@ impl<T, S> Error for ChunkedSubdivError<T, S> where T : VoxelCoord, S : VoxelCoo
 /// A space is a "world"-like paged space for subdivided voxels (octrees and octree-like things)
 /// C is our chunk type.
 pub struct SubdivSpace<C> {
-    pub chunks: HashMap<VoxelPos<i32>, 
+    pub chunks: HashMap<VoxelPos<i32>,
                         Arc<RwLock<
                             C
                             >>
@@ -66,8 +66,8 @@ pub fn chunkpos_to_center(point: OctPos<i32>, result_scale: Scale) -> Point3<f32
     //How many blocks of "result_scale" make up our chunk?
     let chunk_size : i32 = scale_coord(1, result_scale-point.scale);
 
-    Point3::new(block_pos.pos.x as f32 + (chunk_size as f32 * 0.5), 
-        block_pos.pos.y as f32 + (chunk_size as f32 * 0.5), 
+    Point3::new(block_pos.pos.x as f32 + (chunk_size as f32 * 0.5),
+        block_pos.pos.y as f32 + (chunk_size as f32 * 0.5),
         block_pos.pos.z as f32 + (chunk_size as f32 * 0.5))
 }
 
@@ -83,7 +83,7 @@ impl<L,D,C> SubdivSource<SubdivNode<L, D>, i32> for SubdivSpace<C>
 }
 
 impl<L,D,C> OctreeSource<L, D, i32> for SubdivSpace<C>
-        where L : Voxel,  D : Voxel, C : OctreeSource<L,D,i32> {
+    where L : Voxel,  D : Voxel, C : OctreeSource<L,D,i32> {
     fn get_details(&self, coord: OctPos<i32>) -> Result<(SubdivNode<L, D>, Scale), SubdivError> {
         let chunkpos = blockpos_to_chunk(coord, self.chunk_scale);
         // Do we have a chunk that would contain this block position?
@@ -92,9 +92,9 @@ impl<L,D,C> OctreeSource<L, D, i32> for SubdivSpace<C>
                 let chunk_entry = chunk_entry_arc.clone();
                 let chunk_start_scaled = chunkpos.scale_to(coord.scale);
                 let chunk_size = self.get_chunk_size(coord.scale);
-                let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos, 
-                                upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size, 
-                                                y: chunk_start_scaled.pos.y + chunk_size, 
+                let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos,
+                                upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size,
+                                                y: chunk_start_scaled.pos.y + chunk_size,
                                                 z: chunk_start_scaled.pos.z + chunk_size } };
                 match bounds.get_local_unsigned(coord.pos) {
                     Some(pos) => {
@@ -120,9 +120,9 @@ impl<L, C> SubdivDrain<L, i32> for SubdivSpace<C>
         match self.chunks.get_mut(&chunkpos.pos) {
             Some(chunk_entry_arc) => {
                 let chunk_start_scaled = chunkpos.scale_to(coord.scale);
-                let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos, 
-                                upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size, 
-                                                y: chunk_start_scaled.pos.y + chunk_size, 
+                let bounds : VoxelRange<i32> = VoxelRange{ lower: chunk_start_scaled.pos,
+                                upper: VoxelPos{ x: chunk_start_scaled.pos.x + chunk_size,
+                                                y: chunk_start_scaled.pos.y + chunk_size,
                                                 z: chunk_start_scaled.pos.z + chunk_size } };
                 match bounds.get_local_unsigned(coord.pos) {
                     Some(pos) => {
@@ -161,13 +161,13 @@ impl<C> SubdivSpace<C> {
     }
 
     /// Remove all pairs such that f(&position, &mut chunk) returns false.
-    pub fn retain_chunks<F>(&mut self, f: F) 
+    pub fn retain_chunks<F>(&mut self, f: F)
             where F: FnMut(&VoxelPos<i32>, &mut Arc<RwLock<C>>) -> bool {
         self.chunks.retain(f);
         // This does not return a bool - it just looks that way because of the closure signature.
-    } 
+    }
 
-    /// Returns chunk size in scale block_scl voxels. 
+    /// Returns chunk size in scale block_scl voxels.
     pub fn get_chunk_size(&self, block_scl: Scale) -> i32 {
         scale_coord(1, block_scl-self.chunk_scale)
     }
@@ -179,8 +179,8 @@ impl<C> SubdivSpace<C> {
 #[test]
 fn test_subdiv_space() {
     use crate::world::TileID;
-    use string_cache::DefaultAtom as Atom; 
     use crate::world::tile::*;
+    use string_cache::DefaultAtom as Atom;
 
     let air_id = TILE_REGISTRY.lock().register_tile(&Atom::from("air"));
     let stone_id = TILE_REGISTRY.lock().register_tile(&Atom::from("stone"));
@@ -194,10 +194,12 @@ fn test_subdiv_space() {
     chunk.set(opos!((1,0,1) @ 3), air_id).unwrap();
     chunk.set(opos!((0,0,1) @ 3), air_id).unwrap();
     chunk.set(opos!((3,0,0) @ 2), air_id).unwrap();
-    
+
+    chunk.root.rebuild_lod();
+
     let mut chunk2 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
     chunk2.set(opos!((0,0,0) @ CHUNK_SCALE), lava_id ).unwrap();
-    
+
     let mut chunk3 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
 
     let chunk_1_pos = vpos!(0,0,0);
