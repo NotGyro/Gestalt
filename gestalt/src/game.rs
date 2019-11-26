@@ -22,7 +22,8 @@ use imgui::{FontSource, FontConfig, FontGlyphRanges, Condition, ImString, im_str
 
 
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
-const MAX_CHUNK_MESH_THREADS: u32 = 2;
+const MAX_CHUNK_MESH_THREADS: u32 = 1;
+const MAX_OCCLUSION_MESH_THREADS: u32 = 1;
 
 
 /// Main type for the game. `Game::new().run()` runs the game.
@@ -36,6 +37,7 @@ pub struct Game {
     dimension_registry: DimensionRegistry,
     chunk_generating_threads: Arc<std::sync::atomic::AtomicU32>,
     chunk_meshing_threads: Arc<std::sync::atomic::AtomicU32>,
+    occlusion_mesh_threads: Arc<std::sync::atomic::AtomicU32>,
     visible_ids: [bool; 65536],
     tick: Arc<AtomicU64>,
     imgui: imgui::Context
@@ -100,6 +102,7 @@ impl Game {
             dimension_registry,
             chunk_generating_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             chunk_meshing_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            occlusion_mesh_threads: Arc::new(std::sync::atomic::AtomicU32::new(0)),
             visible_ids: [false; 65536],
             tick: Arc::new(AtomicU64::new(0)),
             imgui
@@ -260,7 +263,7 @@ impl Game {
         }
         {
             if self.chunk_meshing_threads.load(Ordering::Relaxed) < MAX_CHUNK_MESH_THREADS {
-                let mut chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
+                let mut chunks = self.dimension_registry.get(0).unwrap().chunks.lock();
                 let mut chunk_positions: Vec< (i32, i32, i32) > = chunks.keys().cloned().collect();
 
                 let player_pos = self.player.position.clone();
@@ -284,14 +287,14 @@ impl Game {
                                 let thread_count_clone = self.chunk_meshing_threads.clone();
                                 let info = self.renderer.info.clone();
                                 thread::spawn(move || {
-                                    let mut chunk_lock = chunk_arc.lock().unwrap();
+                                    let mut chunk_lock = chunk_arc.lock();
 
                                     // TODO: fix this
                                     (*chunk_lock).generate_mesh(&info);
 
                                     //let chunk_center = Chunk::chunk_pos_to_center_ws(chunk_pos);
                                     //let dist = Point3::distance(Point3::new(chunk_center.0, chunk_center.1, chunk_center.2), player_pos);
-                                    let occluder_scale = 2;
+                                    let occluder_scale = 3;
 //                                    if dist > 128.0 {
 //                                        occluder_scale = 3;
 //                                        if dist > 192.0 {
@@ -312,7 +315,7 @@ impl Game {
         }
 
         {
-            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
+            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock();
             self.chunk_metrics.generated = 0;
 
             for (_, (_, state))  in chunks.iter() {
@@ -326,9 +329,9 @@ impl Game {
         // queueing chunks and drawing
 
         {
-            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
+            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock();
             for (_, (chunk, _)) in chunks.iter() {
-                if let Ok(c) = chunk.try_lock() {
+                if let Some(c) = chunk.try_lock() {
                     self.visible_ids[c.id as usize] = false;
                 }
             }
@@ -344,12 +347,10 @@ impl Game {
         // 0 is the clear value for the buffer. no chunks should have id 0
         self.visible_ids[0] = false;
 
-        let mut occlusion_verts = Vec::new();
-        let mut occlusion_indices = Vec::new();
-        let mut offset = 0;
+        let mut occlusion_chunks = Vec::new();
         {
             self.chunk_metrics.meshed = 0;
-            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock().unwrap();
+            let chunks = self.dimension_registry.get(0).unwrap().chunks.lock();
             let frustum = view_to_frustum(self.player.pitch, self.player.yaw, self.player.camera.fov, 4.0/3.0, 1.0, 10000.0);
 
             for (pos, (chunk, state)) in chunks.iter() {
@@ -362,16 +363,10 @@ impl Game {
                 }
                 let is_in_view = aabb_frustum_intersection(aabb_min, aabb_max, frustum.clone());
                 if status == CHUNK_STATE_CLEAN {
-                    match chunk.try_lock() {
-                        Ok(mut chunk_lock) => {
-                            chunk_lock.get_occluder_geometry(&mut occlusion_verts, &mut occlusion_indices, &mut offset);
-                        },
-                        Err(_) => {}
-                    }
-
+                    occlusion_chunks.push(chunk.clone());
                 }
                 if is_ready && is_in_view {
-                    let mut chunk_lock = chunk.lock().unwrap();
+                    let mut chunk_lock = chunk.lock();
                     let mut draw = false;
                     if self.visible_ids[chunk_lock.id as usize] {
                         draw = true;
@@ -389,8 +384,30 @@ impl Game {
                     }
                 }
             }
-            let mut queue_lock = self.renderer.info.render_queues.write().unwrap();
-            queue_lock.occluders.vertex_group = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, self.renderer.info.device.clone()));
+        }
+
+        // occlusion mesh building
+
+        if self.occlusion_mesh_threads.load(Ordering::Relaxed) < MAX_OCCLUSION_MESH_THREADS {
+            self.occlusion_mesh_threads.fetch_add(1, Ordering::Relaxed);
+
+            let queue_arc = self.renderer.info.render_queues.clone();
+            let device_arc = self.renderer.info.device.clone();
+            let thread_count_arc = self.occlusion_mesh_threads.clone();
+            thread::spawn(move || {
+                let mut occlusion_verts = Vec::new();
+                let mut occlusion_indices = Vec::new();
+                let mut offset = 0;
+                for chunk in occlusion_chunks.iter() {
+                    let mut lock = chunk.lock();
+                    lock.get_occluder_geometry(&mut occlusion_verts, &mut occlusion_indices, &mut offset);
+                }
+                let new_vg = Arc::new(VertexGroup::new(occlusion_verts.into_iter(), occlusion_indices.into_iter(), 0, device_arc.clone()));
+                let mut queue_lock = queue_arc.write().unwrap();
+                queue_lock.occluders.vertex_group = new_vg;
+
+                thread_count_arc.fetch_sub(1, Ordering::Relaxed);
+            });
         }
 
         self.frame_metrics.end_game();

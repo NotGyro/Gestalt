@@ -9,7 +9,8 @@ use phosphor::geometry::{Mesh, DeferredShadingVertex, VertexGroup, Material};
 
 use crate::world::Chunk;
 use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32};
-use crate::voxel::subdivstorage::{SubdivSource, SubdivNode};
+use crate::voxel::traits::VoxelSourceAbstract;
+use crate::voxel::subdivmath::OctPos;
 
 
 /// Struct used internally to represent unoptimized quads.
@@ -210,19 +211,15 @@ pub fn generate_mesh(chunk: &mut Chunk, info: &RenderInfo) {
     let mut ids = [0u8; CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE];
     let mut unique_ids = HashSet::new();
 
-    // collect block info in flat array
     for x in 0..CHUNK_SIZE {
         for y in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
-                let idx = (x * CHUNK_SIZE * CHUNK_SIZE)  +  (y * CHUNK_SIZE )  +  z;
-                let block_id: u8 = match chunk.data.get(opos!((x, y, z) @ 0)).unwrap() {
-                    SubdivNode::Leaf(l) => l,
-                    SubdivNode::Branch(_) => { panic!(); },
-                };
-                ids[idx] = block_id;
+                let block_id = *chunk.storage.get(OctPos::from_four(x, y, z, 0)).unwrap();
                 if block_id != 0 {
                     unique_ids.insert(block_id);
                 }
+                let idx = (x * CHUNK_SIZE * CHUNK_SIZE) + (y * CHUNK_SIZE) + z;
+                ids[idx] = block_id;
             }
         }
     }

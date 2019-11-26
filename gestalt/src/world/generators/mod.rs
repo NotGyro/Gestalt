@@ -2,9 +2,10 @@
 
 use cgmath::{Vector3, MetricSpace};
 
-use crate::voxel::subdivstorage::{NaiveVoxelOctree, SubdivDrain};
-use crate::world::{CHUNK_SIZE, CHUNK_SIZE_F32, CHUNK_SCALE};
+use crate::voxel::array_storage::{ArrayStorageType, CHUNK_SIZE, CHUNK_ELEMENTS, xyz_to_index};
 use toolbox::noise::OctavePerlinNoise;
+
+const CHUNK_SIZE_F32: f32 = CHUNK_SIZE as f32;
 
 
 /// Trait for world voxel generators.
@@ -18,7 +19,7 @@ pub trait ChunkGenerator {
     /// # Returns
     ///
     /// The octree generated for the given chunk.
-    fn generate(&self, pos: (i32, i32, i32)) -> NaiveVoxelOctree<u8, ()>;
+    fn generate(&self, pos: (i32, i32, i32)) -> ArrayStorageType;
 }
 
 
@@ -39,8 +40,8 @@ impl SphereGenerator {
 
 #[allow(dead_code)]
 impl ChunkGenerator for SphereGenerator {
-    fn generate(&self, _pos: (i32, i32, i32)) -> NaiveVoxelOctree<u8, ()> {
-        let mut tree = NaiveVoxelOctree::new(0, CHUNK_SCALE);
+    fn generate(&self, _pos: (i32, i32, i32)) -> ArrayStorageType {
+        let mut data = [0u8; CHUNK_ELEMENTS];
 
         let center = Vector3::new(CHUNK_SIZE_F32 / 2.0, CHUNK_SIZE_F32 / 2.0, CHUNK_SIZE_F32 / 2.0);
 
@@ -50,13 +51,13 @@ impl ChunkGenerator for SphereGenerator {
                     let pos = Vector3::new(x as f32, y as f32, z as f32);
                     let dist = pos.distance(center);
                     if dist < 10.0 {
-                        tree.set(opos!((x, y, z) @ 0), 1).unwrap();
+                        data[xyz_to_index(x, y, z)] = 1;
                     }
                 }
             }
         }
 
-        tree
+        data
     }
 }
 
@@ -88,35 +89,33 @@ const GRASS_ID: u8 = 3;
 
 impl ChunkGenerator for PerlinGenerator {
     /// See [ChunkGenerator]
-    fn generate(&self, pos: (i32, i32, i32)) -> NaiveVoxelOctree<u8, ()> {
-        let mut tree = NaiveVoxelOctree::new(0, CHUNK_SCALE);
+    fn generate(&self, pos: (i32, i32, i32)) -> ArrayStorageType {
+        let mut data = [0u8; CHUNK_ELEMENTS];
 
-        const CHUNK_SIZE_I32: i32 = CHUNK_SIZE as i32;
-
-        for x in 0..CHUNK_SIZE_I32 {
-            for z in 0..CHUNK_SIZE_I32 {
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
                 let height_norm = self.perlin.value(
                         pos.0 as f32 * CHUNK_SIZE_F32 + x as f32,
                         pos.2 as f32 * CHUNK_SIZE_F32 + z as f32)
                     / 2.0 + 0.5;
                 let height_abs = height_norm as f32 * 32.0;
 
-                for y in 0..CHUNK_SIZE_I32 {
+                for y in 0..CHUNK_SIZE {
                     if (pos.1 as f32 * CHUNK_SIZE_F32) + y as f32 <= height_abs {
                         if (pos.1 as f32 * CHUNK_SIZE_F32) + y as f32 + 1.0 > height_abs {
-                            tree.set(opos!((x, y, z) @ 0), GRASS_ID).unwrap();
+                            data[xyz_to_index(x, y, z)] = GRASS_ID;
                         }
                         else if (pos.1 as f32 * CHUNK_SIZE_F32) + y as f32 + 4.0 > height_abs {
-                            tree.set(opos!((x, y, z) @ 0), DIRT_ID).unwrap();
+                            data[xyz_to_index(x, y, z)] = DIRT_ID;
                         }
                         else {
-                            tree.set(opos!((x, y, z) @ 0), STONE_ID).unwrap();
+                            data[xyz_to_index(x, y, z)] = STONE_ID;
                         }
                     }
                 }
             }
         }
 
-        tree
+        data
     }
 }

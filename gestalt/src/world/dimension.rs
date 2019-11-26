@@ -1,10 +1,12 @@
 //! A dimension.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicUsize, AtomicU32, Ordering};
 use std::collections::HashMap;
 use cgmath::{Point3, MetricSpace};
 
+use crate::voxel::traits::VoxelStorageAbstract;
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_GENERATING};
 use crate::world::{
     Chunk, CHUNK_SIZE_F32,
@@ -77,7 +79,7 @@ impl Dimension {
         // starting with closest
         for chunk_pos in nearby_positions {
             {
-                let lock = self.chunks.lock().unwrap();
+                let lock = self.chunks.lock();
                 // if the chunk pos already exists, the chunk has already begun (or completed) processing
                 if lock.contains_key(&chunk_pos) {
                     continue;
@@ -91,15 +93,15 @@ impl Dimension {
                 let chunk = Chunk::new(id, chunk_pos, 0); // TODO: use dimension id
                 let chunk_arc = Arc::new(Mutex::new(chunk));
                 {
-                    let mut lock = chunks_arc.lock().unwrap();
+                    let mut lock = chunks_arc.lock();
                     lock.insert(chunk_pos, (chunk_arc.clone(), Arc::new(AtomicUsize::new(CHUNK_STATE_GENERATING))));
                 }
                 let data = gen.generate(chunk_pos);
                 {
-                    let mut lock = chunk_arc.lock().unwrap();
-                    lock.data = data;
+                    let mut lock = chunk_arc.lock();
+                    lock.storage.replace_data(data);
                     {
-                        let mut lock = chunks_arc.lock().unwrap();
+                        let mut lock = chunks_arc.lock();
                         match lock.get(&chunk_pos) {
                             Some(x) => {
                                 let old = x.clone();
@@ -123,7 +125,7 @@ impl Dimension {
 
     /// Removes old chunks as the player moves away.
     pub fn unload_chunks(&mut self, player_pos: Point3<f32>, info: &RenderInfo) {
-        let mut chunks = self.chunks.lock().unwrap();
+        let mut chunks = self.chunks.lock();
         let old_num = chunks.len();
         chunks.retain(|pos, _| {
             let center = Chunk::chunk_pos_to_center_ws((pos.0, pos.1, pos.2));

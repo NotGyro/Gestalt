@@ -4,3 +4,5 @@ pub mod voxelstorage;
 pub mod voxelarray;
 pub mod subdivstorage;
 pub mod subdivspace;
+pub mod traits;
+pub mod array_storage;
