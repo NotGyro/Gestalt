@@ -423,7 +423,8 @@ impl Game {
             phosphor::renderer::DEBUG_VISUALIZE_ALBEDO_BUFFER => "Albedo Buffer",
             phosphor::renderer::DEBUG_VISUALIZE_ROUGHNESS_BUFFER => "Roughness Buffer",
             phosphor::renderer::DEBUG_VISUALIZE_METALLIC_BUFFER => "Metallic Buffer",
-            phosphor::renderer::DEBUG_VISUALIZE_DEFERRED_LIGHTING_ONLY => "Deferred Lighting Only",
+            phosphor::renderer::DEBUG_VISUALIZE_DIFFUSE_LIGHTING_ONLY => "Diffuse Lighting Only",
+            phosphor::renderer::DEBUG_VISUALIZE_SPECULAR_LIGHTING_ONLY => "Specular Lighting Only",
             phosphor::renderer::DEBUG_VISUALIZE_NO_POST_PROCESSING => "No Post Processing",
             phosphor::renderer::DEBUG_VISUALIZE_OCCLUSION_BUFFER => "Occlusion Buffer",
             _ => unreachable!()
