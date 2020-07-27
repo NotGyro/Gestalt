@@ -782,6 +782,6 @@ fn test_octree() {
     tree.set_raw(fourth_pos, "Fourth!".to_owned() ).unwrap();
 
     //We are looking at a 16x16x16 node.
-    let big_node : OctPos <u32> = opos!((0, 0, 0) @ 4);
+    let _big_node : OctPos <u32> = opos!((0, 0, 0) @ 4);
     //if let SubdivNode::Branch(ref branch_dat) = tree.get()
 }

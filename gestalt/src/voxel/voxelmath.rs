@@ -1169,8 +1169,8 @@ fn test_axis_iteration() {
 #[test]
 fn test_axis_iteration_unrolled() {
     let mut list : Vec<VoxelAxis> = Vec::new();
-    voxel_sides_unroll!(dir, {
-        list.push(dir);
+    voxel_sides_unroll!(DIR, {
+        list.push(DIR);
     });
     assert!( list.len() == 6 );
     assert!(list.contains(&VoxelAxis::PosiX));

@@ -52,7 +52,7 @@ pub mod world;
 
 use std::net::SocketAddr;
 use clap::{Arg, App};
-use game::Game;
+use game::ClientGame;
 
 #[allow(non_upper_case_globals)]
 pub mod lumberjack_scopes {
@@ -88,8 +88,6 @@ impl HelloMessage {
 
 impl_netmsg!(HelloMessage, ClientToServer, 1, ReliableUnordered, 1);
 impl_netmsg!(HelloMessage, ServerToClient, 4, ReliableUnordered, 1);
-
-
 
 pub fn main() {
     match sodiumoxide::init() {
@@ -153,15 +151,6 @@ pub fn main() {
 //        //mode = game::GameMode::JoinServer(join_ip.unwrap().parse().unwrap());
 //    }
 
-//    match util::logger::init_logger() {
-//        Ok(_) => {},
-//        Err(error) => {
-//            println!("Unable to initialize logger. Reason: {}. Closing application.", error);
-//            return;
-//        }
-//    }
-
-
     else if net_role == NetworkRole::Offline {
     //let mut rt = tokio::runtime::Runtime::new().unwrap();
         let start_time = Instant::now();
@@ -188,7 +177,7 @@ pub fn main() {
                     Err(_) => {},
                 }
             }
-            Game::new().run();
+            ClientGame::new().run();
         }
         else if net_role == NetworkRole::Server {
             let server_ip_inner : SocketAddr = server_ip.unwrap().parse().unwrap();
@@ -213,7 +202,7 @@ pub fn main() {
             }
         }
         else if net_role == NetworkRole::Offline {
-            Game::new().run();
+            ClientGame::new().run();
         }
     }
 }

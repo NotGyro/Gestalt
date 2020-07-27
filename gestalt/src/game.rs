@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicU64};
 use std::thread;
+use parking_lot::Mutex;
 
 use cgmath::{Point3, MetricSpace, Vector3, EuclideanSpace};
 use winit::{Event, WindowEvent, DeviceEvent, ElementState, EventsLoop, VirtualKeyCode, MouseButton, KeyboardInput};
@@ -15,6 +16,7 @@ use toolbox::{view_to_frustum, aabb_frustum_intersection};
 use crate::input::InputState;
 use crate::world::dimension::DimensionRegistry;
 use crate::metrics::{FrameMetrics, ChunkMetrics};
+use crate::network::*;
 use crate::player::Player;
 use crate::world::{Dimension, Chunk, CHUNK_SIZE_F32};
 use crate::world::chunk::{CHUNK_STATE_DIRTY, CHUNK_STATE_MESHING, CHUNK_STATE_CLEAN, CHUNK_STATE_GENERATING};
@@ -24,27 +26,34 @@ use imgui::{FontSource, FontConfig, FontGlyphRanges, Condition, ImString, im_str
 const MAX_CHUNK_GEN_THREADS: u32 = 1;
 const MAX_CHUNK_MESH_THREADS: u32 = 2;
 
+/// Shared struct for world simulation - including 
+/// serverside, singleplayer, and dead-reckoning on clientside.
+pub struct Node {
+    pub worlds: DimensionRegistry,
+}
 
 /// Main type for the game. `Game::new().run()` runs the game.
-pub struct Game {
+pub struct ClientGame {
     event_loop: EventsLoop,
     renderer: Renderer,
     frame_metrics: FrameMetrics,
     chunk_metrics: ChunkMetrics,
     input_state: InputState,
     player: Player,
-    dimension_registry: DimensionRegistry,
     chunk_generating_threads: Arc<std::sync::atomic::AtomicU32>,
     chunk_meshing_threads: Arc<std::sync::atomic::AtomicU32>,
     visible_ids: [bool; 65536],
     tick: Arc<AtomicU64>,
-    imgui: imgui::Context
+    imgui: imgui::Context,
+    /// The presence or absence of this determines whether or not this is a Singleplayer game or a networked game.
+    net: Option<ClientNet>,
+    universe: Node,
 }
 
 
-impl Game {
+impl ClientGame {
     /// Creates a new `Game`.
-    pub fn new() -> Game {
+    pub fn new() -> ClientGame {
         let mut imgui = imgui::Context::create();
         imgui.set_ini_filename(None);
         imgui.io_mut().config_flags |= imgui::ConfigFlags::DOCKING_ENABLE;
@@ -90,7 +99,7 @@ impl Game {
         let dimension = Dimension::new();
         dimension_registry.dimensions.insert(0, dimension);
 
-        Game {
+        ClientGame {
             event_loop,
             renderer,
             frame_metrics: FrameMetrics::new(),

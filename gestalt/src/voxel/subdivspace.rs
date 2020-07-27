@@ -195,12 +195,12 @@ fn test_subdiv_space() {
     chunk.set(opos!((0,0,1) @ 3), air_id).unwrap();
     chunk.set(opos!((3,0,0) @ 2), air_id).unwrap();
 
-    chunk.root.rebuild_lod();
+    //chunk.root.rebuild_lod();
 
     let mut chunk2 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
     chunk2.set(opos!((0,0,0) @ CHUNK_SCALE), lava_id ).unwrap();
 
-    let mut chunk3 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
+    let chunk3 : NaiveVoxelOctree<TileID, ()> = NaiveVoxelOctree::new(air_id.clone(), CHUNK_SCALE);
 
     let chunk_1_pos = vpos!(0,0,0);
     let chunk_2_pos = vpos!(1,0,0);
