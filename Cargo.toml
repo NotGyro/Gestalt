@@ -1,0 +1,27 @@
+[package]
+name = "gestalt"
+version = "0.0.1"
+authors = ["Sam 'Gyro' C. <gyrocoder@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lazy_static = "1.4.0"
+crossbeam-channel = "0.4.3"
+time = "0.2.16"
+chrono = "0.4.13"
+parking_lot = "0.11.0"
+hashbrown = "0.8.2"
+num = "0.3.0"
+serde = { version = "1.0.114", features = ["derive"] }
+serde_json = "1.0.57"
+ustr = "0.7.0"
+uuid = { version = "0.8.1", features = ["serde", "v4"] }
+log = "0.4.11"
+rand = "0.7"
+
+kiss3d = "0.24.1"
+nalgebra = "0.21.1"
+
+#nphysics3d = "0.16.1"
