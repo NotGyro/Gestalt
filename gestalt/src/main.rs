@@ -1,9 +1,10 @@
 extern crate anyhow;
 #[macro_use] extern crate crossbeam_channel;
 extern crate hashbrown;
+#[macro_use] extern crate hemlock;
 extern crate kiss3d;
 #[macro_use] extern crate lazy_static;
-#[macro_use] extern crate log;
+extern crate log;
 extern crate nalgebra as na;
 extern crate num;
 extern crate parking_lot;
@@ -14,9 +15,14 @@ extern crate serde_json;
 //extern crate ustr;
 extern crate uuid;
 
+use logger::hemlock_scopes;
+
 use kiss3d::light::Light;
 use kiss3d::window::Window;
+use kiss3d::event::{Action, WindowEvent};
+
 use na::{UnitQuaternion, Vector3};
+
 use anyhow::Result;
 
 use std::fs::File;
@@ -27,11 +33,14 @@ use rusty_v8 as v8;
 pub mod world;
 #[macro_use] pub mod util;
 
-//use wasmtime::*;
+/// The main purpose of the Logger module is to define our Hemlock scopes. 
+/// It also contains a https://crates.io/crates/log proxy into Hemlock, so anything 
+/// logged using that crate's macros will show up as coming from the "Library" scope.
+pub mod logger;
 
 fn main() -> Result<()> {
-    match util::logger::init_logger() {
-        Ok(_) => info!("Logger initialized."),
+    match logger::init_logger() {
+        Ok(_) => info!(Core, "Logger initialized."),
         Err(e) => panic!("Could not initialize logger! Reason: {}", e),
     };
     
@@ -64,6 +73,15 @@ fn main() -> Result<()> {
 
     while window.render() {
         c.prepend_to_local_rotation(&rot);
+        
+        for mut event in window.events().iter() {
+            match event.value {
+                WindowEvent::Key(button, Action::Press, _) => {
+                    info!(Test, "You pressed the button: {:?}", button);
+                },
+                _ => {},
+            }
+        }
     }
     Ok(())
 }
