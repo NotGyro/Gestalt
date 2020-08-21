@@ -18,10 +18,14 @@ serde = { version = "1.0.114", features = ["derive"] }
 serde_json = "1.0.57"
 ustr = "0.7.0"
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
-log = "0.4.11"
+log = { version = "0.4.11", features = ["std"] }
 rand = "0.7"
 
 kiss3d = "0.24.1"
 nalgebra = "0.21.1"
+
+rusty_v8 = "0.8.1"
+
+anyhow = "1.0.32"
 
 #nphysics3d = "0.16.1"

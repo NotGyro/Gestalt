@@ -23,6 +23,8 @@
 # Other data generated at runtime.
 /keys/
 /target/keys/
+/temp/
+/logs/
 
 # Logs
 log.csv
@@ -39,3 +41,6 @@ gestalt/log.csv
 # IDEA project stuff
 .idea
 *.iml
+
+# IDE garbate
+.vscode

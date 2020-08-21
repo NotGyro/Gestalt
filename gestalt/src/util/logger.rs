@@ -4,6 +4,12 @@ use parking_lot::Mutex;
 
 use crossbeam_channel::{unbounded, Sender, Receiver};
 
+use std::error::Error;
+
+use std::fs::OpenOptions;
+use std::fs::File;
+use std::io::prelude::*;
+
 pub struct GameLoggerState {
     pub filter_print : LevelFilter,
     pub filter_to_file : LevelFilter, 
@@ -13,6 +19,7 @@ pub struct GameLoggerState {
     /// Used to print current game logic tick, which makes things much more informative.
     pub current_tick : u64,
     pub enable_console_push : bool,
+    pub file : Option<File>,
 }
 
 impl GameLoggerState { 
@@ -31,19 +38,34 @@ impl GameLoggerState {
             }
         }
     }
+
+    fn push_to_file(&mut self, message : String) {
+        if self.file.is_some() {
+            writeln!(self.file.as_mut().unwrap(), "{}", message);
+        }
+    }
+}
+
+impl Drop for GameLoggerState {
+    fn drop(&mut self) {
+        if self.file.is_some() {
+            self.file.as_ref().unwrap().flush().unwrap();
+        }
+    }
 }
 
 lazy_static! {
     pub static ref GAME_LOGGER_STATE : Mutex<GameLoggerState> = {
         let (s, r) = unbounded();
         Mutex::new(GameLoggerState { 
-            filter_print : LevelFilter::Debug,  
-            filter_to_file : LevelFilter::Debug,
-            filter_game_console : LevelFilter::Debug,
+            filter_print : LevelFilter::Info,  
+            filter_to_file : LevelFilter::Info,
+            filter_game_console : LevelFilter::Info,
             console_sender : s, 
             console_receiver : r,
             current_tick : 0,
             enable_console_push : true,
+            file : None,
         })
     };
 }
@@ -52,7 +74,8 @@ struct GameLogger;
 impl GameLogger { 
     /// Used internally, factored out in case we need to use time from a different source. 
     fn time_string(gls : &GameLoggerState) -> String { 
-        format!("{} (tick {})", chrono::Local::now().format("%m/%d/%Y %H:%M:%S"), gls.current_tick) 
+        //format!("{} (tick {})", chrono::Local::now().format("%m/%d/%Y %H:%M:%S"), gls.current_tick) 
+        format!("{}", chrono::Local::now().format("%m/%d/%Y %H:%M:%S")) 
     }
     fn make_log_entry(gls : &GameLoggerState, record : &Record) -> String { 
         //Commenting out the version with module, too verbose.
@@ -77,19 +100,37 @@ impl log::Log for GameLogger {
         
         // TODO: Write to a log file.
         // gls.filter_to_file
+        if record.level() <= gls.filter_to_file {
+            gls.push_to_console(message.clone());
+        }
         // Put messages to the tilde-accessible game console. 
         // (Rendered by polling (gls.game_console_log).
         if record.level() <= gls.filter_game_console {
-            gls.push_to_console(message.clone());
+            gls.push_to_file(message);
         }
         drop(gls);
     }
-    fn flush(&self) {}
+    fn flush(&self) {
+        let mut gls = GAME_LOGGER_STATE.lock();
+        if gls.file.is_some() {
+            gls.file.as_mut().unwrap().flush().unwrap();
+        }
+        drop(gls);
+    }
 }
 
 static GAME_LOGGER : GameLogger = GameLogger;
 
-pub fn init_logger() -> Result<(), SetLoggerError> {
-    log::set_logger(&GAME_LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::max()))
+pub fn init_logger() -> Result<(), Box<dyn Error>> {
+    let mut gls = GAME_LOGGER_STATE.lock();
+    gls.file = Some(OpenOptions::new()
+                                .write(true)
+                                .create(true)
+                                .truncate(true)
+                                .open("logs/game.log")?);
+    
+    drop(gls);
+
+    Ok(log::set_logger(&GAME_LOGGER)
+        .map(|()| log::set_max_level(LevelFilter::max()))?)
 }

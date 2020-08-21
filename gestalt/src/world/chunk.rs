@@ -1,5 +1,5 @@
 use crate::world::tile::TileID;
-use ustr::{ustr, Ustr, UstrMap};
+//use ustr::{ustr, Ustr, UstrMap};
 use hashbrown::HashMap;
 use hashbrown::hash_map::*;
 
@@ -30,7 +30,7 @@ pub fn chunk_i_to_xyz(i : usize) -> (usize, usize, usize) {
 pub struct ChunkSmall {
     data: [u8; CHUNK_VOLUME],
     pub palette: [TileID; 256],
-    reverse_palette: UstrMap<u8>,
+    reverse_palette: HashMap<TileID, u8>,
     highest_idx: u8,
 }
 
@@ -69,7 +69,7 @@ impl ChunkSmall {
         for (i, tile) in self.data.iter().enumerate() {
             new_data[i] = *tile as u16;
         }
-        let mut new_reverse_palette : UstrMap<u16> = UstrMap::default();
+        let mut new_reverse_palette : HashMap<TileID, u16> = HashMap::new();
         for (key, value) in self.reverse_palette.iter() {
             new_reverse_palette.insert(*key, *value as u16);
         }
@@ -108,7 +108,7 @@ impl ChunkSmall {
 pub struct ChunkLarge {
     pub data: [u16; CHUNK_VOLUME],
     pub palette: HashMap<u16, TileID>,
-    pub reverse_palette: UstrMap<u16>,
+    pub reverse_palette: HashMap<TileID, u16>,
 }
 
 impl ChunkLarge {
@@ -155,7 +155,7 @@ impl ChunkLarge {
 
 pub enum ChunkInner {
     ///Chunk that is all one value (usually this is for chunks that are 100% air). Note that, after being converted, idx 0 maps to 
-    Uniform(Ustr),
+    Uniform(TileID),
     ///Chunk that maps palette to 8-bit values.
     Small(Box<ChunkSmall>),
     ///Chunk that maps palette to 16-bit values.
@@ -235,7 +235,7 @@ impl Chunk {
                     let mut data : [u8; CHUNK_VOLUME] = [0; CHUNK_VOLUME];
                     let mut palette : [TileID; 256] = [*val; 256];
                     palette[1] = tile;
-                    let mut reverse_palette: UstrMap<u8> = UstrMap::default();
+                    let mut reverse_palette: HashMap<TileID, u8> = HashMap::new();
                     reverse_palette.insert(*val, 0);
                     reverse_palette.insert(tile, 1);
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
@@ -306,8 +306,10 @@ fn chunk_index_bounds() {
 
 #[test]
 fn assignemnts_to_chunk() {
-    let u1 = Ustr::from("air");
-    let u2 = Ustr::from("stone");
+    //let u1 = Ustr::from("air");
+    //let u2 = Ustr::from("stone");
+    let u1 = 999999999;
+    let u2 = 123456789;
     let mut test_chunk = Chunk{inner: ChunkInner::Uniform(u1)};
 
     {
@@ -368,7 +370,7 @@ fn assignemnts_to_chunk() {
             let y = rng.gen_range(0, CHUNK_SZ);
             let z = rng.gen_range(0, CHUNK_SZ); 
 
-            let tile = Ustr::from( (format!("test.{}", i)).as_str() );
+            let tile = i + 70000;
 
             test_chunk.set(x, y, z, tile);
 
@@ -398,7 +400,7 @@ fn assignemnts_to_chunk() {
             let y = rng.gen_range(0, CHUNK_SZ);
             let z = rng.gen_range(0, CHUNK_SZ); 
 
-            let tile = Ustr::from( (format!("test.{}", i)).as_str() );
+            let tile = i + 900000;
 
             test_chunk.set(x, y, z, tile);
 
