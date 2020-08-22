@@ -1,7 +1,10 @@
-extern crate anyhow;
-#[macro_use] extern crate crossbeam_channel;
-extern crate hashbrown;
 #[macro_use] extern crate hemlock;
+
+extern crate anyhow;
+extern crate bincode;
+#[macro_use] extern crate crossbeam_channel;
+#[macro_use] extern crate custom_error;
+extern crate hashbrown;
 extern crate kiss3d;
 #[macro_use] extern crate lazy_static;
 extern crate log;
@@ -11,7 +14,7 @@ extern crate parking_lot;
 extern crate rand;
 extern crate rusty_v8;
 extern crate serde;
-//extern crate ustr;
+extern crate ustr;
 extern crate uuid;
 
 use logger::hemlock_scopes;
