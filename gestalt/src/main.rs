@@ -11,7 +11,6 @@ extern crate parking_lot;
 extern crate rand;
 extern crate rusty_v8;
 extern crate serde;
-extern crate serde_json;
 //extern crate ustr;
 extern crate uuid;
 
@@ -25,27 +24,78 @@ use na::{UnitQuaternion, Vector3};
 
 use anyhow::Result;
 
+use serde::{Serialize, Deserialize};
+use std::fs::OpenOptions;
 use std::fs::File;
 use std::io::prelude::*;
 
+use ron::ser::{to_string_pretty, PrettyConfig};
+use ron::de::from_reader;
 use rusty_v8 as v8;
 
 pub mod world;
-#[macro_use] pub mod util;
+#[macro_use] pub mod core;
 
 /// The main purpose of the Logger module is to define our Hemlock scopes. 
 /// It also contains a https://crates.io/crates/log proxy into Hemlock, so anything 
 /// logged using that crate's macros will show up as coming from the "Library" scope.
 pub mod logger;
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ClientConfig {
+    pub resolution: (u32, u32),
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self { ClientConfig {resolution: (800,600)} }
+}
+
 fn main() -> Result<()> {
     match logger::init_logger() {
         Ok(_) => info!(Core, "Logger initialized."),
         Err(e) => panic!("Could not initialize logger! Reason: {}", e),
     };
+
+    let client_config_filename = "client.ron";
+
+    let client_config_result = OpenOptions::new().read(true)
+                                                .write(true)
+                                                .truncate(false)
+                                                .open(client_config_filename);
+    let mut create_conf_flag = false;
+    let client_config: ClientConfig = match client_config_result {
+        Ok(file) => {
+            match from_reader(file) {
+                Ok(x) => x,
+                Err(e) => {
+                    error!(Core, "Failed to load client config: {}", e);
+                    error!(Core, "Using default client config values.");
+                    ClientConfig::default()
+                }
+            }
+        }, 
+        Err(e) => {
+            warn!(Core, "Failed to open {} (client config file): {}", client_config_filename, e);
+            warn!(Core, "Using default client config values.");
+            create_conf_flag = true;
+            ClientConfig::default()
+        }
+    };
+
+    // Client.ron wasn't there, create it. 
+    if create_conf_flag { 
+        info!(Core, "Creating {}, since it wasn't there before.", client_config_filename);
+        let mut f = File::create(client_config_filename)?;
+        let pretty = PrettyConfig::new().with_depth_limit(16)
+                                        .with_enumerate_arrays(true);
+        let s = to_string_pretty(&client_config, pretty).expect("Serialization failed");
+        f.write_all(s.as_bytes())?;
+        f.flush()?;
+        drop(f);
+    }
     
-    let mut window = Window::new("Kiss3d: cube");
-    let mut c = window.add_cube(1.0, 1.0, 1.0);
+    let mut window = Window::new_with_size("Gestalt early demo", client_config.resolution.0, client_config.resolution.1);
+    let mut c = window.add_cube(0.1, 0.1, 0.1);
 
     let platform = v8::new_default_platform().unwrap();
     v8::V8::initialize_platform(platform);

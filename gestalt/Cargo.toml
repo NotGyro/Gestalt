@@ -1,33 +1,28 @@
 [package]
 name = "gestalt"
 version = "0.0.1"
-authors = ["Sam 'Gyro' C. <gyrocoder@gmail.com>"]
+authors = ["Sam 'Gyro' C. <gyrocoder@gmail.com>", "trashbyte"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-lazy_static = "1.4.0"
-crossbeam-channel = "0.4.3"
-time = "0.2.16"
-chrono = "0.4.13"
-parking_lot = "0.11.0"
-hashbrown = "0.8.2"
-num = "0.3.0"
-serde = { version = "1.0.114", features = ["derive"] }
-serde_json = "1.0.57"
-ustr = "0.7.0"
-uuid = { version = "0.8.1", features = ["serde", "v4"] }
-log = { version = "0.4.11", features = ["std"] }
-rand = "0.7"
-
-kiss3d = "0.24.1"
-nalgebra = "0.21.1"
-
-rusty_v8 = "0.8.1"
+hemlock = { path = "../hemlock" }
 
 anyhow = "1.0.32"
+chrono = "0.4.15"
+crossbeam-channel = "0.4.3"
+hashbrown = "0.8.2"
+kiss3d = "0.24.1"
+lazy_static = "1.4.0"
+log = { version = "0.4.11", features = ["std"] }
+nalgebra = "0.21.1"
+num = "0.3.0"
+parking_lot = "0.11.0"
+rand = "0.7"
+ron = "0.6.0"
+rusty_v8 = "0.8.1"
+serde = { version = "1.0.115", features = ["derive"] }
+time = "0.2.16"
+ustr = "0.7.0"
+uuid = { version = "0.8.1", features = ["serde", "v4"] }
 
 #nphysics3d = "0.16.1"
-
-hemlock = { path = "../hemlock" }

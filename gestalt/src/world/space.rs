@@ -12,11 +12,11 @@ use std::error::Error;
 use std::result::Result;
 
 pub type TileCoord = i32; 
-pub type TilePos = crate::util::voxelmath::VoxelPos<TileCoord>;
+pub type TilePos = crate::core::voxelmath::VoxelPos<TileCoord>;
 
 //Position of a chunk cell in the space.
 pub type ChunkCoord = i32;
-pub type ChunkPos = crate::util::voxelmath::VoxelPos<ChunkCoord>;
+pub type ChunkPos = crate::core::voxelmath::VoxelPos<ChunkCoord>;
 
 #[allow(dead_code)]
 pub enum SpaceErrorKind {
