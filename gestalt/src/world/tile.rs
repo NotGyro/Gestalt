@@ -1,6 +1,4 @@
-//use ustr::{Ustr, ustr};
-//use uuid::Uuid;
+use ustr::{Ustr, ustr};
+use uuid::Uuid;
 
-//pub type TileID = Ustr;
-
-pub type TileID = u32;
+pub type TileID = Ustr;

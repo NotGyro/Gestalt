@@ -6,6 +6,7 @@ use hashbrown::hash_map::*;
 // Dependencies for testing
 use rand::Rng;
 use rand::thread_rng;
+use ustr::*;
 
 pub const CHUNK_SZ : usize = 32;
 pub const CHUNK_SQUARED : usize = 1024;
@@ -162,7 +163,8 @@ pub enum ChunkInner {
     Large(Box<ChunkLarge>),
 }
 
-pub struct Chunk { 
+pub struct Chunk {
+    revision_number: u64,
     inner: ChunkInner,
 }
 
@@ -170,7 +172,7 @@ impl Chunk {
     #[inline(always)]
     pub fn get_raw(&self, x: usize, y : usize, z: usize) -> usize {
         match &self.inner {
-            ChunkInner::Uniform(_) => 0, 
+            ChunkInner::Uniform(_) => 0,
             ChunkInner::Small(inner) => inner.get_raw(x,y,z) as usize,
             ChunkInner::Large(inner) => inner.get_raw(x,y,z) as usize,
         }
@@ -211,7 +213,7 @@ impl Chunk {
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<TileID> {
         match &self.inner {
-            ChunkInner::Uniform(val) => { 
+            ChunkInner::Uniform(val) => {
                 if idx == 0 { 
                     Some(*val)
                 }
@@ -230,8 +232,8 @@ impl Chunk {
                 if tile == *val {
                     0
                 }
-                else { 
-                    // Convert to a ChunkSmall. 
+                else {
+                    // Convert to a ChunkSmall.
                     let mut data : [u8; CHUNK_VOLUME] = [0; CHUNK_VOLUME];
                     let mut palette : [TileID; 256] = [*val; 256];
                     palette[1] = tile;
@@ -267,6 +269,11 @@ impl Chunk {
     #[inline]
     pub fn set(&mut self, x: usize, y : usize, z: usize, tile: TileID) {
         let idx = self.add_to_palette(tile);
+        //Did we just change something?
+        if self.get(x, y, z) != tile {
+            //Increment revision.
+            self.revision_number += 1;
+        }
         self.set_raw(x,y,z, idx)
     }
 }
@@ -306,11 +313,9 @@ fn chunk_index_bounds() {
 
 #[test]
 fn assignemnts_to_chunk() {
-    //let u1 = Ustr::from("air");
-    //let u2 = Ustr::from("stone");
-    let u1 = 999999999;
-    let u2 = 123456789;
-    let mut test_chunk = Chunk{inner: ChunkInner::Uniform(u1)};
+    let u1 = Ustr::from("air");
+    let u2 = Ustr::from("stone");
+    let mut test_chunk = Chunk{revision_number: 0, inner: ChunkInner::Uniform(u1)};
 
     {
         test_chunk.set(1, 1, 1, u1);
@@ -370,7 +375,8 @@ fn assignemnts_to_chunk() {
             let y = rng.gen_range(0, CHUNK_SZ);
             let z = rng.gen_range(0, CHUNK_SZ); 
 
-            let tile = i + 70000;
+            let name = format!("{}.test",i);
+            let tile = Ustr::from(name.as_str());
 
             test_chunk.set(x, y, z, tile);
 
@@ -400,8 +406,9 @@ fn assignemnts_to_chunk() {
             let y = rng.gen_range(0, CHUNK_SZ);
             let z = rng.gen_range(0, CHUNK_SZ); 
 
-            let tile = i + 900000;
-
+            let name = format!("{}.test",i);
+            let tile = Ustr::from(name.as_str());
+            
             test_chunk.set(x, y, z, tile);
 
             assert_eq!(test_chunk.get(x,y,z), tile);

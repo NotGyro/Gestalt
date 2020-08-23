@@ -1,3 +1,7 @@
+//! Voxel metaverse "game" you can have some fun in.
+
+#![feature(drain_filter)]
+
 #[macro_use] extern crate hemlock;
 
 extern crate anyhow;
@@ -7,6 +11,7 @@ extern crate bincode;
 extern crate hashbrown;
 extern crate kiss3d;
 #[macro_use] extern crate lazy_static;
+//extern crate linear_map;
 extern crate log;
 extern crate nalgebra as na;
 extern crate num;
