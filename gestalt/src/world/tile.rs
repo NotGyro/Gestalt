@@ -1,4 +1,3 @@
-use ustr::{Ustr, ustr};
-use uuid::Uuid;
+use ustr::{Ustr};
 
-pub type TileID = Ustr;
+pub type TileId = Ustr;

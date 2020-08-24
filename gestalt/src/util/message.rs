@@ -4,23 +4,15 @@ use std::result::Result;
 use std::error::Error;
 use std::fmt::Debug;
 use std::collections::VecDeque;
-use std::thread::Thread;
 use std::thread;
-use std::io::*;
-use std::time::Duration;
 
 use ustr::*;
 use crossbeam_channel::*;
 use custom_error::custom_error;
-use hashbrown::HashMap;
 //use linear_map::LinearMap;
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use serde::de::DeserializeOwned;
-
-// Dependencies for testing
-use rand::Rng;
-use rand::thread_rng;
 
 /// Runtime type identifier for a type of message.
 pub type MsgTypeId = Ustr;

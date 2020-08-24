@@ -1,7 +1,7 @@
-use crate::world::tile::TileID;
+use crate::world::tile::TileId;
+use crate::util::voxelmath::*;
 //use ustr::{ustr, Ustr, UstrMap};
 use hashbrown::HashMap;
-use hashbrown::hash_map::*;
 
 // Dependencies for testing
 use rand::Rng;
@@ -13,6 +13,9 @@ pub const CHUNK_SQUARED : usize = 1024;
 pub const CHUNK_VOLUME : usize = 32768;
 //The length of each chunk side is 2^5.
 pub const CHUNK_EXP : usize = 5;
+
+pub const CHUNK_RANGE : VoxelRange<i32> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
+pub const CHUNK_RANGE_USIZE : VoxelRange<usize> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
 
 #[inline(always)] 
 pub fn chunk_xyz_to_i(x : usize, y : usize, z : usize) -> usize {
@@ -30,8 +33,8 @@ pub fn chunk_i_to_xyz(i : usize) -> (usize, usize, usize) {
 /// A smaller chunk structure for chunks which only need 255 unique values.
 pub struct ChunkSmall {
     data: [u8; CHUNK_VOLUME],
-    pub palette: [TileID; 256],
-    reverse_palette: HashMap<TileID, u8>,
+    pub palette: [TileId; 256],
+    reverse_palette: HashMap<TileId, u8>,
     highest_idx: u8,
 }
 
@@ -41,7 +44,7 @@ impl ChunkSmall {
         self.data[chunk_xyz_to_i(x, y, z)]
     }
     #[inline(always)]
-    pub fn get(&self, x: usize, y : usize, z: usize) -> TileID {
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
         //Get our int data and use it as an index for our palette. Yay constant-time!  
         self.palette[self.data[chunk_xyz_to_i(x, y, z)] as usize]
     }
@@ -50,11 +53,11 @@ impl ChunkSmall {
         self.data[chunk_xyz_to_i(x, y, z)] = value;
     }
     #[inline(always)]
-    pub fn index_from_palette(&self, tile: TileID) -> Option<u16> {
+    pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
         self.reverse_palette.get(&tile).map( #[inline(always)] |i| *i as u16)
     }
     #[inline(always)]
-    pub fn tile_from_index(&self, idx: u16) -> Option<TileID> {
+    pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
         if idx > 255 { return None };
         if idx > self.highest_idx as u16 { return None };
         Some(self.palette[idx as usize])
@@ -62,7 +65,7 @@ impl ChunkSmall {
     ///Use this chunk to construct a chunk with u16 tiles rather than u8 ones. 
     #[inline]
     pub fn expand(&self) -> ChunkLarge {
-        let mut new_palette : HashMap<u16, TileID> = HashMap::new();
+        let mut new_palette : HashMap<u16, TileId> = HashMap::new();
         for (i, entry) in self.palette.iter().enumerate() {
             new_palette.insert(i as u16, *entry);
         }
@@ -70,7 +73,7 @@ impl ChunkSmall {
         for (i, tile) in self.data.iter().enumerate() {
             new_data[i] = *tile as u16;
         }
-        let mut new_reverse_palette : HashMap<TileID, u16> = HashMap::new();
+        let mut new_reverse_palette : HashMap<TileId, u16> = HashMap::new();
         for (key, value) in self.reverse_palette.iter() {
             new_reverse_palette.insert(*key, *value as u16);
         }
@@ -82,7 +85,7 @@ impl ChunkSmall {
     /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
     /// If it already exists, return the associated index. If we're out of room, return None.
     #[inline]
-    pub fn add_to_palette(&mut self, tile: TileID) -> Option<u16> {
+    pub fn add_to_palette(&mut self, tile: TileId) -> Option<u16> {
         match self.reverse_palette.get(&tile) {
             Some(idx) => {
                 //Already in the palette. 
@@ -108,8 +111,8 @@ impl ChunkSmall {
 /// Medium chunk structure. 
 pub struct ChunkLarge {
     pub data: [u16; CHUNK_VOLUME],
-    pub palette: HashMap<u16, TileID>,
-    pub reverse_palette: HashMap<TileID, u16>,
+    pub palette: HashMap<u16, TileId>,
+    pub reverse_palette: HashMap<TileId, u16>,
 }
 
 impl ChunkLarge {
@@ -118,7 +121,7 @@ impl ChunkLarge {
         self.data[chunk_xyz_to_i(x, y, z)]
     }
     #[inline(always)]
-    pub fn get(&self, x: usize, y : usize, z: usize) -> TileID {
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
         //Get our int data and use it as an index for our palette. Yay constant-time!  
         self.palette[&self.data[chunk_xyz_to_i(x, y, z)]]
     }
@@ -127,17 +130,17 @@ impl ChunkLarge {
         self.data[chunk_xyz_to_i(x, y, z)] = value;
     }
     #[inline(always)]
-    pub fn index_from_palette(&self, tile: TileID) -> Option<u16> {
+    pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
         self.reverse_palette.get(&tile).map( #[inline(always)] |i| *i)
     }
     #[inline(always)]
-    pub fn tile_from_index(&self, idx: u16) -> Option<TileID> {
+    pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
         self.palette.get(&idx).map( #[inline(always)] |i| *i)
     }
     /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
     /// If it already exists, return the associated index. If we're out of room, return None.
     #[inline]
-    pub fn add_to_palette(&mut self, tile: TileID) -> u16 {
+    pub fn add_to_palette(&mut self, tile: TileId) -> u16 {
         match self.reverse_palette.get(&tile) {
             Some(idx) => {
                 //Already in the palette. 
@@ -156,7 +159,7 @@ impl ChunkLarge {
 
 pub enum ChunkInner {
     ///Chunk that is all one value (usually this is for chunks that are 100% air). Note that, after being converted, idx 0 maps to 
-    Uniform(TileID),
+    Uniform(TileId),
     ///Chunk that maps palette to 8-bit values.
     Small(Box<ChunkSmall>),
     ///Chunk that maps palette to 16-bit values.
@@ -164,8 +167,8 @@ pub enum ChunkInner {
 }
 
 pub struct Chunk {
-    revision_number: u64,
-    inner: ChunkInner,
+    pub revision_number: u64,
+    pub inner: ChunkInner,
 }
 
 impl Chunk {
@@ -178,12 +181,16 @@ impl Chunk {
         }
     }
     #[inline(always)]
-    pub fn get(&self, x: usize, y : usize, z: usize) -> TileID {
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
         match &self.inner{
             ChunkInner::Uniform(val) => *val, 
             ChunkInner::Small(inner) => inner.get(x,y,z),
             ChunkInner::Large(inner) => inner.get(x,y,z),
         }
+    }
+    #[inline(always)]
+    pub fn getv(&self, pos: VoxelPos<usize>) -> TileId {
+        self.get(pos.x, pos.y, pos.z)
     }
     #[inline(always)]
     pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u16) {
@@ -196,7 +203,7 @@ impl Chunk {
         };
     }
     #[inline(always)]
-    pub fn index_from_palette(&self, tile: TileID) -> Option<u16> {
+    pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
         match &self.inner {
             ChunkInner::Uniform(val) => { 
                 if tile == *val { 
@@ -211,7 +218,7 @@ impl Chunk {
         }
     }
     #[inline(always)]
-    pub fn tile_from_index(&self, idx: u16) -> Option<TileID> {
+    pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
         match &self.inner {
             ChunkInner::Uniform(val) => {
                 if idx == 0 { 
@@ -226,7 +233,7 @@ impl Chunk {
         }
     }
     #[inline]
-    pub fn add_to_palette(&mut self, tile: TileID) -> u16 {
+    pub fn add_to_palette(&mut self, tile: TileId) -> u16 {
         match &mut self.inner {
             ChunkInner::Uniform(val) => {
                 if tile == *val {
@@ -235,9 +242,9 @@ impl Chunk {
                 else {
                     // Convert to a ChunkSmall.
                     let mut data : [u8; CHUNK_VOLUME] = [0; CHUNK_VOLUME];
-                    let mut palette : [TileID; 256] = [*val; 256];
+                    let mut palette : [TileId; 256] = [*val; 256];
                     palette[1] = tile;
-                    let mut reverse_palette: HashMap<TileID, u8> = HashMap::new();
+                    let mut reverse_palette: HashMap<TileId, u8> = HashMap::new();
                     reverse_palette.insert(*val, 0);
                     reverse_palette.insert(tile, 1);
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
@@ -267,7 +274,7 @@ impl Chunk {
         }
     }
     #[inline]
-    pub fn set(&mut self, x: usize, y : usize, z: usize, tile: TileID) {
+    pub fn set(&mut self, x: usize, y : usize, z: usize, tile: TileId) {
         let idx = self.add_to_palette(tile);
         //Did we just change something?
         if self.get(x, y, z) != tile {
@@ -275,6 +282,10 @@ impl Chunk {
             self.revision_number += 1;
         }
         self.set_raw(x,y,z, idx)
+    }
+    #[inline(always)]
+    pub fn setv(&mut self, pos: VoxelPos<usize>, tile: TileId) {
+        self.set(pos.x, pos.y, pos.z, tile);
     }
 }
 

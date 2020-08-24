@@ -21,6 +21,8 @@ use std::error::Error;
 
 use serde::{Serialize, Deserialize};
 
+use cgmath::{Vector3, Point3};
+
 pub trait USizeAble {
     fn as_usize(&self) -> usize;
     fn from_usize(val : usize) -> Self;
@@ -921,7 +923,7 @@ impl <T> VoxelPos<T> where T : VoxelCoord + Unsigned {
     }
 }
 
-/*
+
 #[derive(Clone, Debug)]
 pub struct VoxelRaycast {
 	pub pos : VoxelPos<i32>,
@@ -1098,7 +1100,7 @@ impl VoxelRaycast {
         }
     }
 }
-*/
+
 #[test]
 fn test_voxel_range_iteration() {
     let side1 = 50;

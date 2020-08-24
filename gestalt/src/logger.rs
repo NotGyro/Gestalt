@@ -20,7 +20,7 @@ pub mod hemlock_scopes {
         pub static ref Test:     u32 = hemlock::register_scope(Scope::new("Test").log(Verbose).print(Verbose));
         pub static ref Network:  u32 = hemlock::register_scope(Scope::new("Network").print(Info));
         pub static ref Renderer: u32 = hemlock::register_scope(Scope::new("Renderer"));
-        pub static ref Mesher:   u32 = hemlock::register_scope(Scope::new("Mesher"));
+        pub static ref Mesher:   u32 = hemlock::register_scope(Scope::new("Mesher").log(Verbose).print(Verbose));
     }
 }
 
