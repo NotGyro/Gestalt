@@ -1,6 +1,7 @@
 //! Voxel metaverse "game" you can have some fun in.
 
 #![feature(drain_filter)]
+#![feature(seek_convenience)]
 
 #[macro_use] extern crate hemlock;
 
@@ -8,6 +9,7 @@ extern crate anyhow;
 extern crate bincode;
 #[macro_use] extern crate crossbeam_channel;
 #[macro_use] extern crate custom_error;
+#[macro_use] extern crate enum_dispatch;
 #[macro_use] extern crate glium;
 extern crate glutin;
 extern crate hashbrown;
@@ -19,19 +21,20 @@ extern crate num;
 extern crate parking_lot;
 extern crate rand;
 extern crate rusty_v8;
+extern crate semver;
 extern crate serde;
 extern crate ustr;
 extern crate uuid;
 
-use cgmath::{Angle, Matrix4, Vector3, Vector4, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad};
+use cgmath::{Angle, Matrix4, Vector3, /*Vector4,*/ Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad};
 
 use glium::backend::glutin::Display;
 use glutin::window::*;
 use glutin::event::*;
 use glutin::event_loop::*;
 use glutin::ContextBuilder;
-use glutin::dpi::LogicalPosition;
-use glutin::dpi::PhysicalPosition;
+//use glutin::dpi::LogicalPosition;
+//use glutin::dpi::PhysicalPosition;
 use glium::Surface;
 
 use logger::hemlock_scopes;
@@ -41,6 +44,7 @@ use std::fs::OpenOptions;
 use std::fs::File;
 use std::io::prelude::*;
 use std::error::Error;
+//use std::time::Duration;
 use core::ops::Neg;
 use num::Zero;
 
@@ -85,7 +89,7 @@ impl Default for ClientConfig {
 }
 
 fn main() -> anyhow::Result<()> {
-    let air = ustr("air");
+    //let air = ustr("air");
     let stone = ustr("stone");
     let dirt = ustr("dirt");
     let grass = ustr("grass");
@@ -95,7 +99,7 @@ fn main() -> anyhow::Result<()> {
     for x in -2 .. 2 {
         for y in -2 .. 2 {
             for z in -2 .. 2 {
-                space.load_or_gen_chunk(vpos!(x,y,z));
+                space.load_or_gen_chunk(vpos!(x,y,z)).unwrap();
             }
         }
     }
@@ -151,8 +155,8 @@ fn main() -> anyhow::Result<()> {
     let mut fshaderfile = File::open("fragmentshader.glsl").unwrap();
     let mut vertex_shader_src = String::new();
     let mut fragment_shader_src = String::new();
-    vshaderfile.read_to_string(&mut vertex_shader_src);
-    fshaderfile.read_to_string(&mut fragment_shader_src);
+    vshaderfile.read_to_string(&mut vertex_shader_src).unwrap();
+    fshaderfile.read_to_string(&mut fragment_shader_src).unwrap();
 
     let program = glium::Program::from_source(&display, vertex_shader_src.as_ref(), fragment_shader_src.as_ref(), None).unwrap();
 
@@ -177,7 +181,7 @@ fn main() -> anyhow::Result<()> {
 
     //let mut perspective_matrix : cgmath::Matrix4<f32> = cgmath::perspective(cgmath::deg(45.0), 1.333, 0.0001, 100.0);
     //let mut view_matrix : Matrix4<f32> = Matrix4::look_at(view_eye, view_center, view_up);
-    let model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);
+    //let model_matrix : Matrix4<f32> = Matrix4::from_scale(1.0);
     
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
@@ -198,8 +202,11 @@ fn main() -> anyhow::Result<()> {
     tile_art_manager.insert(dirt, dirt_art.clone());
 
     for chunk in space.get_loaded_chunks() {
-        info!(Mesher, "Forcing mesh of {:?}", chunk);
+        info!(Mesher, "Forcing mesh of {}...", chunk);
+        let start = time::Instant::now();
         renderer.force_mesh(&space, chunk, &display, &tile_art_manager);
+        let elapsed = start.elapsed();
+        info!(Mesher, "Meshing {} took {} milliseconds", chunk, elapsed.num_milliseconds());
     }
 
     //---- Some movement stuff ----
@@ -209,12 +216,12 @@ fn main() -> anyhow::Result<()> {
     let mut s_down : bool = false;
     let mut d_down : bool = false;
 
-    let mut set_action : bool = false;
+    /*let mut set_action : bool = false;
     let mut delete_action : bool = false;
-    
+
     
     let screen_center_x : i32 = client_config.resolution.0 as i32 /2;
-    let screen_center_y : i32 = client_config.resolution.1 as i32 /2;
+    let screen_center_y : i32 = client_config.resolution.1 as i32 /2;*/
     
     let mut mouse_first_moved : bool = false;
     let mut grabs_mouse : bool = true;
@@ -339,5 +346,5 @@ fn main() -> anyhow::Result<()> {
         lastupdate = precise_time_s();
     });
 
-    Ok(())
+    //Ok(())
 }

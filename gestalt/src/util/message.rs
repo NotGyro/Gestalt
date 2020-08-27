@@ -4,12 +4,10 @@ use std::result::Result;
 use std::error::Error;
 use std::fmt::Debug;
 use std::collections::VecDeque;
-use std::thread;
 
 use ustr::*;
 use crossbeam_channel::*;
 use custom_error::custom_error;
-//use linear_map::LinearMap;
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use serde::de::DeserializeOwned;
@@ -32,7 +30,15 @@ pub trait RegisteredMessage: Clone + Debug + Serialize + DeserializeOwned + Send
     fn msg_ty() -> MsgTypeId;
     fn unpack(msg: &MsgData) -> Result<Self, Box<dyn Error>>;
     fn construct_message(&self) -> Result<Message, Box<dyn Error>>;
-    fn unpack_from(msg: Message) -> Result<Self, Box<dyn Error>>;
+
+    fn unpack_from(msg: Message) -> Result<Self, Box<dyn Error>> {
+        if msg.ty != Self::msg_ty() {
+            Err(Box::new(MessageError::MessageCastFailure{target: Self::msg_ty(), src: msg.ty.clone()}))
+        }
+        else {
+            Ok(Self::unpack(&msg.data)?)
+        }
+    }
 }
 
 //MsgSender gets to be pretty lightweight. MsgReceiver wishes it could be this lucky.
@@ -151,6 +157,29 @@ impl MsgReceiver {
     }
 }
 
+pub struct TypedMsgReceiver<T: RegisteredMessage>  {
+    receiver: MsgReceiverInternal,
+    /// We maintain our own (cached?) queue so that we don't have the overhead of locking a mutex on every invocation of poll().
+    pub our_queue: VecDeque<T>,
+}
+impl<T> TypedMsgReceiver<T> where T: RegisteredMessage {
+    #[inline(always)]
+    fn poll_inner(&mut self) {
+        if let Some(ref mut rece) = self.receiver.poll() {
+            //TODO: More graceful error handling here.
+            self.our_queue.append( &mut rece.iter_mut().map(|m| T::unpack(&m.data).unwrap() ).collect() );
+        }
+    }
+    #[inline(always)]
+    pub fn poll(&mut self) -> Option<T> { 
+        self.poll_inner();
+        self.our_queue.pop_front()
+    }
+    pub fn accepted_type() -> MsgTypeId { 
+        T::msg_ty()
+    }
+}
+
 /// An event bus that multicasts incoming events out to all consumers.
 pub struct EventBus { 
     /// This is where events sent to the bus / journal will go.
@@ -158,14 +187,16 @@ pub struct EventBus {
     /// Used to clone repeatedly for senders to this bus
     sender_template : Sender<Message>,
     /// A list of registered subscribers. Each receiving queue is owned by the consumer.
-    subscribers : Vec<MsgReceiverInternal>
+    subscribers : Vec<MsgReceiverInternal>,
+    /// A map of MsgTypeIDs -> Single-type subscribers.
+    typed_subscribers: UstrMap<Vec<MsgReceiverInternal>>,
 }
 
 impl EventBus {
     #[allow(dead_code)]
     pub fn new() -> EventBus {
         let (s_in, r_in) = unbounded();
-        EventBus { our_receiver : r_in, sender_template : s_in, subscribers : Vec::new(),}
+        EventBus { our_receiver : r_in, sender_template : s_in, subscribers : Vec::new(), typed_subscribers: UstrMap::default()}
     }
 
     /// Gives you a Crossbeam Sender to push events to this bus.
@@ -174,7 +205,7 @@ impl EventBus {
         MsgSender(self.sender_template.clone())
     }
 
-    /// Gives you a Crossbeam Receiver where you can poll events from this bus, and an ID you can
+    /// Gives you a receiver you can use to poll events from this bus, and an ID you can
     /// use to unsubscribe later.
     pub fn subscribe(&mut self) -> MsgReceiver { 
         let resl = Arc::new( MsgQueueThreaded {
@@ -185,6 +216,24 @@ impl EventBus {
 
         return MsgReceiver{receiver: resl, our_queue: VecDeque::new()};
     }
+    /// Gives you a recevier that only accepts a single type of message.
+    pub fn subscribe_typed<T: RegisteredMessage>(&mut self) -> TypedMsgReceiver<T> {
+        let resl = Arc::new( MsgQueueThreaded {
+            is_empty: AtomicBool::new(true),
+            queue: Mutex::new(Vec::new()),
+        });
+        match self.typed_subscribers.get_mut(&T::msg_ty()) {
+            Some(list) => {
+                list.push(resl.clone());
+            },
+            None =>  {
+                self.typed_subscribers.insert(T::msg_ty(), vec![resl.clone()]);
+            }
+        }
+        
+        return TypedMsgReceiver{receiver: resl, our_queue: VecDeque::new()};
+    }
+    
     /// If a MsgReceiver has been dropped on the other end, clean up our reference to it.
     #[allow(unused_must_use)]
     pub fn garbage_collect(&mut self) {
@@ -207,53 +256,74 @@ impl EventBus {
         for subscriber in self.subscribers.iter() {
             subscriber.send(message.clone());
         }
+        if let Some(typed_subscriber_list) = self.typed_subscribers.get(&message.ty) {
+            for sub in typed_subscriber_list { 
+                sub.send(message.clone());
+            }
+        }
     }
 }
 
-custom_error!{MessageError
+custom_error!{ pub MessageError
     MissingChannel{channel: ChannelId} = "Attempted to access channel {channel}, which does not exist.",
     CreateChannelAlreadyExists{channel: ChannelId} = "Attempted to create channel {channel}, which exists already.",
-    MessageCastFailure{target: MsgTypeId, src: MsgTypeId} = "Attempted to downcast a {src} message into {target}."
+    MessageCastFailure{target: MsgTypeId, src: MsgTypeId} = "Attempted to downcast a {src} message into {target}.",
+    InvalidMessage{msg_ty: MsgTypeId} = "A message of type {msg_ty} contained invalid data.",
+}
+
+/*
+pub enum ChannelDomain { 
+    Global, 
+    World(crate::world::WorldId),
 }
 
 pub struct MessageSystem {
-    //namespaces: UstrSet,
-    //A list of every channel ID put into a particular namespace, by the namespace name.
-    //ns_channels: UstrMap<Vec<UstrSet>>,
-    channels: UstrMap<EventBus>,
+    global_channels: UstrMap<EventBus>,
+    per_world_channels: HashMap<crate::world::WorldId, UstrMap<EventBus>>,
 }
 
 impl MessageSystem {
     pub fn process(&self) {
-        for (_,chan) in self.channels.iter() {
+        for (_,chan) in self.global_channels.iter() {
             chan.process();
         }
     }
-    pub fn send(&self, chan: ChannelId, message: Message) -> Result<(), Box<dyn Error>> {
-        Ok(self.channels.get(&chan).ok_or(
-            Box::new(MessageError::MissingChannel{channel: chan.clone()})
-        )?.broadcast(message)
-        )
+    pub fn send(&self, chan: ChannelId, context: ChannelDomain, message: Message) -> Result<(), Box<dyn Error>> {
+        match context {
+            ChannelDomain::Global => {
+                Ok(self.global_channels.get(&chan).ok_or(
+                    Box::new(MessageError::MissingChannel{channel: chan.clone()})
+                )?.broadcast(message)
+                )
+            },
+            ChannelDomain::World(id) => {
+                Ok(self.per_world_channels.get(&id).ok_or(Box::new(MessageError::MissingChannel{channel: chan.clone()}))?
+                    .get(&chan).ok_or(
+                        Box::new(MessageError::MissingChannel{channel: chan.clone()})
+                    )?.broadcast(message)
+                )
+            }
+        }
     }
-    pub fn sender_for(&mut self, chan: ChannelId) -> Result<MsgSender, Box<dyn Error>> {
-        Ok(self.channels.get_mut(&chan).ok_or(
+    pub fn sender_for(&mut self, chan: ChannelId, context: ChannelDomain) -> Result<MsgSender, Box<dyn Error>> {
+        Ok(self.global_channels.get_mut(&chan).ok_or(
             Box::new(MessageError::MissingChannel{channel: chan.clone()})
         )?.get_sender()
         )
     }
-    pub fn subscribe_to(&mut self, chan: ChannelId) -> Result<MsgReceiver, Box<dyn Error>> {
-        Ok(self.channels.get_mut(&chan).ok_or(
+    pub fn subscribe_to(&mut self, chan: ChannelId, context: ChannelDomain) -> Result<MsgReceiver, Box<dyn Error>> {
+        Ok(self.global_channels.get_mut(&chan).ok_or(
             Box::new(MessageError::MissingChannel{channel: chan.clone()})
         )?.subscribe()
         )
     }
-    pub fn make_channel(&mut self, chan: &ChannelId) -> Result<(), Box<dyn Error>> {
-        if self.channels.contains_key(chan) {
+    pub fn make_channel(&mut self, chan: &ChannelId, context: ChannelDomain) -> Result<(), Box<dyn Error>> {
+        if self.global_channels.contains_key(chan) {
             Err(Box::new(MessageError::CreateChannelAlreadyExists{channel: chan.clone()}))
         }
         else {
             let (s,r) = unbounded();
-            self.channels.insert(chan.clone(), EventBus { 
+            self.global_channels.insert(chan.clone(), EventBus { 
                 our_receiver : r,
                 sender_template : s,
                 subscribers : Vec::new(),
@@ -269,22 +339,24 @@ lazy_static! {
     pub static ref MESSAGE_SYSTEM: Mutex<MessageSystem> = Mutex::new(MessageSystem{channels: UstrMap::default()} );
     pub static ref MESSANGER_THREAD : std::thread::JoinHandle<()> = thread::spawn(move || {
         loop {
-            MESSAGE_SYSTEM.lock().process();
+            if let Some(system) = MESSAGE_SYSTEM.try_lock() {
+                system.process()
+            }
         }
     });
 }
 
-pub fn send_message(chan: ChannelId, msg: Message) -> Result<(), Box<dyn Error>> {
-    MESSAGE_SYSTEM.lock().send(chan, msg)
+pub fn send_message(chan: ChannelId, context: ChannelDomain, msg: Message) -> Result<(), Box<dyn Error>> {
+    MESSAGE_SYSTEM.lock().send(chan, context, msg)
 }
-pub fn channel_sender(chan: ChannelId) -> Result<MsgSender, Box<dyn Error>> {
-    MESSAGE_SYSTEM.lock().sender_for(chan)
+pub fn channel_sender(chan: ChannelId, context: ChannelDomain) -> Result<MsgSender, Box<dyn Error>> {
+    MESSAGE_SYSTEM.lock().sender_for(chan, context)
 }
-pub fn subscribe_channel(chan: ChannelId) -> Result<MsgReceiver, Box<dyn Error>> {
-    MESSAGE_SYSTEM.lock().subscribe_to(chan)
+pub fn subscribe_channel(chan: ChannelId, context: ChannelDomain) -> Result<MsgReceiver, Box<dyn Error>> {
+    MESSAGE_SYSTEM.lock().subscribe_to(chan, context)
 }
-pub fn make_channel(chan: ChannelId) -> Result<(), Box<dyn Error>> {
-    MESSAGE_SYSTEM.lock().make_channel(&chan)
+pub fn make_channel(chan: ChannelId, context: ChannelDomain) -> Result<(), Box<dyn Error>> {
+    MESSAGE_SYSTEM.lock().make_channel(&chan, context)
 }
 
 #[test]
@@ -343,6 +415,118 @@ fn test_send_message() {
         count += 1;
         println!("{}", msg.ty);
         println!("{}", bincode::deserialize::<String>(msg.data.as_slice()).unwrap());
+    }
+    assert_eq!(count, 11);
+}
+*/
+#[test]
+fn test_make_channel() {
+    let (s,r) = unbounded();
+    let _channel = EventBus { 
+        our_receiver : r,
+        sender_template : s,
+        subscribers : Vec::new(),
+        typed_subscribers : UstrMap::default(),
+    };
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct TestMessage(String);
+
+impl RegisteredMessage for TestMessage {
+    fn msg_ty() -> MsgTypeId { ustr("test_string") }
+    fn unpack(msg: &MsgData) -> Result<Self, Box<dyn Error>>{
+        Ok( TestMessage{ 0: bincode::deserialize_from(msg.as_slice())? } )
+    }
+    fn construct_message(&self) -> Result<Message, Box<dyn Error>> {
+        Ok(Message{ty: Self::msg_ty(), data: bincode::serialize(&self.0)?})
+    }
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct TestMessage2(String);
+
+impl RegisteredMessage for TestMessage2 {
+    fn msg_ty() -> MsgTypeId { ustr("test_string_2") }
+    fn unpack(msg: &MsgData) -> Result<Self, Box<dyn Error>>{
+        Ok( TestMessage2{ 0: bincode::deserialize_from(msg.as_slice())? } )
+    }
+    fn construct_message(&self) -> Result<Message, Box<dyn Error>> {
+        Ok(Message{ty: Self::msg_ty(), data: bincode::serialize(&self.0)?})
+    }
+
+    fn unpack_from(msg: Message) -> Result<Self, Box<dyn Error>> {
+        if msg.ty != Self::msg_ty() {
+            Err(Box::new(MessageError::MessageCastFailure{target: Self::msg_ty(), src: msg.ty.clone()}))
+        }
+        else {
+            Ok(Self::unpack(&msg.data)?)
+        }
+    }
+}
+
+#[allow(unused_must_use)]
+#[test]
+fn test_send_message() {
+    let mut channel = EventBus::new();
+    
+    let mut receiver = channel.subscribe();
+    
+    let msg1 = TestMessage{ 0: String::from("msg_test")};
+
+    channel.broadcast(msg1.construct_message().unwrap());
+
+    //thread::sleep(std::time::Duration::from_millis(100));
+    let mut count = 0;
+    while let Some(msg) = receiver.poll() {
+        count += 1;
+        println!("{}", msg.ty);
+        if msg.ty != ustr("test_string") {panic!()}
+    }
+    assert_eq!(count, 1);
+    for i in 0..10 {
+        let msg = TestMessage{ 0: format!("test.{}",i) };
+
+        channel.broadcast(msg.construct_message().unwrap());
+    }
+    while let Some(msg) = receiver.poll() {
+        count += 1;
+        println!("{}", msg.ty);
+        println!("{}", bincode::deserialize::<String>(msg.data.as_slice()).unwrap());
+    }
+    assert_eq!(count, 11);
+}
+
+
+#[allow(unused_must_use)]
+#[test]
+fn test_send_message_typed() {
+    let mut channel = EventBus::new();
+
+    let mut receiver : TypedMsgReceiver<TestMessage> = channel.subscribe_typed();
+    
+    let msg1 = TestMessage{ 0: String::from("msg test")};
+    let msg2 = TestMessage2{ 0: String::from("second test")};
+
+    channel.broadcast(msg1.construct_message().unwrap());
+    channel.broadcast(msg2.construct_message().unwrap());
+
+    //This is a typed receiver that only gets "TestMessage" type messages. 
+    //Even if we send a TestMessage2, this receiver should not get it.
+    let mut count = 0;
+    while let Some(msg) = receiver.poll() {
+        count += 1;
+        assert_eq!(msg.0, msg1.0);
+    }
+    assert_eq!(count, 1);
+
+    for i in 0..10 {
+        let msg = TestMessage{ 0: format!("test.{}",i) };
+
+        channel.broadcast(msg.construct_message().unwrap());
+        channel.broadcast(msg2.construct_message().unwrap());
+    }
+    while receiver.poll().is_some() {
+        count += 1;
     }
     assert_eq!(count, 11);
 }

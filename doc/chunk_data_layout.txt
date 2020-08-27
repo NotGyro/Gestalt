@@ -1,0 +1,19 @@
+Header: //40 bytes fixed size.
+	Version: 
+		u64 major;
+		u64 minor;
+		u64 patch;
+ 	u64 type/flags;
+	u64 revision_number;
+	
+bytes Data; //This will be absent if type is Uniform, CHUNK_VOLUME bytes if Small, CHUNK_VOLUME*2 if Large.
+
+Palette: 
+	u16 palette_count;
+	u64 palette_size; //Doesn't include itself. Missing in a "Uniform" chunk. 
+	(Entry:
+		u16 idx;
+		u16 name_length;
+		bytes name;
+	)+
+	//Minimum entry size is 32 bits / 4 bytes, you'll notice.

@@ -6,65 +6,12 @@ use crate::util::voxelmath::*;
 
 use hashbrown::HashMap;
 
-use std::fmt::{Display, Debug};
-use std::fmt;
-use std::error;
 use std::error::Error;
 use std::result::Result;
 use ustr::*;
 
-pub type TileCoord = i32; 
-pub type TilePos = VoxelPos<TileCoord>;
-
-//Position of a chunk cell in the space.
-pub type ChunkCoord = i32;
-pub type ChunkPos = VoxelPos<ChunkCoord>;
-
-#[allow(dead_code)]
-pub enum SpaceErrorKind {
-    OutOfBounds,
-    ChunkBoundIssue,
-    NotYetLoaded,
-    Other,
-}
-/// An error reported upon trying to get or set a voxel outside of our range.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum SpaceError {
-    OutOfBounds(TilePos),
-    ChunkBoundIssue(TilePos, ChunkPos),
-    NotYetLoaded(TilePos),
-    Other(Box<dyn error::Error + 'static>),
-}
-
-impl SpaceError {
-    #[allow(dead_code)]
-    fn kind(&self) -> SpaceErrorKind {
-        match self {
-            SpaceError::OutOfBounds(_) => SpaceErrorKind::OutOfBounds,
-            SpaceError::ChunkBoundIssue(_,_) => SpaceErrorKind::ChunkBoundIssue,
-            SpaceError::NotYetLoaded(_) => SpaceErrorKind::NotYetLoaded,
-            SpaceError::Other(_) => SpaceErrorKind::Other,
-        }
-    }
-}
-
-impl Display for SpaceError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            SpaceError::OutOfBounds(pos) => write!(f, "Attempted to access a voxel at position {}, which is out of bounds on this space.", pos),
-            SpaceError::ChunkBoundIssue(pos, chunkpos) => 
-                write!(f, "Attempted to access a voxel at position {}, on chunk cell {}, which did not accept this as in-bounds.", pos, chunkpos),
-            SpaceError::NotYetLoaded(pos) => write!(f, "Attempted to access a voxel position {}, which is not yet loaded.", pos),
-            SpaceError::Other(err) => write!(f, "Other voxel error: {}", err),
-        }
-    }
-}
-impl Error for SpaceError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None //I would love to have it to handle Other correctly but nope, the sized variablre requirement isn't having it.
-    }
-}
+use crate::world::voxelstorage::*;
+use crate::world::{ChunkCoord, ChunkPos, TileCoord, TilePos};
 
 pub struct Space {
     /// HashMap<chunk position, chunk>
@@ -93,7 +40,7 @@ impl Space {
     pub fn new() -> Self { 
         Space { chunks : HashMap::new() }
     }
-    pub fn get(&self, pos: TilePos) -> Result<TileId, SpaceError> {
+    pub fn get(&self, pos: TilePos) -> Result<TileId, VoxelError> {
         let (x, chx) = world_to_chunk_local_coord(pos.x);
         let (y, chy) = world_to_chunk_local_coord(pos.y);
         let (z, chz) = world_to_chunk_local_coord(pos.z);
@@ -101,10 +48,10 @@ impl Space {
             Some(chunk) => {
                 return Result::Ok(chunk.get(x, y, z));
             },
-            None => return Result::Err(SpaceError::NotYetLoaded(pos)),
+            None => return Result::Err(VoxelError::NotYetLoaded(pos)),
         }
     }
-    pub fn set(&mut self, pos: TilePos, value: TileId) -> Result<(), SpaceError> {
+    pub fn set(&mut self, pos: TilePos, value: TileId) -> Result<(), VoxelError> {
         let (x, chx) = world_to_chunk_local_coord(pos.x);
         let (y, chy) = world_to_chunk_local_coord(pos.y);
         let (z, chz) = world_to_chunk_local_coord(pos.z);
@@ -113,7 +60,7 @@ impl Space {
                 (*chunk).set(x, y, z, value);
                 return Result::Ok(());
             },
-            None => return Result::Err(SpaceError::NotYetLoaded(pos)),
+            None => return Result::Err(VoxelError::NotYetLoaded(pos)),
         }
     }
     pub fn borrow_chunk(&self, chunk: ChunkPos) -> Option<&Chunk> {
@@ -127,11 +74,11 @@ impl Space {
     pub fn gen_chunk(&mut self, pos: ChunkPos) -> Result<(), Box<dyn Error>> {
         if pos.y > 0 {
             //Surface chunk, all air.
-            let chunk = Chunk{revision_number: 0, inner: ChunkInner::Uniform(ustr("air"))};
+            let chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("air"))};
             self.chunks.insert(pos, chunk);
         }
         else if pos.y == 0  {
-            let mut chunk = Chunk{revision_number: 0, inner: ChunkInner::Uniform(ustr("stone"))};
+            let mut chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("stone"))};
             let grass_id = chunk.add_to_palette(ustr("grass"));
             let dirt_id = chunk.add_to_palette(ustr("dirt"));
             for x in 0..CHUNK_SZ {
@@ -150,7 +97,7 @@ impl Space {
         }
         else { 
             //Necessarily, pos.y < 0
-            let chunk = Chunk{revision_number: 0, inner: ChunkInner::Uniform(ustr("stone"))};
+            let chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("stone"))};
             self.chunks.insert(pos, chunk);
         }
         Ok(())

@@ -506,6 +506,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "bincode",
+ "byteorder",
  "cgmath",
  "chrono",
  "crossbeam-channel",
@@ -524,6 +525,7 @@ dependencies = [
  "rand 0.7.3",
  "ron",
  "rusty_v8",
+ "semver 0.10.0",
  "serde",
  "time 0.2.16",
  "ustr",
@@ -1596,7 +1598,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
- "semver",
+ "semver 0.9.0",
 ]
 
 [[package]]
@@ -1664,6 +1666,15 @@ name = "semver"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
+dependencies = [
+ "semver-parser",
+]
+
+[[package]]
+name = "semver"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "394cec28fa623e00903caf7ba4fa6fb9a0e260280bb8cdbbba029611108a0190"
 dependencies = [
  "semver-parser",
 ]

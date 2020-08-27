@@ -7,18 +7,18 @@ use std::collections::HashMap;
 
 use glium::texture::RawImage2d;
 use glium::texture::Texture2dArray;
-use glium::texture::Texture2dDataSource;
+//use glium::texture::Texture2dDataSource;
 //use glium::backend::Display;
-use glium::Frame;
+//use glium::Frame;
 use glium::Surface;
 use glium::backend::glutin::Display;
 
-use cgmath::{Matrix4, Vector3, Vector4, Point3, InnerSpace};
+use cgmath::{Matrix4, Vector3}; //, Vector4, Point3, InnerSpace};
 
 use ustr::*;
 
-use std::error::Error;
-use std::fs::File;
+//use std::error::Error;
+//use std::fs::File;
 use std::path::Path;
 use std::collections::HashSet;
 
@@ -87,7 +87,7 @@ impl PackedVertex {
     
     pub fn get_x(&self) -> u32 {
         let bitmask : u32 = 0b0_0_000000000000_000000_000000_111111;
-        let mut val = self.vertexdata & bitmask;
+        let val = self.vertexdata & bitmask;
         return val;
     }
     pub fn get_y(&self) -> u32 {
@@ -126,10 +126,10 @@ impl PackedVertex {
         ret.set_x(vert.position[0]);
         ret.set_y(vert.position[1]);
         ret.set_z(vert.position[2]);
-        if(u >= 1) {
+        if u >= 1 {
             ret.set_u_high(true);
         }
-        if(v >= 1) {
+        if v >= 1 {
             ret.set_v_high(true);
         }
         return ret;
@@ -204,8 +204,7 @@ const NEGATIVE_Z_FACE : [Vertex; 6] = [
 		NEGX_NEGY_NEGZ_VERT,
 		NEGX_POSY_NEGZ_VERT ];
 
-
-        
+/*        
 const FULL_CUBE : [[Vertex; 6]; 6] = [
     POSITIVE_X_FACE,
     NEGATIVE_X_FACE,
@@ -213,7 +212,7 @@ const FULL_CUBE : [[Vertex; 6]; 6] = [
     NEGATIVE_Y_FACE,
     POSITIVE_Z_FACE,
     NEGATIVE_Z_FACE
-];
+];*/
 
 fn get_face_verts(side: VoxelAxis) -> [Vertex; 6] {
     match side {
@@ -258,14 +257,14 @@ impl TextureArrayDyn {
         assert!(self.tex_data.len() < self.max_tex);
     }
     
-    fn ld_image(display : &Display, path_name : Ustr, size_x : u32, size_y : u32) -> Vec<u8> {        
+    fn ld_image(_display : &Display, path_name : Ustr, size_x : u32, size_y : u32) -> Vec<u8> {        
         let path = Path::new(path_name.as_str());
 
         let image = image::open(path).unwrap().to_rgba();
         let image_dimensions = image.dimensions();
         assert_eq!(image_dimensions, (size_x, size_y));
         //According to compiler errors, a Piston image module image struct's into_raw() returns a Vec<u8>.
-        println!("Loaded texture file: {}", path_name.clone());
+        info!(Renderer, "Loaded texture file: {}", path_name.clone());
         return image.into_raw();
     }
     
@@ -280,7 +279,7 @@ impl TextureArrayDyn {
             Ok(v) => self.textures = Some(v),
             Err(e) => {
                 self.textures = None;
-                println!("{}", e) },
+                error!(Renderer, "Could not add a texture array: {}", e) },
         }
     }
 }
@@ -350,7 +349,7 @@ impl Renderer {
                     display : &Display, art_map : &MatArtMapping) {
         //We use drain here to clear the list and iterate through it at the same time
         for coords in self.remesh_list.drain() { 
-            if(self.meshes.contains_key(&coords)) {
+            if self.meshes.contains_key(&coords) {
                 self.meshes.remove(&coords);
                 // TODO: More graceful error handling than an unwrap.
                 self.meshes.insert(coords, Box::new( make_voxel_mesh(vs.borrow_chunk(coords).unwrap(), display, &mut self.texture_manager, art_map)) );
@@ -401,7 +400,6 @@ pub fn make_voxel_mesh(chunk : &Chunk, display : &Display, textures : &mut Textu
     let mut drawable : Vec<SideRenderInfo> = Vec::new();
     let mut rebuild_tex : bool = false;
 
-    let mut sides_count : usize = 0;
     for pos in chunk::CHUNK_RANGE_USIZE {
         let range = chunk::CHUNK_RANGE_USIZE;
         let tile = chunk.getv(pos);
@@ -419,7 +417,7 @@ pub fn make_voxel_mesh(chunk : &Chunk, display : &Display, textures : &mut Textu
             voxel_sides_unroll!(DIR, {
                 let mut cull = false;
                 let maybe_neighbor = pos.get_neighbor_unsigned(DIR);
-                if let Ok(mut neighbor) = maybe_neighbor {
+                if let Ok(neighbor) = maybe_neighbor {
                     let coord = neighbor.coord_for_axis(DIR.into());
                     if coord < CHUNK_SZ {
                         let neighbor_tile = chunk.getv(neighbor);
@@ -429,7 +427,6 @@ pub fn make_voxel_mesh(chunk : &Chunk, display : &Display, textures : &mut Textu
                     }
                 }
                 if cull == false {
-                    sides_count += 1;
                     let vri = SideRenderInfo {
                         side : DIR,
                         x : (x - range.lower.x) as u16, 
@@ -444,7 +441,6 @@ pub fn make_voxel_mesh(chunk : &Chunk, display : &Display, textures : &mut Textu
     if rebuild_tex { 
         textures.rebuild(display);
     }
-    info!(Mesher, "We have meshed {} sides.", sides_count);
     //println!("Found {} drawable cubes.", drawable.len());
     return mesh_step(drawable, display);
 }
