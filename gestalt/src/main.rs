@@ -6,8 +6,9 @@
 #[macro_use] extern crate hemlock;
 
 extern crate anyhow;
+#[macro_use] extern crate arr_macro;
 extern crate bincode;
-#[macro_use] extern crate crossbeam_channel;
+extern crate crossbeam_channel;
 #[macro_use] extern crate custom_error;
 #[macro_use] extern crate enum_dispatch;
 #[macro_use] extern crate glium;
@@ -50,9 +51,9 @@ use num::Zero;
 
 use ron::ser::{to_string_pretty, PrettyConfig};
 use ron::de::from_reader;
-use rusty_v8 as v8;
+//use rusty_v8 as v8;
 use ustr::*;
-use time::*;
+use std::time::*;
 
 #[macro_use] pub mod util;
 pub mod client;
@@ -88,14 +89,15 @@ impl Default for ClientConfig {
     fn default() -> Self { ClientConfig {resolution: (800,600)} }
 }
 
+#[allow(unused_must_use)]
 fn main() -> anyhow::Result<()> {
-    //let air = ustr("air");
+    let air = ustr("air");
     let stone = ustr("stone");
     let dirt = ustr("dirt");
     let grass = ustr("grass");
 
     let mut space = Space::new();
-    
+
     for x in -2 .. 2 {
         for y in -2 .. 2 {
             for z in -2 .. 2 {
@@ -190,23 +192,29 @@ fn main() -> anyhow::Result<()> {
     let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {0 : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0}; 
     
     //---- Set up our texture(s) and chunk verticies ----
-    let mut tile_art_manager = client::renderer::MatArtMapping::new();
 
     let mut renderer : client::renderer::Renderer = client::renderer::Renderer::new();
-    let stone_art = client::tileart::TileArtSimple { texture_name : ustr("teststone.png") };
-    let dirt_art = client::tileart::TileArtSimple { texture_name : ustr("testdirt.png") };
-    let grass_art = client::tileart::TileArtSimple { texture_name : ustr("testgrass.png") };
+    let air_art = client::tileart::TileArtSimple { texture_name : ustr(""), visible: false };
+    let stone_art = client::tileart::TileArtSimple { texture_name : ustr("teststone.png"), visible: true };
+    let dirt_art = client::tileart::TileArtSimple { texture_name : ustr("testdirt.png"), visible: true };
+    let grass_art = client::tileart::TileArtSimple { texture_name : ustr("testgrass.png"), visible: true };
 
-    tile_art_manager.insert(grass, grass_art.clone());
-    tile_art_manager.insert(stone, stone_art.clone());
-    tile_art_manager.insert(dirt, dirt_art.clone());
+    renderer.texture_manager.associate_tile(&display, air, air_art);
+    renderer.texture_manager.associate_tile(&display, stone, stone_art);
+    renderer.texture_manager.associate_tile(&display, dirt, dirt_art);
+    renderer.texture_manager.associate_tile(&display, grass, grass_art);
+
+    renderer.texture_manager.rebuild(&display);
 
     for chunk in space.get_loaded_chunks() {
         info!(Mesher, "Forcing mesh of {}...", chunk);
-        let start = time::Instant::now();
-        renderer.force_mesh(&space, chunk, &display, &tile_art_manager);
+        if chunk.y > 0 { 
+            info!(Mesher, "- (This should be all air!)");
+        }
+        let start = Instant::now();
+        renderer.force_mesh(&space, chunk, &display);
         let elapsed = start.elapsed();
-        info!(Mesher, "Meshing {} took {} milliseconds", chunk, elapsed.num_milliseconds());
+        info!(Mesher, "- Meshing {} took {} microseconds", chunk, elapsed.as_micros());
     }
 
     //---- Some movement stuff ----
@@ -226,8 +234,7 @@ fn main() -> anyhow::Result<()> {
     let mut mouse_first_moved : bool = false;
     let mut grabs_mouse : bool = true;
     //---- A mainloop ----
-    let mut lastupdate = precise_time_s();
-    let mut elapsed = 0.0 as f32;
+    let mut lastupdate = Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
         
@@ -239,27 +246,28 @@ fn main() -> anyhow::Result<()> {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit
                 },
+                /*
                 WindowEvent::CursorMoved{device_id, position, modifiers} => {
-                    println!("Mouse moved ({}, {})", position.x, position.y);
+                    //println!("Mouse moved ({}, {})", position.x, position.y);
                     let x = position.x;
                     let y = position.y;
                     if grabs_mouse {
                         if !mouse_first_moved {
-                            horz_angle.0 += ((x - mouse_prev_x as f64) as f32) * (mouse_sensitivity * elapsed);
-                            vert_angle.0 += ((y - mouse_prev_y as f64) as f32) * (mouse_sensitivity * elapsed);
-                            println!("Angle is now ({}, {})", horz_angle.0, vert_angle.0);
+                            //horz_angle.0 += ((x - mouse_prev_x as f64) as f32) * (mouse_sensitivity * lastupdate.elapsed().as_secs_f32());
+                            //vert_angle.0 += ((y - mouse_prev_y as f64) as f32) * (mouse_sensitivity * lastupdate.elapsed().as_secs_f32());
+                            //println!("Angle is now ({}, {})", horz_angle.0, vert_angle.0);
                         }
                         else {
                             mouse_first_moved = true;
                         }
-                        mouse_prev_x = x as i32;
-                        mouse_prev_y = y as i32;
-                        let gl_window = display.gl_window();
-                        let window = gl_window.window();
-                        let window_position = window.inner_position().unwrap(); 
+                        //mouse_prev_x = x as i32;
+                        //mouse_prev_y = y as i32;
+                        //let gl_window = display.gl_window();
+                        //let window = gl_window.window();
+                        //let window_position = window.inner_position().unwrap(); 
                         //window.set_cursor_position(LogicalPosition{x: window_position.x + (x as i32), y: window_position.y + (y as i32)}).unwrap();
                     }
-                },
+                },*/
                 WindowEvent::KeyboardInput{device_id, input, is_synthetic} => {
                     if !is_synthetic {
                         match input.virtual_keycode {
@@ -307,34 +315,34 @@ fn main() -> anyhow::Result<()> {
         let pitch : Quaternion<f32> = Quaternion::from_angle_y(vert_angle);
         let rotation = (yaw * pitch).normalize();
 
-        let mut forward : Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
-        let mut right : Vector3<f32> = Vector3::new(0.0, -1.0, 0.0);
+        let mut forward : Vector3<f32> = Vector3::new(0.0, 0.0, -1.0);
+        let mut right : Vector3<f32> = Vector3::new(-1.0, 0.0, 0.0);
         forward = rotation.rotate_vector(forward);
         right = rotation.rotate_vector(right);
         let up = forward.cross( right ).neg();
         
         //Movement
         if w_down {
-            camera_pos += forward * (elapsed * move_speed);
+            camera_pos += forward * (lastupdate.elapsed().as_secs_f32() * move_speed);
         }
         if d_down {
-            camera_pos += right * (elapsed * move_speed);
+            camera_pos += right * (lastupdate.elapsed().as_secs_f32() * move_speed);
         }
         if s_down {
-            camera_pos += (forward * (elapsed * move_speed)).neg();
+            camera_pos += (forward * (lastupdate.elapsed().as_secs_f32() * move_speed)).neg();
         }
         if a_down {
-            camera_pos += (right * (elapsed * move_speed)).neg();
+            camera_pos += (right * (lastupdate.elapsed().as_secs_f32() * move_speed)).neg();
         }
 
         //Drawing
         let view_matrix = Matrix4::look_at(camera_pos, camera_pos + forward, up);
         let perspective_matrix = Matrix4::from(perspective);
         
-        let before_remesh = precise_time_s();
-        renderer.process_remesh(&space, &display, &tile_art_manager);
-        let remesh_time = precise_time_s() - before_remesh;
-        if(remesh_time > 0.01) {
+        let before_remesh = Instant::now();
+        renderer.process_remesh(&space, &display);
+        let remesh_time = before_remesh.elapsed().as_secs_f32();
+        if remesh_time > 0.01 {
             info!(Mesher, "Took {} seconds to remesh chunks.", remesh_time);
         }
 
@@ -342,8 +350,7 @@ fn main() -> anyhow::Result<()> {
         target.clear_color_and_depth((0.43, 0.7, 0.82, 1.0), 1.0);
         renderer.draw(perspective_matrix, view_matrix, &mut target, &program, &params);
         target.finish().unwrap();
-        elapsed = (precise_time_s() - lastupdate) as f32;
-        lastupdate = precise_time_s();
+        lastupdate = Instant::now();
     });
 
     //Ok(())

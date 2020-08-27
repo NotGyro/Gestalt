@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use crate::util::voxelmath::*;
 use crate::util::message::*;
-use crate::world::{TilePos, TileCoord, VoxelStorage, VoxelStorageBounded};
+use crate::world::{TilePos, TileCoord};
 use crate::world::Space;
 use crate::world::tile::TileId;
 
@@ -109,7 +109,7 @@ pub fn apply_event() {
     let evt = VoxelEvent::Single( VoxelEventSingle{new_id: id, position: vpos!(1,1,1)});
 
     {
-        evt.apply_to(&mut space);    
+        evt.apply_to(&mut space).unwrap();
     }
 
     assert_eq!(space.get(vpos!(1,1,1)).unwrap(), id);
@@ -119,7 +119,7 @@ pub fn apply_event() {
     let evt = VoxelEvent::Cuboid( VoxelEventCuboid{new_id: id, cuboid: range} );
     
     {
-        evt.apply_to(&mut space);    
+        evt.apply_to(&mut space).unwrap();    
     }
 
     for pos in range {

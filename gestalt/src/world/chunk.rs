@@ -3,11 +3,8 @@ use crate::util::voxelmath::*;
 //use ustr::{ustr, Ustr, UstrMap};
 use hashbrown::HashMap;
 
-// Dependencies for testing
-use rand::Rng;
-use rand::thread_rng;
 use std::error::Error;
-use std::io::{Read, Write, Seek, SeekFrom, Cursor};
+use std::io::{Read, Write, Seek, SeekFrom};
 use semver::Version;
 
 use ustr::*;
@@ -32,8 +29,21 @@ pub const CHUNK_RANGE : VoxelRange<i32> = VoxelRange{lower:vpos!(0,0,0), upper:v
 pub const CHUNK_RANGE_USIZE : VoxelRange<usize> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
 
 #[inline(always)] 
+pub fn chunk_z_to_i_component(z : usize) -> usize {
+    z * CHUNK_SQUARED
+}
+#[inline(always)] 
+pub fn chunk_y_to_i_component(y : usize) -> usize {
+    y * CHUNK_SZ
+}
+#[inline(always)] 
+pub fn chunk_x_to_i_component(x : usize) -> usize {
+    x
+}
+
+#[inline(always)] 
 pub fn chunk_xyz_to_i(x : usize, y : usize, z : usize) -> usize {
-    (z * CHUNK_SQUARED) + (y * CHUNK_SZ) + x
+    chunk_z_to_i_component(z) + chunk_y_to_i_component(y) + chunk_x_to_i_component(x)
 }
 
 #[inline(always)] 
@@ -42,6 +52,62 @@ pub fn chunk_i_to_xyz(i : usize) -> (usize, usize, usize) {
     let z = (i-x)/CHUNK_SQUARED; //The remainder on this (the y value) just gets thrown away, which is good here.
     let y = (i - (z * CHUNK_SQUARED))/CHUNK_SZ;
     (x, y, z)
+}
+
+
+#[inline(always)]
+pub fn get_pos_x_offset(i : usize) -> Option<usize> {
+    if i + chunk_x_to_i_component(1) < CHUNK_VOLUME {
+        Some(i + chunk_x_to_i_component(1))
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub fn get_neg_x_offset(i : usize) -> Option<usize> {
+    if (i as i32) - (chunk_x_to_i_component(1) as i32) >= 0 {
+        Some(((i as i32) - (chunk_x_to_i_component(1) as i32)) as usize)
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub fn get_pos_y_offset(i : usize) -> Option<usize> {
+    if i + chunk_y_to_i_component(1) < CHUNK_VOLUME {
+        Some(i + chunk_y_to_i_component(1))
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub fn get_neg_y_offset(i : usize) -> Option<usize> {
+    if (i as i32) - (chunk_y_to_i_component(1) as i32) >= 0 {
+        Some(((i as i32) - (chunk_y_to_i_component(1) as i32)) as usize)
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub fn get_pos_z_offset(i : usize) -> Option<usize> {
+    if i + chunk_z_to_i_component(1) < CHUNK_VOLUME {
+        Some(i + chunk_z_to_i_component(1))
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub fn get_neg_z_offset(i : usize) -> Option<usize> {
+    if (i as i32) - (chunk_z_to_i_component(1) as i32) >= 0 {
+        Some(((i as i32) - (chunk_z_to_i_component(1) as i32)) as usize)
+    }
+    else {
+        None 
+    }
 }
 
 /// A smaller chunk structure for chunks which only need 255 unique values.
@@ -56,8 +122,12 @@ pub struct ChunkSmall {
 
 impl ChunkSmall {
     #[inline(always)]
+    pub fn get_raw_i(&self, i: usize) -> u8 {
+        self.data[i]
+    }
+    #[inline(always)]
     pub fn get_raw(&self, x: usize, y : usize, z: usize) -> u8 {
-        self.data[chunk_xyz_to_i(x, y, z)]
+        self.get_raw_i(chunk_xyz_to_i(x, y, z))
     }
     #[inline(always)]
     pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
@@ -136,8 +206,12 @@ pub struct ChunkLarge {
 
 impl ChunkLarge {
     #[inline(always)]
+    pub fn get_raw_i(&self, i: usize) -> u16 {
+        self.data[i]
+    }
+    #[inline(always)]
     pub fn get_raw(&self, x: usize, y : usize, z: usize) -> u16 {
-        self.data[chunk_xyz_to_i(x, y, z)]
+        self.get_raw_i(chunk_xyz_to_i(x, y, z))
     }
     #[inline(always)]
     pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
@@ -192,11 +266,19 @@ pub struct Chunk {
 
 impl Chunk {
     #[inline(always)]
-    pub fn get_raw(&self, x: usize, y : usize, z: usize) -> usize {
+    pub fn get_raw(&self, x: usize, y : usize, z: usize) -> u16 {
         match &self.inner {
             ChunkInner::Uniform(_) => 0,
-            ChunkInner::Small(inner) => inner.get_raw(x,y,z) as usize,
-            ChunkInner::Large(inner) => inner.get_raw(x,y,z) as usize,
+            ChunkInner::Small(inner) => inner.get_raw(x,y,z) as u16,
+            ChunkInner::Large(inner) => inner.get_raw(x,y,z) as u16,
+        }
+    }
+    #[inline(always)]
+    pub fn get_raw_i(&self, i: usize) -> u16 {
+        match &self.inner {
+            ChunkInner::Uniform(_) => 0,
+            ChunkInner::Small(inner) => inner.get_raw_i(i) as u16,
+            ChunkInner::Large(inner) => inner.get_raw_i(i) as u16,
         }
     }
     #[inline(always)]
@@ -276,7 +358,7 @@ impl Chunk {
                 }
                 else {
                     // Convert to a ChunkSmall.
-                    let mut data : Vec<u8> = vec![0; CHUNK_VOLUME];
+                    let data : Vec<u8> = vec![0; CHUNK_VOLUME];
 
                     let mut palette : [TileId; 256] = [*val; 256];
                     palette[1] = tile;
@@ -437,9 +519,9 @@ impl Chunk {
     pub fn serialize_full<W: Write + Seek>(&self, writer: &mut W) -> Result<usize, Box<dyn Error>> {
         let mut total : usize = 0;
         total += self.serialize_header(writer)?;
-        writer.seek(SeekFrom::Start(total as u64));
+        writer.seek(SeekFrom::Start(total as u64))?;
         total += self.serialize_data(writer)?;
-        writer.seek(SeekFrom::Start(total as u64));
+        writer.seek(SeekFrom::Start(total as u64))?;
         total += self.serialize_palette(writer)?;
         Ok(total)
     }
@@ -449,11 +531,11 @@ impl Chunk {
     pub fn deserialize<R: Read + Seek>(reader: &mut R) -> Result<Self, Box<dyn Error>> {
         let mut u64_buf : [u8; 8] = [0;8];
         
-        reader.read_exact(&mut u64_buf);
+        reader.read_exact(&mut u64_buf)?;
         let major : u64 = u64::from_le_bytes(u64_buf);
-        reader.read_exact(&mut u64_buf);
+        reader.read_exact(&mut u64_buf)?;
         let minor : u64 = u64::from_le_bytes(u64_buf);
-        reader.read_exact(&mut u64_buf);
+        reader.read_exact(&mut u64_buf)?;
         let patch : u64 = u64::from_le_bytes(u64_buf);
 
         let version = semver::Version::from((major, minor, patch));
@@ -464,7 +546,7 @@ impl Chunk {
         }
 
         let mut u64_buf : [u8; 8] = [0;8];
-        reader.read_exact(&mut u64_buf);
+        reader.read_exact(&mut u64_buf)?;
         let flags_and_type : u64 = u64::from_le_bytes(u64_buf);
         //TODO: When there are flags, separate this out.
         let ty = flags_and_type as u8;
@@ -473,7 +555,7 @@ impl Chunk {
         //ChunkInner::Small(_) => 1,
         //ChunkInner::Large(_) => 2,
 
-        reader.read_exact(&mut u64_buf);
+        reader.read_exact(&mut u64_buf)?;
         let revision : u64 = u64::from_le_bytes(u64_buf);
 
         //End of header. Now we get to data and palette.
@@ -532,15 +614,15 @@ impl Chunk {
                 let palette_count : u16 = u16::from_le_bytes(u16_buf);
                 
                 reader.read_exact(&mut u64_buf)?;
-                let palette_size : usize = u64::from_le_bytes(u64_buf) as usize;
+                let _palette_size : usize = u64::from_le_bytes(u64_buf) as usize;
 
                 let mut palette: [TileId; 256] = [ustr("nil"); 256];
                 let mut reverse_palette: UstrMap<u8> = UstrMap::default();
                 let mut highest_idx: u8 = 0;
                 //The palette is at the end of the file, so read the rest of it.
                 //4 bytes is the absolute minimum size of a palette entry. u16 idx, u16 name_length (which would be 0 if there's no string).
-                for i in 0..palette_count {
-                    let (total_read, idx, value) = read_palette_entry(reader)?;
+                for _ in 0..palette_count {
+                    let (_, idx, value) = read_palette_entry(reader)?;
                     palette[idx as usize] = value;
                     reverse_palette.insert(value, idx as u8);
                     if idx > (highest_idx as u16) { highest_idx = idx as u8 }
@@ -575,15 +657,15 @@ impl Chunk {
                 let palette_count : u16 = u16::from_le_bytes(u16_buf);
 
                 reader.read_exact(&mut u64_buf)?;
-                let mut palette_size_remaining : i32 = u64::from_le_bytes(u64_buf) as i32;
+                let _palette_size_remaining : i32 = u64::from_le_bytes(u64_buf) as i32;
 
                 let mut palette : HashMap<u16, TileId> = HashMap::new();
 
                 let mut reverse_palette: UstrMap<u16> = UstrMap::default();
                 //The palette is at the end of the file, so read the rest of it.
                 //4 bytes is the absolute minimum size of a palette entry. u16 idx, u16 name_length (which would be 0 if there's no string).
-                for i in 0..palette_count {
-                    let (total_read, idx, value) = read_palette_entry(reader)?;
+                for _ in 0..palette_count {
+                    let (_, idx, value) = read_palette_entry(reader)?;
                     palette.insert(idx, value);
                     reverse_palette.insert(value, idx);
                 }
@@ -606,220 +688,227 @@ impl Chunk {
     // ======= End of serialization stuff. =======
 }
 
-#[test]
-fn chunk_index_reverse() {
-    let mut rng = rand::thread_rng();
-    for _ in 0..4096 {
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    use std::io::Cursor;
 
-        let x = rng.gen_range(0, CHUNK_SZ);
-        let y = rng.gen_range(0, CHUNK_SZ);
-        let z = rng.gen_range(0, CHUNK_SZ); 
+    #[test]
+    fn chunk_index_reverse() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..4096 {
 
-        let i_value = chunk_xyz_to_i(x, y, z);
-        let (x1, y1, z1) = chunk_i_to_xyz(i_value);
+            let x = rng.gen_range(0, CHUNK_SZ);
+            let y = rng.gen_range(0, CHUNK_SZ);
+            let z = rng.gen_range(0, CHUNK_SZ); 
 
-        assert_eq!( x, x1 );
-        assert_eq!( y, y1 );
-        assert_eq!( z, z1 );
-    }
-}
+            let i_value = chunk_xyz_to_i(x, y, z);
+            let (x1, y1, z1) = chunk_i_to_xyz(i_value);
 
-#[test]
-fn chunk_index_bounds() {
-    for x in 0..CHUNK_SZ {
-        for y in 0..CHUNK_SZ {
-            for z in 0..CHUNK_SZ {
-                assert!(chunk_xyz_to_i(x, y, z) < CHUNK_VOLUME);
-            }
-        }
-    }
-}
-
-#[test]
-fn assignemnts_to_chunk() {
-    let u1 = Ustr::from("air");
-    let u2 = Ustr::from("stone");
-    let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
-
-    {
-        test_chunk.set(1, 1, 1, u1);
-        
-        assert_eq!(test_chunk.get(1,1,1), u1);
-    }
-
-    if let ChunkInner::Uniform(_) = test_chunk.inner {} 
-    else {
-        assert!(false);
-    }
-
-    //Make sure Uniform chunks work the way they're supposed to. 
-    
-    for x in 0..CHUNK_SZ {
-        for y in 0..CHUNK_SZ {
-            for z in 0..CHUNK_SZ {
-                assert_eq!(test_chunk.get(x,y,z), u1);
-                //We should also be able to set every tile of the uniform to the uniform's value, and it'll do nothing.
-                test_chunk.set(x,y,z, u1);
-            }
+            assert_eq!( x, x1 );
+            assert_eq!( y, y1 );
+            assert_eq!( z, z1 );
         }
     }
 
-    //Implicitly expand it to a Small chunk rather than a Uniform chunk. 
-    {
-        test_chunk.set(2, 2, 2, u2);
-
-        assert_eq!(test_chunk.get(2,2,2), u2);
-    }
-
-    if let ChunkInner::Small(_) = test_chunk.inner {} 
-    else {
-        assert!(false);
-    }
-
-    //Make sure that our new ChunkSmall is still the Uniform's tile everywhere except the position where we assigned something else.
-    for x in 0..CHUNK_SZ {
-        for y in 0..CHUNK_SZ {
-            for z in 0..CHUNK_SZ {
-                if x == 2 && y == 2 && z == 2 {
-                    assert_eq!(test_chunk.get(x,y,z), u2);
+    #[test]
+    fn chunk_index_bounds() {
+        for x in 0..CHUNK_SZ {
+            for y in 0..CHUNK_SZ {
+                for z in 0..CHUNK_SZ {
+                    assert!(chunk_xyz_to_i(x, y, z) < CHUNK_VOLUME);
                 }
-                else { 
+            }
+        }
+    }
+
+    #[test]
+    fn assignemnts_to_chunk() {
+        let u1 = Ustr::from("air");
+        let u2 = Ustr::from("stone");
+        let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
+
+        {
+            test_chunk.set(1, 1, 1, u1);
+            
+            assert_eq!(test_chunk.get(1,1,1), u1);
+        }
+
+        if let ChunkInner::Uniform(_) = test_chunk.inner {} 
+        else {
+            assert!(false);
+        }
+
+        //Make sure Uniform chunks work the way they're supposed to. 
+        
+        for x in 0..CHUNK_SZ {
+            for y in 0..CHUNK_SZ {
+                for z in 0..CHUNK_SZ {
+                    assert_eq!(test_chunk.get(x,y,z), u1);
+                    //We should also be able to set every tile of the uniform to the uniform's value, and it'll do nothing.
+                    test_chunk.set(x,y,z, u1);
+                }
+            }
+        }
+
+        //Implicitly expand it to a Small chunk rather than a Uniform chunk. 
+        {
+            test_chunk.set(2, 2, 2, u2);
+
+            assert_eq!(test_chunk.get(2,2,2), u2);
+        }
+
+        if let ChunkInner::Small(_) = test_chunk.inner {} 
+        else {
+            assert!(false);
+        }
+
+        //Make sure that our new ChunkSmall is still the Uniform's tile everywhere except the position where we assigned something else.
+        for x in 0..CHUNK_SZ {
+            for y in 0..CHUNK_SZ {
+                for z in 0..CHUNK_SZ {
+                    if x == 2 && y == 2 && z == 2 {
+                        assert_eq!(test_chunk.get(x,y,z), u2);
+                    }
+                    else { 
+                        assert_eq!(test_chunk.get(x,y,z), u1);
+                    }
+                }
+            }
+        }
+
+        let mut rng = rand::thread_rng();
+
+        {
+            for i in 0..253 {
+                
+                let x = rng.gen_range(0, CHUNK_SZ);
+                let y = rng.gen_range(0, CHUNK_SZ);
+                let z = rng.gen_range(0, CHUNK_SZ); 
+
+                let name = format!("{}.test",i);
+                let tile = Ustr::from(name.as_str());
+
+                test_chunk.set(x, y, z, tile);
+
+                assert_eq!(test_chunk.get(x,y,z), tile);
+            }
+        }
+
+        if let ChunkInner::Small(_) = test_chunk.inner {} 
+        else {
+            assert!(false);
+        }
+
+        //Make sure we can assign to everywhere in our chunk bounds.
+        for x in 0..CHUNK_SZ {
+            for y in 0..CHUNK_SZ {
+                for z in 0..CHUNK_SZ {
+                    test_chunk.set(x,y,z, u1);
                     assert_eq!(test_chunk.get(x,y,z), u1);
                 }
             }
         }
-    }
 
-    let mut rng = rand::thread_rng();
+        {
+            for i in 253..1024 {
+                
+                let x = rng.gen_range(0, CHUNK_SZ);
+                let y = rng.gen_range(0, CHUNK_SZ);
+                let z = rng.gen_range(0, CHUNK_SZ); 
 
-    {
-        for i in 0..253 {
-            
-            let x = rng.gen_range(0, CHUNK_SZ);
-            let y = rng.gen_range(0, CHUNK_SZ);
-            let z = rng.gen_range(0, CHUNK_SZ); 
+                let name = format!("{}.test",i);
+                let tile = Ustr::from(name.as_str());
+                
+                test_chunk.set(x, y, z, tile);
 
-            let name = format!("{}.test",i);
-            let tile = Ustr::from(name.as_str());
-
-            test_chunk.set(x, y, z, tile);
-
-            assert_eq!(test_chunk.get(x,y,z), tile);
-        }
-    }
-
-    if let ChunkInner::Small(_) = test_chunk.inner {} 
-    else {
-        assert!(false);
-    }
-
-    //Make sure we can assign to everywhere in our chunk bounds.
-    for x in 0..CHUNK_SZ {
-        for y in 0..CHUNK_SZ {
-            for z in 0..CHUNK_SZ {
-                test_chunk.set(x,y,z, u1);
-                assert_eq!(test_chunk.get(x,y,z), u1);
+                assert_eq!(test_chunk.get(x,y,z), tile);
             }
         }
-    }
-
-    {
-        for i in 253..1024 {
-            
-            let x = rng.gen_range(0, CHUNK_SZ);
-            let y = rng.gen_range(0, CHUNK_SZ);
-            let z = rng.gen_range(0, CHUNK_SZ); 
-
-            let name = format!("{}.test",i);
-            let tile = Ustr::from(name.as_str());
-            
-            test_chunk.set(x, y, z, tile);
-
-            assert_eq!(test_chunk.get(x,y,z), tile);
+        if let ChunkInner::Large(_) = test_chunk.inner {} 
+        else {
+            assert!(false);
         }
     }
-    if let ChunkInner::Large(_) = test_chunk.inner {} 
-    else {
-        assert!(false);
-    }
-}
 
 
 
-#[test]
-fn chunk_serialize_deserialize() {
-    let u1 = Ustr::from("stone");
-    let u2 = Ustr::from("steel");
-    let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
+    #[test]
+    fn chunk_serialize_deserialize() {
+        let u1 = Ustr::from("stone");
+        let u2 = Ustr::from("steel");
+        let test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
 
-    //Serialize it as a uniform. 
+        //Serialize it as a uniform. 
 
-    let mut buf : Cursor<Vec<u8>> = Cursor::new(Vec::new());
-    test_chunk.serialize_full(&mut buf).unwrap();
-    buf.seek(SeekFrom::Start(0));
-    let mut chunk_copy = Chunk::deserialize(&mut buf).unwrap();
+        let mut buf : Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        test_chunk.serialize_full(&mut buf).unwrap();
+        buf.seek(SeekFrom::Start(0)).unwrap();
+        let mut chunk_copy = Chunk::deserialize(&mut buf).unwrap();
 
-    if let ChunkInner::Uniform(val) = chunk_copy.inner {
-        assert_eq!(val, u1);
-    } 
-    else {
-        assert!(false);
-    }
+        if let ChunkInner::Uniform(val) = chunk_copy.inner {
+            assert_eq!(val, u1);
+        } 
+        else {
+            assert!(false);
+        }
 
-    //Implicitly expand it to a Small chunk rather than a Uniform chunk. 
-    chunk_copy.set(2, 2, 2, u2);
-    assert_eq!(chunk_copy.get(2,2,2), u2);
-    
-    if let ChunkInner::Small(_) = chunk_copy.inner {} 
-    else {
-        assert!(false);
-    }
-
-    let mut buf : Cursor<Vec<u8>> = Cursor::new(Vec::new());
-    chunk_copy.serialize_full(&mut buf).unwrap();
-    buf.seek(SeekFrom::Start(0));
-    let mut chunk_copy = Chunk::deserialize(&mut buf).unwrap();
-
-    if let ChunkInner::Small(_) = chunk_copy.inner {
-        assert_eq!(chunk_copy.get(0,0,0), u1);
+        //Implicitly expand it to a Small chunk rather than a Uniform chunk. 
+        chunk_copy.set(2, 2, 2, u2);
         assert_eq!(chunk_copy.get(2,2,2), u2);
-    }
-    else {
-        assert!(false);
-    }
-
-    //Add a large number of new tile types to expand it implicitly to a Large chunk 
-    let mut rng = rand::thread_rng();
-    
-    {
-        for i in 0..1024 {
-            
-            let x = rng.gen_range(0, CHUNK_SZ);
-            let y = rng.gen_range(0, CHUNK_SZ);
-            let z = rng.gen_range(0, CHUNK_SZ); 
-
-            let name = format!("{}.test",i);
-            let tile = Ustr::from(name.as_str());
-
-            chunk_copy.set(x, y, z, tile);
-
-            assert_eq!(chunk_copy.get(x,y,z), tile);
+        
+        if let ChunkInner::Small(_) = chunk_copy.inner {} 
+        else {
+            assert!(false);
         }
-    }
 
-    if let ChunkInner::Large(_) = chunk_copy.inner {} 
-    else {
-        assert!(false);
-    }
+        let mut buf : Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        chunk_copy.serialize_full(&mut buf).unwrap();
+        buf.seek(SeekFrom::Start(0)).unwrap();
+        let mut chunk_copy = Chunk::deserialize(&mut buf).unwrap();
 
-    let mut buf : Cursor<Vec<u8>> = Cursor::new(Vec::new());
-    chunk_copy.serialize_full(&mut buf).unwrap();
-    buf.seek(SeekFrom::Start(0));
-    let mut chunk_copy = Chunk::deserialize(&mut buf).unwrap();
+        if let ChunkInner::Small(_) = chunk_copy.inner {
+            assert_eq!(chunk_copy.get(0,0,0), u1);
+            assert_eq!(chunk_copy.get(2,2,2), u2);
+        }
+        else {
+            assert!(false);
+        }
 
-    //If it's still Large, we're golden. 
-    if let ChunkInner::Large(_) = chunk_copy.inner {} 
-    else {
-        assert!(false);
+        //Add a large number of new tile types to expand it implicitly to a Large chunk 
+        let mut rng = rand::thread_rng();
+        
+        {
+            for i in 0..1024 {
+                
+                let x = rng.gen_range(0, CHUNK_SZ);
+                let y = rng.gen_range(0, CHUNK_SZ);
+                let z = rng.gen_range(0, CHUNK_SZ); 
+
+                let name = format!("{}.test",i);
+                let tile = Ustr::from(name.as_str());
+
+                chunk_copy.set(x, y, z, tile);
+
+                assert_eq!(chunk_copy.get(x,y,z), tile);
+            }
+        }
+
+        if let ChunkInner::Large(_) = chunk_copy.inner {} 
+        else {
+            assert!(false);
+        }
+
+        let mut buf : Cursor<Vec<u8>> = Cursor::new(Vec::new());
+        chunk_copy.serialize_full(&mut buf).unwrap();
+        buf.seek(SeekFrom::Start(0)).unwrap();
+        let chunk_copy = Chunk::deserialize(&mut buf).unwrap();
+
+        //If it's still Large, we're golden. 
+        if let ChunkInner::Large(_) = chunk_copy.inner {} 
+        else {
+            assert!(false);
+        }
     }
 }
