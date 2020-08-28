@@ -55,7 +55,7 @@ impl Space {
         let (x, chx) = world_to_chunk_local_coord(pos.x);
         let (y, chy) = world_to_chunk_local_coord(pos.y);
         let (z, chz) = world_to_chunk_local_coord(pos.z);
-        match self.chunks.get_mut(& vpos!(chx,chy,chz) ) {
+        match self.chunks.get_mut(&vpos!(chx,chy,chz) ) {
             Some(chunk) => {
                 (*chunk).set(x, y, z, value);
                 return Result::Ok(());
@@ -63,6 +63,13 @@ impl Space {
             None => return Result::Err(VoxelError::NotYetLoaded(pos)),
         }
     }
+    pub fn is_loaded(&self, voxel: TilePos) -> bool { 
+        let (_, chx) = world_to_chunk_local_coord(voxel.x);
+        let (_, chy) = world_to_chunk_local_coord(voxel.y);
+        let (_, chz) = world_to_chunk_local_coord(voxel.z);
+        self.chunks.contains_key(&vpos!(chx,chy,chz))
+    }
+
     pub fn borrow_chunk(&self, chunk: ChunkPos) -> Option<&Chunk> {
         self.chunks.get(&chunk)
     }
@@ -72,23 +79,28 @@ impl Space {
         self.gen_chunk(pos)
     }
     pub fn gen_chunk(&mut self, pos: ChunkPos) -> Result<(), Box<dyn Error>> {
-        if pos.y > 0 {
+        if pos.y > 1 {
             //Surface chunk, all air.
             let chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("air"))};
             self.chunks.insert(pos, chunk);
         }
-        else if pos.y == 0  {
+        else if pos.y == 1  {
             let mut chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("stone"))};
             let grass_id = chunk.add_to_palette(ustr("grass"));
             let dirt_id = chunk.add_to_palette(ustr("dirt"));
             for x in 0..CHUNK_SZ {
                 for y in (CHUNK_SZ - 6)..CHUNK_SZ {
                     for z in 0..CHUNK_SZ {
-                        if y == (CHUNK_SZ-1) {
-                            chunk.set_raw(x, y, z, grass_id);
-                        }
-                        else if y >= (CHUNK_SZ-4) {
+                        if x % 2 == 0 { 
                             chunk.set_raw(x, y, z, dirt_id);
+                        }
+                        else {
+                            if y == (CHUNK_SZ-1) {
+                                chunk.set_raw(x, y, z, grass_id);
+                            }
+                            else if y >= (CHUNK_SZ-4) {
+                                chunk.set_raw(x, y, z, dirt_id);
+                            }
                         }
                     }
                 }

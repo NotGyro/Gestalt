@@ -2,6 +2,7 @@
 
 #![feature(drain_filter)]
 #![feature(seek_convenience)]
+#![feature(const_int_pow)]
 
 #[macro_use] extern crate hemlock;
 
@@ -16,7 +17,6 @@ extern crate glutin;
 extern crate hashbrown;
 #[macro_use] extern crate lazy_static;
 //extern crate linear_map;
-extern crate log;
 extern crate nalgebra as na;
 extern crate num;
 extern crate parking_lot;
@@ -34,8 +34,8 @@ use glutin::window::*;
 use glutin::event::*;
 use glutin::event_loop::*;
 use glutin::ContextBuilder;
-//use glutin::dpi::LogicalPosition;
-//use glutin::dpi::PhysicalPosition;
+use glutin::dpi::LogicalPosition;
+use glutin::dpi::PhysicalPosition;
 use glium::Surface;
 
 use logger::hemlock_scopes;
@@ -61,6 +61,7 @@ pub mod world;
 
 use crate::util::voxelmath::*;
 use crate::world::*;
+use crate::client::tileart::*;
 
 /// The main purpose of the Logger module is to define our Hemlock scopes. 
 /// It also contains a https://crates.io/crates/log proxy into Hemlock, so anything 
@@ -106,8 +107,8 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    match logger::init_logger() {
-        Ok(_) => info!(Core, "Logger initialized."),
+    match logger::logger::init_logger() {
+        Ok(_) => warn!(Core, "Logger initialized."),
         Err(e) => panic!("Could not initialize logger! Reason: {}", e),
     };
 
@@ -168,16 +169,16 @@ fn main() -> anyhow::Result<()> {
             write: true,
             .. Default::default()
         },
-        backface_culling : glium::draw_parameters::BackfaceCullingMode::CullClockwise,
+        backface_culling : glium::draw_parameters::BackfaceCullingMode::CullingDisabled,
         .. Default::default()
     };
     
     //---- Set up our camera ----
     
-	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 0.0, z : 10.0}; 
+	let mut camera_pos : Point3<f32> = Point3 {x : 0.0, y : 66.0, z : 10.0}; 
 	
-	let mouse_sensitivity : f32 = 2.0;
-	let move_speed : f32 = 16.0;
+	let mouse_sensitivity : f32 = 64.0;
+	let move_speed : f32 = 160.0;
 	let mut horz_angle : Rad<f32> = Rad::zero();
 	let mut vert_angle : Rad<f32> = Rad::zero();
 
@@ -188,16 +189,19 @@ fn main() -> anyhow::Result<()> {
     let mut mouse_prev_x : i32 = 0;
     let mut mouse_prev_y : i32 = 0;
     
-    
     let perspective : cgmath::PerspectiveFov<f32> = cgmath::PerspectiveFov { fovy : cgmath::Rad {0 : 1.22173 }, aspect : 4.0 / 3.0, near : 0.1, far : 100.0}; 
     
     //---- Set up our texture(s) and chunk verticies ----
 
+    let mut arry : [Ustr; 6] = arr![ustr("testgrass.png"); 6];
+
+    arry[posi_x_index!()] = ustr("test.png");
+
     let mut renderer : client::renderer::Renderer = client::renderer::Renderer::new();
-    let air_art = client::tileart::TileArtSimple { texture_name : ustr(""), visible: false };
-    let stone_art = client::tileart::TileArtSimple { texture_name : ustr("teststone.png"), visible: true };
-    let dirt_art = client::tileart::TileArtSimple { texture_name : ustr("testdirt.png"), visible: true };
-    let grass_art = client::tileart::TileArtSimple { texture_name : ustr("testgrass.png"), visible: true };
+    let air_art = TileArtSimple { textures : BlockTex::Invisible };
+    let stone_art = TileArtSimple { textures : BlockTex::Single(ustr("teststone.png")) };
+    let dirt_art = TileArtSimple { textures : BlockTex::Single(ustr("testdirt.png")) };
+    let grass_art = TileArtSimple { textures : BlockTex::AllSides(arry) };
 
     renderer.texture_manager.associate_tile(&display, air, air_art);
     renderer.texture_manager.associate_tile(&display, stone, stone_art);
@@ -224,17 +228,21 @@ fn main() -> anyhow::Result<()> {
     let mut s_down : bool = false;
     let mut d_down : bool = false;
 
-    /*let mut set_action : bool = false;
+    let mut set_action : bool = false;
     let mut delete_action : bool = false;
 
-    
     let screen_center_x : i32 = client_config.resolution.0 as i32 /2;
-    let screen_center_y : i32 = client_config.resolution.1 as i32 /2;*/
+    let screen_center_y : i32 = client_config.resolution.1 as i32 /2;
     
     let mut mouse_first_moved : bool = false;
     let mut grabs_mouse : bool = true;
     //---- A mainloop ----
     let mut lastupdate = Instant::now();
+
+    {
+        display.gl_window().window().set_cursor_grab(grabs_mouse);
+        display.gl_window().window().set_cursor_visible(!grabs_mouse);
+    }
 
     event_loop.run(move |event, _, control_flow| {
         
@@ -246,35 +254,53 @@ fn main() -> anyhow::Result<()> {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit
                 },
-                /*
+                
                 WindowEvent::CursorMoved{device_id, position, modifiers} => {
                     //println!("Mouse moved ({}, {})", position.x, position.y);
                     let x = position.x;
                     let y = position.y;
                     if grabs_mouse {
                         if !mouse_first_moved {
-                            //horz_angle.0 += ((x - mouse_prev_x as f64) as f32) * (mouse_sensitivity * lastupdate.elapsed().as_secs_f32());
-                            //vert_angle.0 += ((y - mouse_prev_y as f64) as f32) * (mouse_sensitivity * lastupdate.elapsed().as_secs_f32());
+                            let diff_x = x - screen_center_x as f64;
+                            let diff_y = y - screen_center_y as f64;
+                            horz_angle.0 -= (diff_x as f32) * (mouse_sensitivity * lastupdate.elapsed().as_secs_f32());
+                            vert_angle.0 += (diff_y as f32) * (mouse_sensitivity * lastupdate.elapsed().as_secs_f32());
                             //println!("Angle is now ({}, {})", horz_angle.0, vert_angle.0);
+                            mouse_prev_x = x as i32;
+                            mouse_prev_y = y as i32;
                         }
                         else {
                             mouse_first_moved = true;
                         }
-                        //mouse_prev_x = x as i32;
-                        //mouse_prev_y = y as i32;
-                        //let gl_window = display.gl_window();
-                        //let window = gl_window.window();
-                        //let window_position = window.inner_position().unwrap(); 
-                        //window.set_cursor_position(LogicalPosition{x: window_position.x + (x as i32), y: window_position.y + (y as i32)}).unwrap();
+                        let gl_window = display.gl_window();
+                        let window = gl_window.window();
+                        let window_position = window.inner_position().unwrap(); 
+                        window.set_cursor_position(PhysicalPosition{x: screen_center_x, y: screen_center_y}).unwrap();
                     }
-                },*/
+                },
+                WindowEvent::MouseInput{device_id, state, button, modifiers} => {
+                    match button { 
+                        glutin::event::MouseButton::Left => delete_action = true,
+                        glutin::event::MouseButton::Right => set_action = true,
+                        _ => {},
+                    }
+                },
                 WindowEvent::KeyboardInput{device_id, input, is_synthetic} => {
                     if !is_synthetic {
                         match input.virtual_keycode {
                             Some(VirtualKeyCode::Escape) => {
                                 *control_flow = ControlFlow::Exit;
                             },
-                            Some(VirtualKeyCode::Tab) => grabs_mouse = false,
+                            Some(VirtualKeyCode::Tab) => { 
+                                match input.state {
+                                    glutin::event::ElementState::Released => {
+                                        grabs_mouse = !grabs_mouse;
+                                        display.gl_window().window().set_cursor_grab(grabs_mouse);
+                                        display.gl_window().window().set_cursor_visible(!grabs_mouse);
+                                    },
+                                    _ => {},
+                                }
+                            },
                             Some(VirtualKeyCode::W) => {
                                 match input.state {
                                     glutin::event::ElementState::Pressed => w_down = true,
@@ -311,8 +337,8 @@ fn main() -> anyhow::Result<()> {
         vert_angle = vert_angle.normalize();
         
         //Remember: Z is our vertical axis here.
-        let yaw : Quaternion<f32> = Quaternion::from_angle_z(horz_angle.neg());
-        let pitch : Quaternion<f32> = Quaternion::from_angle_y(vert_angle);
+        let yaw : Quaternion<f32> = Quaternion::from_angle_y(horz_angle);
+        let pitch : Quaternion<f32> = Quaternion::from_angle_x(vert_angle);
         let rotation = (yaw * pitch).normalize();
 
         let mut forward : Vector3<f32> = Vector3::new(0.0, 0.0, -1.0);
@@ -333,6 +359,46 @@ fn main() -> anyhow::Result<()> {
         }
         if a_down {
             camera_pos += (right * (lastupdate.elapsed().as_secs_f32() * move_speed)).neg();
+        }
+
+        let click_point = camera_pos + forward.normalize();
+        let click_point_vx : VoxelPos<i32> = VoxelPos{x: click_point.x.round() as i32, y: click_point.y.round() as i32, z: click_point.z.round() as i32};
+        
+        if delete_action { 
+            println!("Clicked: {}", click_point_vx);
+            if space.is_loaded(click_point_vx) {
+                let old_material = space.get(click_point_vx).unwrap();
+                let set_material = air.clone();
+                space.set(click_point_vx, set_material.clone());
+                if let Ok(material) = space.get(click_point_vx) {
+                    println!("New material is : {}", material);
+                }
+                if old_material != set_material.clone() {
+                    renderer.notify_remesh(click_point_vx);
+                }
+            }
+            else { 
+                println!("Trying to set on a not-yet-loaded chunk!");
+            }
+            delete_action = false;
+        }
+        else if set_action {
+            println!("Clicked: {}", click_point_vx);
+            if space.is_loaded(click_point_vx) {
+                let old_material = space.get(click_point_vx).unwrap();
+                let set_material = stone.clone();
+                space.set(click_point_vx, set_material.clone());
+                if let Ok(_material) = space.get(click_point_vx) {
+                    println!("New material is : {}", space.get(click_point_vx).unwrap());
+                }
+                if old_material != set_material.clone() {
+                    renderer.notify_remesh(click_point_vx);
+                }
+            }
+            else { 
+                println!("Trying to set on a not-yet-loaded chunk!");
+            }
+            set_action = false;
         }
 
         //Drawing

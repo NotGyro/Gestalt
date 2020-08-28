@@ -19,26 +19,25 @@ custom_error!{ pub ChunkSerializeError
     InvalidType{ty_id: u8} = "Attempted to load chunk type {ty_id}, which is not supported.",
 }
 
-pub const CHUNK_SZ : usize = 32;
-pub const CHUNK_SQUARED : usize = 1024;
-pub const CHUNK_VOLUME : usize = 32768;
-//The length of each chunk side is 2^5.
 pub const CHUNK_EXP : usize = 5;
+pub const CHUNK_SZ : usize = 2usize.pow(CHUNK_EXP as u32);
+pub const CHUNK_SQUARED : usize = CHUNK_SZ*CHUNK_SZ;
+pub const CHUNK_VOLUME : usize = CHUNK_SZ*CHUNK_SZ*CHUNK_SZ;
 
-pub const CHUNK_RANGE : VoxelRange<i32> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
-pub const CHUNK_RANGE_USIZE : VoxelRange<usize> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
+pub const CHUNK_RANGE : VoxelRange<i32> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(CHUNK_SZ as i32,CHUNK_SZ as i32,CHUNK_SZ as i32)};
+pub const CHUNK_RANGE_USIZE : VoxelRange<usize> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(CHUNK_SZ,CHUNK_SZ,CHUNK_SZ)};
 
 #[inline(always)] 
-pub fn chunk_z_to_i_component(z : usize) -> usize {
-    z * CHUNK_SQUARED
+pub fn chunk_x_to_i_component(x : usize) -> usize {
+    x
 }
 #[inline(always)] 
 pub fn chunk_y_to_i_component(y : usize) -> usize {
     y * CHUNK_SZ
 }
 #[inline(always)] 
-pub fn chunk_x_to_i_component(x : usize) -> usize {
-    x
+pub fn chunk_z_to_i_component(z : usize) -> usize {
+    z * CHUNK_SQUARED
 }
 
 #[inline(always)] 
@@ -46,18 +45,18 @@ pub fn chunk_xyz_to_i(x : usize, y : usize, z : usize) -> usize {
     chunk_z_to_i_component(z) + chunk_y_to_i_component(y) + chunk_x_to_i_component(x)
 }
 
-#[inline(always)] 
+#[inline(always)]
 pub fn chunk_i_to_xyz(i : usize) -> (usize, usize, usize) {
-    let x = i % CHUNK_SZ;
-    let z = (i-x)/CHUNK_SQUARED; //The remainder on this (the y value) just gets thrown away, which is good here.
-    let y = (i - (z * CHUNK_SQUARED))/CHUNK_SZ;
+    let z = i/CHUNK_SQUARED;
+    let y = (i-z*CHUNK_SQUARED)/CHUNK_SZ;
+    let x = i - ((z*CHUNK_SQUARED) + (y*CHUNK_SZ));
     (x, y, z)
 }
 
 
 #[inline(always)]
 pub fn get_pos_x_offset(i : usize) -> Option<usize> {
-    if i + chunk_x_to_i_component(1) < CHUNK_VOLUME {
+    if (i + chunk_x_to_i_component(1) < CHUNK_VOLUME) && (chunk_i_to_xyz(i).0 + 1 < CHUNK_SZ) {
         Some(i + chunk_x_to_i_component(1))
     }
     else {
@@ -66,16 +65,14 @@ pub fn get_pos_x_offset(i : usize) -> Option<usize> {
 }
 #[inline(always)]
 pub fn get_neg_x_offset(i : usize) -> Option<usize> {
-    if (i as i32) - (chunk_x_to_i_component(1) as i32) >= 0 {
-        Some(((i as i32) - (chunk_x_to_i_component(1) as i32)) as usize)
+    if chunk_i_to_xyz(i).0.checked_sub(1).is_none() {
+        return None;
     }
-    else {
-        None 
-    }
+    i.checked_sub(chunk_x_to_i_component(1))
 }
 #[inline(always)]
 pub fn get_pos_y_offset(i : usize) -> Option<usize> {
-    if i + chunk_y_to_i_component(1) < CHUNK_VOLUME {
+    if (i + chunk_y_to_i_component(1) < CHUNK_VOLUME) && (chunk_i_to_xyz(i).1 + 1 < CHUNK_SZ)  {
         Some(i + chunk_y_to_i_component(1))
     }
     else {
@@ -84,16 +81,14 @@ pub fn get_pos_y_offset(i : usize) -> Option<usize> {
 }
 #[inline(always)]
 pub fn get_neg_y_offset(i : usize) -> Option<usize> {
-    if (i as i32) - (chunk_y_to_i_component(1) as i32) >= 0 {
-        Some(((i as i32) - (chunk_y_to_i_component(1) as i32)) as usize)
+    if chunk_i_to_xyz(i).1.checked_sub(1).is_none() {
+        return None;
     }
-    else {
-        None 
-    }
+    i.checked_sub(chunk_y_to_i_component(1))
 }
 #[inline(always)]
 pub fn get_pos_z_offset(i : usize) -> Option<usize> {
-    if i + chunk_z_to_i_component(1) < CHUNK_VOLUME {
+    if (i + chunk_z_to_i_component(1) < CHUNK_VOLUME) && (chunk_i_to_xyz(i).2 + 1 < CHUNK_SZ) {
         Some(i + chunk_z_to_i_component(1))
     }
     else {
@@ -102,20 +97,17 @@ pub fn get_pos_z_offset(i : usize) -> Option<usize> {
 }
 #[inline(always)]
 pub fn get_neg_z_offset(i : usize) -> Option<usize> {
-    if (i as i32) - (chunk_z_to_i_component(1) as i32) >= 0 {
-        Some(((i as i32) - (chunk_z_to_i_component(1) as i32)) as usize)
+    if chunk_i_to_xyz(i).2.checked_sub(1).is_none() {
+        return None;
     }
-    else {
-        None 
-    }
+    i.checked_sub(chunk_z_to_i_component(1))
 }
 
 /// A smaller chunk structure for chunks which only need 255 unique values.
 pub struct ChunkSmall {
     pub data: Vec<u8>,
-    pub palette: [TileId; 256],
+    pub palette: Vec<TileId>,
     pub reverse_palette: UstrMap<u8>,
-    pub highest_idx: u8,
     // Used by the serializer to tell if the palette has changed.
     pub palette_dirty: bool,
 }
@@ -139,13 +131,17 @@ impl ChunkSmall {
         self.data[chunk_xyz_to_i(x, y, z)] = value;
     }
     #[inline(always)]
+    pub fn set_raw_i(&mut self, i: usize, value: u8) {
+        self.data[i] = value;
+    }
+    #[inline(always)]
     pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
         self.reverse_palette.get(&tile).map( #[inline(always)] |i| *i as u16)
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
         if idx > 255 { return None };
-        if idx > self.highest_idx as u16 { return None };
+        if idx > self.palette.len() as u16 { return None };
         Some(self.palette[idx as usize])
     }
     ///Use this chunk to construct a chunk with u16 tiles rather than u8 ones. 
@@ -181,14 +177,13 @@ impl ChunkSmall {
             None => {
                 self.palette_dirty = true;
                 //We have run out of space.
-                if self.highest_idx >= 255 { 
+                if self.palette.len() >= 255 { 
                     return None;
                 }
                 else { 
-                    self.highest_idx += 1;
-                    let idx = self.highest_idx;
-                    self.palette[idx as usize] = tile;
-                    self.reverse_palette.insert(tile, idx);
+                    let idx = self.palette.len();
+                    self.palette.push(tile);
+                    self.reverse_palette.insert(tile, idx as u8);
                     Some(idx as u16)
                 }
             }
@@ -221,6 +216,10 @@ impl ChunkLarge {
     #[inline(always)]
     pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u16) {
         self.data[chunk_xyz_to_i(x, y, z)] = value;
+    }
+    #[inline(always)]
+    pub fn set_raw_i(&mut self, i: usize, value: u16) {
+        self.data[i] = value;
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
@@ -303,6 +302,18 @@ impl Chunk {
             ChunkInner::Large(ref mut inner) => inner.set_raw(x,y,z, value),
         };
     }
+
+    #[inline(always)]
+    pub fn set_raw_i(&mut self, i: usize, value: u16) {
+        match &mut self.inner {
+            //TODO: Smarter way of handling this case. Currently, just don't. 
+            //I don't want to return a result type HERE for performance reasons.
+            ChunkInner::Uniform(_) => if value != 0 { panic!("Attempted to set_raw() on a Uniform chunk!")}, 
+            ChunkInner::Small(ref mut inner) => inner.set_raw_i(i, value as u8),
+            ChunkInner::Large(ref mut inner) => inner.set_raw_i(i, value),
+        };
+    }
+
     #[inline(always)]
     pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
         match &self.inner {
@@ -360,16 +371,18 @@ impl Chunk {
                     // Convert to a ChunkSmall.
                     let data : Vec<u8> = vec![0; CHUNK_VOLUME];
 
-                    let mut palette : [TileId; 256] = [*val; 256];
-                    palette[1] = tile;
+                    let mut palette : Vec<TileId> = Vec::with_capacity(256);
+                    palette.push(*val);
+                    palette.push(tile);
+
                     let mut reverse_palette: UstrMap<u8> = UstrMap::default();
                     reverse_palette.insert(*val, 0);
                     reverse_palette.insert(tile, 1);
+
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
                         data: data,
                         palette: palette,
                         reverse_palette: reverse_palette,
-                        highest_idx: 1,
                         palette_dirty: false,
                     }));
                     1
@@ -477,8 +490,8 @@ impl Chunk {
                 full_palette_data.append(&mut name_bytes);
             },
             ChunkInner::Small(inner) => {
-                count = (inner.highest_idx+1) as u16;
-                for idx in 0..((inner.highest_idx as usize+1) as usize) {
+                count = inner.palette.len() as u16;
+                for (idx, _val) in inner.palette.iter().enumerate() {
                     let mut idx_bytes : Vec<u8> = Vec::from((idx as u16).to_le_bytes());
                     let mut name_bytes : Vec<u8> = Vec::from(inner.palette[idx].as_str());
                     let mut name_len_bytes : Vec<u8> = Vec::from((name_bytes.len() as u16).to_le_bytes());
@@ -616,25 +629,22 @@ impl Chunk {
                 reader.read_exact(&mut u64_buf)?;
                 let _palette_size : usize = u64::from_le_bytes(u64_buf) as usize;
 
-                let mut palette: [TileId; 256] = [ustr("nil"); 256];
+                let mut palette: Vec<TileId> = vec![ustr("nil"); palette_count as usize];
                 let mut reverse_palette: UstrMap<u8> = UstrMap::default();
-                let mut highest_idx: u8 = 0;
                 //The palette is at the end of the file, so read the rest of it.
                 //4 bytes is the absolute minimum size of a palette entry. u16 idx, u16 name_length (which would be 0 if there's no string).
                 for _ in 0..palette_count {
                     let (_, idx, value) = read_palette_entry(reader)?;
                     palette[idx as usize] = value;
                     reverse_palette.insert(value, idx as u8);
-                    if idx > (highest_idx as u16) { highest_idx = idx as u8 }
                 }
-                //Here, build a chunk to return. 
+                //Here, build a chunk to return.
                 Chunk{revision: revision,
                     inner: ChunkInner::Small( Box::new(
                         ChunkSmall {
                             data: data,
                             palette: palette,
                             reverse_palette: reverse_palette,
-                            highest_idx: highest_idx,
                             palette_dirty: false,
                         }
                     ))
