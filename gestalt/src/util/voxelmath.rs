@@ -1028,10 +1028,10 @@ impl VoxelRaycast {
             step_dir.z = -1;
         }
 
-        let mut voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
+        let voxel_origin : VoxelPos<i32> = VoxelPos{x: origin.x.floor() as i32, y: origin.y.floor() as i32, z: origin.z.floor() as i32};
         
         //Resolve some weird sign bugs.
-        let mut negative : bool =false;
+        /*let mut negative : bool =false;
         let mut step_negative : VoxelPos<i32> = VoxelPos{x: 0, y: 0, z : 0};
         if direction.x<0.0 {
             step_negative.x = -1; negative=true;
@@ -1044,7 +1044,7 @@ impl VoxelRaycast {
         }
         if negative {
             voxel_origin = voxel_origin + step_negative;
-        }
+        }*/
 
         //Distance along the ray to the next voxel from our origin
         let next_voxel_boundary = voxel_origin + step_dir;

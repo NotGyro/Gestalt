@@ -6,19 +6,19 @@
 #[allow(non_upper_case_globals)]
 pub mod hemlock_scopes {
     use hemlock::Scope;
-    //use hemlock::Verbosity::*;
+    use hemlock::Verbosity::*;
 
     lazy_static! {
-        pub static ref Core:     u32 = hemlock::register_scope(Scope::new("Core"));
+        pub static ref Core:     u32 = hemlock::register_scope(Scope::new("Core").print(Verbose));
         // Library is used for the Log crate proxy we're about to define,
         // so anything not logged through Hemlock will show up as being logged by the "Library" scope.
-        pub static ref Library:  u32 = hemlock::register_scope(Scope::new("Library"));
-        pub static ref Script:   u32 = hemlock::register_scope(Scope::new("Script"));
-        pub static ref Game:     u32 = hemlock::register_scope(Scope::new("Game"));
-        pub static ref Test:     u32 = hemlock::register_scope(Scope::new("Test"));
-        pub static ref Network:  u32 = hemlock::register_scope(Scope::new("Network"));
-        pub static ref Renderer: u32 = hemlock::register_scope(Scope::new("Renderer"));
-        pub static ref Mesher:   u32 = hemlock::register_scope(Scope::new("Mesher"));
+        pub static ref Library:  u32 = hemlock::register_scope(Scope::new("Library").print(Verbose));
+        pub static ref Script:   u32 = hemlock::register_scope(Scope::new("Script").print(Verbose));
+        pub static ref Game:     u32 = hemlock::register_scope(Scope::new("Game").print(Verbose));
+        pub static ref Test:     u32 = hemlock::register_scope(Scope::new("Test").print(Verbose));
+        pub static ref Network:  u32 = hemlock::register_scope(Scope::new("Network").print(Verbose));
+        pub static ref Renderer: u32 = hemlock::register_scope(Scope::new("Renderer").print(Verbose));
+        pub static ref Mesher:   u32 = hemlock::register_scope(Scope::new("Mesher").print(Verbose));
     }
 }
 

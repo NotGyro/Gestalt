@@ -26,3 +26,20 @@ pub type TilePos = VoxelPos<TileCoord>;
 //Position of a chunk cell in the space.
 pub type ChunkCoord = i32;
 pub type ChunkPos = VoxelPos<ChunkCoord>;
+
+use crate::entity::{EntPos, EntVel};
+use crate::util::message::*;
+
+pub struct World {
+    pub space : Space,
+    pub entity_world : legion::World,
+}
+
+impl World { 
+    pub fn new() -> Self { 
+        World {
+            space: Space::new(),
+            entity_world: legion::world::World::default(),
+        }
+    }
+}

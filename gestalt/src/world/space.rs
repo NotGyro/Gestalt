@@ -79,12 +79,12 @@ impl Space {
         self.gen_chunk(pos)
     }
     pub fn gen_chunk(&mut self, pos: ChunkPos) -> Result<(), Box<dyn Error>> {
-        if pos.y > 1 {
+        if pos.y > 0 {
             //Surface chunk, all air.
             let chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("air"))};
             self.chunks.insert(pos, chunk);
         }
-        else if pos.y == 1  {
+        else if pos.y == 0  {
             let mut chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(ustr("stone"))};
             let grass_id = chunk.add_to_palette(ustr("grass"));
             let dirt_id = chunk.add_to_palette(ustr("dirt"));

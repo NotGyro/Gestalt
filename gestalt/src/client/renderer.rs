@@ -1,6 +1,7 @@
 use crate::world::*;
 use crate::world::chunk::*;
 use crate::client::tileart::*;
+use crate::world::space::chunk_to_world_pos;
 
 use crate::util::voxelmath::*;
 
@@ -91,7 +92,7 @@ impl PackedVertex {
     
     pub fn get_x(&self) -> u32 {
         let bitmask : u32 = 0b0_0_000000000000_000000_000000_111111;
-        let mut val = self.vertexdata & bitmask;
+        let val = self.vertexdata & bitmask;
         return val;
     }
     pub fn get_y(&self) -> u32 {
@@ -130,10 +131,10 @@ impl PackedVertex {
         ret.set_x(vert.position[0]);
         ret.set_y(vert.position[1]);
         ret.set_z(vert.position[2]);
-        if(u >= 1) {
+        if u >= 1 {
             ret.set_u_high(true);
         }
-        if(v >= 1) {
+        if v >= 1 {
             ret.set_v_high(true);
         }
         return ret;
@@ -294,10 +295,10 @@ impl TextureArrayDyn {
     pub fn associate_tile(&mut self, display : &Display, tile: TileId, art: TileArtSimple) -> Result<(), Box<dyn std::error::Error>> {
         match art.textures {
             BlockTex::Invisible => {
-                
+                self.tile_mapping.insert(tile, ([0;6], art));
             },
             BlockTex::Single(texture_name) => {
-                self.add_tex(texture_name);
+                self.add_tex(texture_name)?;
                 let tex = self.tex_mapping.get(&texture_name);
                 let tex_unwrap = tex.ok_or(ImageLoadError::MissingTileFile{tile: tile, file:texture_name.to_string()})?;
                 let sides_textures: [usize; 6] = arr![*tex_unwrap;6];
@@ -307,7 +308,7 @@ impl TextureArrayDyn {
             BlockTex::AllSides(sides) => {
                 let mut sides_textures: [usize; 6] = arr![0;6];
                 for (idx, side) in sides.iter().enumerate() {
-                    self.add_tex(*side);
+                    self.add_tex(*side)?;
                     let tex = self.tex_mapping.get(&side);
                     let tex_unwrap = tex.ok_or(ImageLoadError::MissingTileFile{tile: tile, file:side.to_string()})?;
 
@@ -339,89 +340,70 @@ struct SideRenderInfo {
     pub tex_idx : u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum ArtCacheInner {
-    Uniform( ArtEntry ),
-    Small( Vec<ArtEntry> ),
-    Large( HashMap<u16, ArtEntry>),
+    Uniform( Option<ArtEntry> ),
+    Small( Vec<Option<ArtEntry>> ),
+    Large( HashMap<u16, Option<ArtEntry>>),
 }
-#[derive(Clone)]
-struct ArtCache(Option<ArtCacheInner>);
+#[derive(Clone, Debug)]
+struct ArtCache(ArtCacheInner);
 
 impl ArtCache {
     pub fn build_from(chunk: &Chunk, tex: &TextureArrayDyn) -> Result<Self, Box<dyn Error>> {
         Ok(match &chunk.inner {
             ChunkInner::Uniform(val) => {
-                if tex.has_tile(&val) {
-                    let art = tex.art_for_tile(&val)?;
-                    ArtCache{0: Some(
-                        ArtCacheInner::Uniform( art )
-                    )}
-                }
-                else {
-                    ArtCache{0: None}
-                }
+                let art = tex.art_for_tile(&val)?;
+                let art_opt = match &art.1.textures { 
+                    BlockTex::Invisible => None, 
+                    _ => Some(art),
+                };
+                ArtCache{0: ArtCacheInner::Uniform( art_opt ) }
             }
             ChunkInner::Small(inner) => {
-                let mut list: Vec<ArtEntry> = Vec::with_capacity(256);
+                let mut list: Vec<Option<ArtEntry>> = Vec::with_capacity(256);
                 for i in 0..inner.palette.len() {
+
                     let value = inner.palette[i];
                     let art = tex.art_for_tile(&value)?;
-                    list.push(art);
+                    let art_opt = match &art.1.textures { 
+                        BlockTex::Invisible => None, 
+                        _ => Some(art),
+                    };
+                    
+                    list.push(art_opt);
                 }
-                if list.len() != 0 {
-                    ArtCache{0: Some(
-                        ArtCacheInner::Small(list)
-                    )}
-                }
-                else {
-                    ArtCache{0: None}
-                }
+                ArtCache{0: ArtCacheInner::Small(list) }
             }
             ChunkInner::Large(inner) => {
-                let mut list: HashMap<u16, ArtEntry> = HashMap::new();
+                let mut list: HashMap<u16, Option<ArtEntry>> = HashMap::new();
                 for (key, value) in inner.palette.iter() {
                     let art = tex.art_for_tile(&value)?;
-                    list.insert(*key, art);
+                    let art_opt = match &art.1.textures { 
+                        BlockTex::Invisible => None, 
+                        _ => Some(art),
+                    };
+                    list.insert(*key, art_opt);
                 }
-                if list.len() != 0 {
-                    ArtCache{0: Some(
-                        ArtCacheInner::Large(list)
-                    )}
-                }
-                else {
-                    ArtCache{0: None}
-                }
+                ArtCache{0: ArtCacheInner::Large(list) }
             }
         })
     }
     #[inline(always)]
     pub fn get_mapping(&self, idx: u16) -> Option<ArtEntry> {
-        if let Some(inner) = &self.0 {
-            match inner {
-                ArtCacheInner::Uniform(single) => {
-                    if idx == 0 {
-                        Some(single.clone())
-                    }            
-                    else { 
-                        None
-                    }
+        match &self.0 {
+            ArtCacheInner::Uniform(single) => single.clone(),
+            ArtCacheInner::Small(list) => { 
+                if idx >= list.len() as u16 {
+                    None
                 } 
-                ArtCacheInner::Small(list) => { 
-                    if idx >= list.len() as u16 {
-                        None
-                    } 
-                    else {
-                        Some(list[idx as usize].clone())
-                    }
+                else {
+                    list[idx as usize].clone()
                 }
-                ArtCacheInner::Large(list)  => {
-                    list.get(&idx).map(|e| e.clone())
-                }
-            }
-        }
-        else {
-            None
+            },
+            ArtCacheInner::Large(list)  => {
+                list.get(&idx).map(|e| e.clone()).flatten()
+            },
         }
     }
 }
@@ -445,7 +427,7 @@ impl Renderer {
     /// Add the mesh at this location to the list of meshes which need to be re-built.
     pub fn notify_remesh(&mut self, pos : VoxelPos<i32>) {
         for(our_chunk, _) in &self.meshes {
-            let range = chunk::CHUNK_RANGE.get_shifted(*our_chunk);
+            let range = chunk::CHUNK_RANGE.get_shifted(chunk_to_world_pos(*our_chunk));
             if range.contains(pos) {
                 if !self.remesh_list.contains(our_chunk) {
                     self.remesh_list.insert(*our_chunk);
@@ -455,7 +437,7 @@ impl Renderer {
                             
                             let neighbor = pos.get_neighbor(DIR);
                             for (neighbor_chunk, _)  in &self.meshes { 
-                                let neighbor_range = chunk::CHUNK_RANGE.get_shifted(*neighbor_chunk);
+                                let neighbor_range = chunk::CHUNK_RANGE.get_shifted(chunk_to_world_pos(*neighbor_chunk));
                                 if neighbor_range.contains(neighbor)  {
                                     if !self.remesh_list.contains(neighbor_chunk) {
                                         self.remesh_list.insert(*neighbor_chunk);
@@ -477,8 +459,7 @@ impl Renderer {
             if self.meshes.contains_key(&coords) {
                 self.meshes.remove(&coords);
                 if let Some(chunk) = vs.borrow_chunk(coords) {
-                    self.meshes.insert(coords,
-                        make_voxel_mesh(chunk, display, &self.texture_manager)? );
+                    self.meshes.insert(coords, make_voxel_mesh(chunk, display, &self.texture_manager)?);
                 }
             }
         }
@@ -572,30 +553,27 @@ pub fn make_voxel_mesh(chunk : &Chunk, display : &Display, textures : &TextureAr
     for i in 0..CHUNK_VOLUME {
         let tile = chunk.get_raw_i(i);
         if let Some(art) = art_cache.get_mapping(tile) {
-            // Skip it if it's air.
-            if art.1.is_visible() {
-                offset_unroll!(SIDE, offset_idx, i, SIDE_INDEX {
-                    let mut cull: bool = false;
-                    if let Some(neighbor_idx) = offset_idx {
-                        let neighbor_tile = chunk.get_raw_i(neighbor_idx);
-                        if let Some(neighbor_art) = art_cache.get_mapping(neighbor_tile) {
-                            if neighbor_art.1.is_visible() {
-                                cull = true;
-                            }
+            offset_unroll!(SIDE, offset_idx, i, SIDE_INDEX {
+                let mut cull: bool = false;
+                if let Some(neighbor_idx) = offset_idx {
+                    let neighbor_tile = chunk.get_raw_i(neighbor_idx);
+                    if let Some(neighbor_art) = art_cache.get_mapping(neighbor_tile) {
+                        if neighbor_art.1.is_visible() {
+                            cull = true;
                         }
                     }
-                    if !cull {
-                        let (x,y,z) = chunk_i_to_xyz(i);
-                        let vri = SideRenderInfo {
-                            side : SIDE,
-                            x : x as u16, 
-                            y : y as u16,
-                            z : z as u16,
-                            tex_idx : art.0[SIDE_INDEX] as u32 };
-                        drawable.push(vri);
-                    }
-                });
-            }
+                }
+                if !cull {
+                    let (x,y,z) = chunk_i_to_xyz(i);
+                    let vri = SideRenderInfo {
+                        side : SIDE,
+                        x : x as u16, 
+                        y : y as u16,
+                        z : z as u16,
+                        tex_idx : art.0[SIDE_INDEX] as u32 };
+                    drawable.push(vri);
+                }
+            });
         }
     }
     //println!("Found {} drawable cubes.", drawable.len());
@@ -650,7 +628,7 @@ fn chunk_index_neighbors_unroll() {
     let u1 = Ustr::from("air");
     let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
 
-    let i = chunk::chunk_xyz_to_i(7, 7, 7);
+    //let i = chunk::chunk_xyz_to_i(7, 7, 7);
 
     for x in 0..CHUNK_SZ {
         for y in 0..CHUNK_SZ {
@@ -665,7 +643,7 @@ fn chunk_index_neighbors_unroll() {
     let i = chunk::chunk_xyz_to_i(7, 7, 7);
     test_chunk.set(7,7,7, u2);
     let id = test_chunk.index_from_palette(u2).unwrap();
-    offset_unroll!(_SIDE, offset_idx, i, _side_idx {
+    offset_unroll!(_SIDE, offset_idx, i, _SIDE_IDX {
         let neighbor_idx = offset_idx.unwrap();
         test_chunk.set_raw_i(neighbor_idx, id); 
     });

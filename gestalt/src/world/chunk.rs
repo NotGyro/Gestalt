@@ -374,10 +374,15 @@ impl Chunk {
                     let mut palette : Vec<TileId> = Vec::with_capacity(256);
                     palette.push(*val);
                     palette.push(tile);
+                    assert_eq!(palette.len(), 2);
+
 
                     let mut reverse_palette: UstrMap<u8> = UstrMap::default();
                     reverse_palette.insert(*val, 0);
                     reverse_palette.insert(tile, 1);
+
+                    //info!(Mesher, "Upgrading a chunk from uniform to small.");
+                    //info!(Mesher, "Palette is {:?}", palette);
 
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
                         data: data,
