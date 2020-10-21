@@ -3,7 +3,7 @@ use crate::world::chunk::*;
 use crate::client::tileart::*;
 use crate::world::space::chunk_to_world_pos;
 
-use crate::common::voxelmath::*;
+use crate::util::voxelmath::*;
 
 use std::collections::HashMap;
 use std::error::Error;
