@@ -1,12 +1,11 @@
 use crate::world::tile::TileId;
-use crate::util::voxelmath::*;
+use crate::common::voxelmath::*;
 //use ustr::{ustr, Ustr, UstrMap};
 use hashbrown::HashMap;
 
 use std::error::Error;
 use std::io::{Read, Write, Seek, SeekFrom};
 use semver::Version;
-
 use ustr::*;
 
 pub const SERIALIZED_CHUNK_VERSION_MAJOR: u64 = 0;
@@ -107,7 +106,7 @@ pub fn get_neg_z_offset(i : usize) -> Option<usize> {
 pub struct ChunkSmall {
     pub data: Vec<u8>,
     pub palette: Vec<TileId>,
-    pub reverse_palette: UstrMap<u8>,
+    pub reverse_palette: HashMap<TileId, u8>,
     // Used by the serializer to tell if the palette has changed.
     pub palette_dirty: bool,
 }
@@ -147,22 +146,12 @@ impl ChunkSmall {
     ///Use this chunk to construct a chunk with u16 tiles rather than u8 ones. 
     #[inline]
     pub fn expand(&self) -> ChunkLarge {
-        let mut new_palette : HashMap<u16, TileId> = HashMap::new();
-        for (i, entry) in self.palette.iter().enumerate() {
-            new_palette.insert(i as u16, *entry);
-        }
         let mut new_data : Vec<u16> = vec![0; CHUNK_VOLUME];
         for (i, tile) in self.data.iter().enumerate() {
             new_data[i] = *tile as u16;
         }
-        let mut new_reverse_palette : UstrMap<u16> = UstrMap::default();
-        for (key, value) in self.reverse_palette.iter() {
-            new_reverse_palette.insert(*key, *value as u16);
-        }
-        ChunkLarge { data: new_data,
-            palette: new_palette,
-            reverse_palette: new_reverse_palette,
-            palette_dirty: true,
+        ChunkLarge { 
+            data: new_data,
         }
     }
     /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
@@ -194,9 +183,6 @@ impl ChunkSmall {
 /// Medium chunk structure. 
 pub struct ChunkLarge {
     pub data: Vec<u16>,
-    pub palette: HashMap<u16, TileId>,
-    pub reverse_palette: UstrMap<u16>,
-    pub palette_dirty: bool,
 }
 
 impl ChunkLarge {
@@ -209,43 +195,12 @@ impl ChunkLarge {
         self.get_raw_i(chunk_xyz_to_i(x, y, z))
     }
     #[inline(always)]
-    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
-        //Get our int data and use it as an index for our palette. Yay constant-time!  
-        self.palette[&self.data[chunk_xyz_to_i(x, y, z)]]
-    }
-    #[inline(always)]
     pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u16) {
         self.data[chunk_xyz_to_i(x, y, z)] = value;
     }
     #[inline(always)]
     pub fn set_raw_i(&mut self, i: usize, value: u16) {
         self.data[i] = value;
-    }
-    #[inline(always)]
-    pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
-        self.reverse_palette.get(&tile).map( #[inline(always)] |i| *i)
-    }
-    #[inline(always)]
-    pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
-        self.palette.get(&idx).map( #[inline(always)] |i| *i)
-    }
-    /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
-    /// If it already exists, return the associated index. If we're out of room, return None.
-    #[inline]
-    pub fn add_to_palette(&mut self, tile: TileId) -> u16 {
-        match self.reverse_palette.get(&tile) {
-            Some(idx) => {
-                //Already in the palette. 
-                *idx as u16
-            },
-            None => {
-                self.palette_dirty = true;
-                let next_idx : u16 = self.palette.len() as u16;
-                self.palette.insert(next_idx, tile);
-                self.reverse_palette.insert(tile, next_idx);
-                next_idx
-            }
-        }
     }
 }
 
@@ -285,7 +240,7 @@ impl Chunk {
         match &self.inner{
             ChunkInner::Uniform(val) => *val, 
             ChunkInner::Small(inner) => inner.get(x,y,z),
-            ChunkInner::Large(inner) => inner.get(x,y,z),
+            ChunkInner::Large(inner) => inner.get_raw(x,y,z),
         }
     }
     #[inline(always)]

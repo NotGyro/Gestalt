@@ -1,5 +1,6 @@
 pub mod renderer;
 pub mod tileart;
+pub mod input;
 
 use cgmath::{Angle, Matrix4, Vector3, Point3, InnerSpace, Rotation, Rotation3, Quaternion, Rad};
 
@@ -28,7 +29,7 @@ use std::time::*;
 use std::net::SocketAddr;
 
 
-use crate::util::voxelmath::*;
+use crate::common::voxelmath::*;
 use crate::world::*;
 use crate::client::tileart::*;
 use crate::world::TileId;

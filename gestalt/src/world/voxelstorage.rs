@@ -2,7 +2,7 @@ use std::fmt::{Display, Debug};
 use std::fmt;
 use std::error::Error;
 
-use crate::util::voxelmath::*;
+use crate::common::voxelmath::*;
 use crate::world::{TilePos, ChunkPos};
 
 #[allow(dead_code)]

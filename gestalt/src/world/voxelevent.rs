@@ -2,8 +2,8 @@ use std::result::Result;
 use std::error::Error;
 use std::fmt::Debug;
 
-use crate::util::voxelmath::*;
-use crate::util::message::*;
+use crate::common::voxelmath::*;
+use crate::common::message::*;
 use crate::world::{TilePos, TileCoord};
 use crate::world::Space;
 use crate::world::tile::TileId;

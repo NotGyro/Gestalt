@@ -6,9 +6,9 @@
 
 #[macro_use] extern crate hemlock;
 
-extern crate anyhow;
 #[macro_use] extern crate arr_macro;
 extern crate bincode;
+extern crate blake3;
 extern crate clap;
 extern crate crossbeam_channel;
 #[macro_use] extern crate custom_error;
@@ -17,7 +17,8 @@ extern crate crossbeam_channel;
 extern crate glutin;
 extern crate hashbrown;
 #[macro_use] extern crate lazy_static;
-extern crate legion;
+#[macro_use] extern crate legion;
+extern crate libp2p;
 extern crate num;
 extern crate parking_lot;
 extern crate rand;
@@ -31,30 +32,22 @@ use logger::hemlock_scopes;
 use clap::{Arg, App};
 use std::net::SocketAddr;
 
-#[macro_use] pub mod util;
+#[macro_use] pub mod common;
 pub mod client;
-pub mod world;
 pub mod entity;
+pub mod world;
 /// The main purpose of the Logger module is to define our Hemlock scopes. 
 /// It also contains a https://crates.io/crates/log proxy into Hemlock, so anything 
 /// logged using that crate's macros will show up as coming from the "Library" scope.
 pub mod logger;
 
 #[allow(unused_must_use)]
-fn main() -> anyhow::Result<()> {
+fn main() {
     match logger::logger::init_logger() {
         Ok(_) => info!(Core, "Logger initialized."),
         Err(e) => panic!("Could not initialize logger! Reason: {}", e),
     };
     
-    match sodiumoxide::init() {
-        Ok(()) => {},
-        Err(()) => {
-            error!(Network, "Unable to initialize cryptography library!");
-            panic!();
-        },
-    };
-
     let matches = App::new("Gestalt Engine")
         .arg(Arg::with_name("server")
             .short("s")
