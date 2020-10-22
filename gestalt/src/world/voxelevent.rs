@@ -103,7 +103,7 @@ impl RegisteredMessage for VoxelEvent {
 
 #[test] 
 pub fn apply_event() {
-    let id = 771;
+    let id = ustr("test1");
     let mut space = Space::new();
     space.load_or_gen_chunk(vpos!(0,0,0)).unwrap();
     let evt = VoxelEvent::Single( VoxelEventSingle{new_id: id, position: vpos!(1,1,1)});
@@ -114,7 +114,7 @@ pub fn apply_event() {
 
     assert_eq!(space.get(vpos!(1,1,1)).unwrap(), id);
 
-    let id = 44;
+    let id = ustr("2test2");
     let range : VoxelRange<TileCoord> = VoxelRange{lower: vpos!(0,0,0), upper: vpos!(8,8,8)}; 
     let evt = VoxelEvent::Cuboid( VoxelEventCuboid{new_id: id, cuboid: range} );
     
@@ -131,8 +131,8 @@ pub fn apply_event() {
 #[allow(unused_must_use)]
 #[test]
 fn test_voxel_message_system() {
-    let id = 33;
-    let id2 = 44;
+    let id = ustr("test1");
+    let id2 = ustr("2test2");
 
     let mut space = Space::new();
     space.load_or_gen_chunk(vpos!(0,0,0)).unwrap();

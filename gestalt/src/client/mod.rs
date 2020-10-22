@@ -60,7 +60,7 @@ impl Default for ClientConfig {
 
 #[allow(unused_variables)]
 #[allow(unused_must_use)]
-pub fn run_client(join: Option<SocketAddr>) -> anyhow::Result<()> {
+pub fn run_client(join: Option<SocketAddr>) -> Result<(), Box<dyn Error>> {
     let air = ustr("air");
     let stone = ustr("stone");
     let dirt = ustr("dirt");

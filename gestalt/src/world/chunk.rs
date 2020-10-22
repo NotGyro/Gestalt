@@ -1,5 +1,5 @@
 use crate::world::tile::TileId;
-use crate::util::voxelmath::*;
+use crate::common::voxelmath::*;
 //use ustr::{ustr, Ustr, UstrMap};
 use hashbrown::HashMap;
 
@@ -189,6 +189,10 @@ impl ChunkSmall {
             }
         }
     }
+    #[inline(always)]
+    pub fn palette_length(&self) -> usize {
+        self.palette.len()
+    }
 }
 
 /// Medium chunk structure. 
@@ -239,6 +243,9 @@ impl ChunkLarge {
                 *idx as u16
             },
             None => {
+                if self.palette.len() >= (u16::MAX as usize) { 
+                    self.garbage_collect_palette();
+                }
                 self.palette_dirty = true;
                 let next_idx : u16 = self.palette.len() as u16;
                 self.palette.insert(next_idx, tile);
@@ -246,6 +253,28 @@ impl ChunkLarge {
                 next_idx
             }
         }
+    }
+    //Gets rid of unused palette entries 
+    pub fn garbage_collect_palette(&mut self) {
+        let mut keep_list: ustr::UstrSet = ustr::UstrSet::default();
+        for i in 0..CHUNK_VOLUME {
+            let idx = self.data[i];
+            let entry = *self.palette.get(&idx).unwrap();
+            if ! keep_list.contains(&entry) {
+                keep_list.insert(entry);
+            }
+        }
+        self.palette.retain(|&_, &mut v| {
+            keep_list.contains(&v)
+        });
+        self.reverse_palette.retain(|&k, &mut _| {
+            keep_list.contains(&k)
+        });
+        self.palette_dirty = true;
+    }
+    #[inline(always)]
+    pub fn palette_length(&self) -> usize {
+        self.palette.len()
     }
 }
 
@@ -410,6 +439,25 @@ impl Chunk {
             ChunkInner::Large(inner) => inner.add_to_palette(tile),
         }
     }
+
+    #[inline(always)]
+    pub fn palette_length(&self) -> usize {
+        match &self.inner {
+            ChunkInner::Uniform(_) => { 1 },
+            ChunkInner::Small(inner) => inner.palette_length(),
+            ChunkInner::Large(inner) => inner.palette_length(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn garbage_collect_palette(&mut self) {
+        match &mut self.inner {
+            ChunkInner::Uniform(_) => { /* Not applicable */ },
+            ChunkInner::Small(_) => { /* TODO */ },
+            ChunkInner::Large(inner) => inner.garbage_collect_palette(),
+        }
+    }
+
     #[inline]
     pub fn set(&mut self, x: usize, y : usize, z: usize, tile: TileId) {
         let idx = self.add_to_palette(tile);
@@ -926,4 +974,44 @@ mod tests {
             assert!(false);
         }
     }
+}
+
+#[test]
+fn test_garbage_collect_palette() {
+    use crate::rand::Rng;
+
+    let u1 = Ustr::from("air");
+    let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
+
+    let mut rng = rand::thread_rng();
+
+    {
+        for i in 0..((u16::MAX as usize)+20) {
+            
+            let x = rng.gen_range(0, CHUNK_SZ);
+            let y = rng.gen_range(0, CHUNK_SZ);
+            let z = rng.gen_range(0, CHUNK_SZ); 
+
+            let name = format!("{}.test",i);
+            let tile = Ustr::from(name.as_str());
+
+            test_chunk.set(x, y, z, tile);
+
+            assert_eq!(test_chunk.get(x,y,z), tile);
+        }
+    }
+    assert!(test_chunk.palette_length() < (u16::MAX as usize));
+
+    for x in 0..CHUNK_SZ {
+        for y in 0..CHUNK_SZ {
+            for z in 0..CHUNK_SZ {
+                test_chunk.set(x, y, z, u1)
+            }
+        }
+    }
+    test_chunk.garbage_collect_palette();
+    assert_eq!(test_chunk.palette_length(), 1);
+    
+    test_chunk.set(7, 7, 7, Ustr::from("steel"));
+    assert_eq!(test_chunk.palette_length(), 2);
 }

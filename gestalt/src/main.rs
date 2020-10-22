@@ -21,7 +21,6 @@ extern crate hashbrown;
 extern crate num;
 extern crate parking_lot;
 extern crate rand;
-extern crate rusty_v8;
 extern crate semver;
 extern crate serde;
 extern crate ustr;
@@ -71,4 +70,6 @@ fn main() {
     else {
         info!(Core, "Starting as server - our IP (hosting from) is {:?}.", ip);
     }
+    info!(Core, "Ustr cache used {} bytes of memory.", ustr::total_allocated());
+    std::thread::sleep(std::time::Duration::from_millis(100));
 }
