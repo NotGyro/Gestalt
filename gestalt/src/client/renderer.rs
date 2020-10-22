@@ -3,7 +3,7 @@ use crate::world::chunk::*;
 use crate::client::tileart::*;
 use crate::world::space::chunk_to_world_pos;
 
-use crate::common::voxelmath::*;
+use crate::util::voxelmath::*;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -228,7 +228,7 @@ pub struct TextureArrayDyn {
     //The key here is "texture name," so here we've got a texture name to Texture Array layer mapping.
     tex_mapping : UstrMap<usize>,
     //Tile to idx&art
-    pub tile_mapping : HashMap<TileId, (SidesTextures, TileArtSimple)>,
+    pub tile_mapping : UstrMap<(SidesTextures, TileArtSimple)>,
     //Cached image data, indexable by tex_mapping's values
     tex_data : Vec<Vec<u8>>,
     pub textures : Option<Texture2dArray>,
@@ -240,7 +240,7 @@ impl TextureArrayDyn {
     pub fn new(twidth : u32, theight : u32, tmax : usize) -> TextureArrayDyn { 
         TextureArrayDyn {
             tex_mapping : UstrMap::default(),
-            tile_mapping : HashMap::default(),
+            tile_mapping : UstrMap::default(),
             tex_data : Vec::new(),
             max_tex : tmax,
             tex_width : twidth,
@@ -249,15 +249,15 @@ impl TextureArrayDyn {
         }
     }
     pub fn has_tex(&self, name : &Ustr) -> bool { self.tex_mapping.contains_key(name) }
-    pub fn index_for_tex(&self, name: &Ustr) -> Result<usize, Box<dyn Error>> {
+    pub fn index_for_tex(&self, name : &Ustr) -> Result<usize, Box<dyn Error>> {
         Ok(self.tex_mapping.get(name)
-            .ok_or(ImageLoadError::UnloadedFile{file: name.to_string()})?.clone()) 
+                    .ok_or(ImageLoadError::UnassociatedTile{tile: name.clone()})?.clone()) 
     }
-    pub fn art_for_tile(&self, tile : TileId) -> Result<ArtEntry, Box<dyn Error>> { 
-        Ok(self.tile_mapping.get(&tile)
-            .ok_or(ImageLoadError::UnassociatedTile{tile: tile})?.clone()) 
+    pub fn art_for_tile(&self, name : &Ustr) -> Result<ArtEntry, Box<dyn Error>> { 
+        Ok(self.tile_mapping.get(name)
+                        .ok_or(ImageLoadError::UnloadedFile{file: name.to_string()})?.clone()) 
     }
-    pub fn has_tile(&self, tile : &TileId) -> bool { self.tile_mapping.contains_key(tile) }
+    pub fn has_tile(&self, name : &Ustr) -> bool { self.tile_mapping.contains_key(name) }
     pub fn add_tex(&mut self, texname : Ustr) -> Result<(), Box<dyn Error>> {
 
         let idx = self.tex_data.len();
@@ -353,7 +353,7 @@ impl ArtCache {
     pub fn build_from(chunk: &Chunk, tex: &TextureArrayDyn) -> Result<Self, Box<dyn Error>> {
         Ok(match &chunk.inner {
             ChunkInner::Uniform(val) => {
-                let art = tex.art_for_tile(*val)?;
+                let art = tex.art_for_tile(&val)?;
                 let art_opt = match &art.1.textures { 
                     BlockTex::Invisible => None, 
                     _ => Some(art),
@@ -365,7 +365,7 @@ impl ArtCache {
                 for i in 0..inner.palette.len() {
 
                     let value = inner.palette[i];
-                    let art = tex.art_for_tile(value)?;
+                    let art = tex.art_for_tile(&value)?;
                     let art_opt = match &art.1.textures { 
                         BlockTex::Invisible => None, 
                         _ => Some(art),
@@ -377,13 +377,21 @@ impl ArtCache {
             }
             ChunkInner::Large(inner) => {
                 let mut list: HashMap<u16, Option<ArtEntry>> = HashMap::new();
+                for (key, value) in inner.palette.iter() {
+                    let art = tex.art_for_tile(&value)?;
+                    let art_opt = match &art.1.textures { 
+                        BlockTex::Invisible => None, 
+                        _ => Some(art),
+                    };
+                    list.insert(*key, art_opt);
+                }
                 ArtCache{0: ArtCacheInner::Large(list) }
             }
         })
     }
     #[inline(always)]
-    pub fn get_mapping(&mut self, idx: u16, chunk: &Chunk, tex: &TextureArrayDyn) -> Option<ArtEntry> {
-        match &mut self.0 {
+    pub fn get_mapping(&self, idx: u16) -> Option<ArtEntry> {
+        match &self.0 {
             ArtCacheInner::Uniform(single) => single.clone(),
             ArtCacheInner::Small(list) => { 
                 if idx >= list.len() as u16 {
@@ -393,17 +401,7 @@ impl ArtCache {
                     list[idx as usize].clone()
                 }
             },
-            ArtCacheInner::Large(ref mut list)  => {
-                if !list.contains_key(&idx) {
-                    if !tex.has_tile(&idx) {
-                        return None; 
-                    }
-                    let art = tex.art_for_tile(idx).unwrap();
-                    match &art.1.textures { 
-                        BlockTex::Invisible => {}, 
-                        _ => {list.insert(idx, Some(art.clone()));},
-                    };
-                }
+            ArtCacheInner::Large(list)  => {
                 list.get(&idx).map(|e| e.clone()).flatten()
             },
         }
@@ -549,17 +547,17 @@ macro_rules! offset_unroll {
 
 pub fn make_voxel_mesh(chunk : &Chunk, display : &Display, textures : &TextureArrayDyn)
                             -> Result<ChunkMesh, Box<dyn Error>> {
-    let mut art_cache = ArtCache::build_from(chunk, &textures)?;
+    let art_cache = ArtCache::build_from(chunk, &textures)?;
     let mut drawable : Vec<SideRenderInfo> = Vec::new();
 
     for i in 0..CHUNK_VOLUME {
         let tile = chunk.get_raw_i(i);
-        if let Some(art) = art_cache.get_mapping(tile, chunk, textures) {
+        if let Some(art) = art_cache.get_mapping(tile) {
             offset_unroll!(SIDE, offset_idx, i, SIDE_INDEX {
                 let mut cull: bool = false;
                 if let Some(neighbor_idx) = offset_idx {
                     let neighbor_tile = chunk.get_raw_i(neighbor_idx);
-                    if let Some(neighbor_art) = art_cache.get_mapping(neighbor_tile, chunk, textures) {
+                    if let Some(neighbor_art) = art_cache.get_mapping(neighbor_tile) {
                         if neighbor_art.1.is_visible() {
                             cull = true;
                         }
@@ -627,20 +625,21 @@ fn mesh_step(drawable : Vec<SideRenderInfo>, display : &Display) -> Result<glium
 #[test]
 fn chunk_index_neighbors_unroll() {
 
-    let u1 = 0;
+    let u1 = Ustr::from("air");
     let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
 
     //let i = chunk::chunk_xyz_to_i(7, 7, 7);
-    let mut i = 0;
+
     for x in 0..CHUNK_SZ {
         for y in 0..CHUNK_SZ {
             for z in 0..CHUNK_SZ {
-                test_chunk.set(x, y, z, i);
-                i = i + 1;
+                let name: String = format!("{}.{}.{}", x, y, z);
+                let tile: Ustr = Ustr::from(name.as_str());
+                test_chunk.set(x, y, z, tile);
             }
         }
     }
-    let u2 = 32999;
+    let u2 = ustr("steel");
     let i = chunk::chunk_xyz_to_i(7, 7, 7);
     test_chunk.set(7,7,7, u2);
     let id = test_chunk.index_from_palette(u2).unwrap();

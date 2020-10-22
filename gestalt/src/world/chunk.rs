@@ -1,11 +1,13 @@
 use crate::world::tile::TileId;
-use crate::common::voxelmath::*;
+use crate::util::voxelmath::*;
 //use ustr::{ustr, Ustr, UstrMap};
 use hashbrown::HashMap;
 
 use std::error::Error;
 use std::io::{Read, Write, Seek, SeekFrom};
 use semver::Version;
+
+use ustr::*;
 
 pub const SERIALIZED_CHUNK_VERSION_MAJOR: u64 = 0;
 pub const SERIALIZED_CHUNK_VERSION_MINOR: u64 = 1;
@@ -105,7 +107,7 @@ pub fn get_neg_z_offset(i : usize) -> Option<usize> {
 pub struct ChunkSmall {
     pub data: Vec<u8>,
     pub palette: Vec<TileId>,
-    pub reverse_palette: HashMap<TileId, u8>,
+    pub reverse_palette: UstrMap<u8>,
     // Used by the serializer to tell if the palette has changed.
     pub palette_dirty: bool,
 }
@@ -153,11 +155,14 @@ impl ChunkSmall {
         for (i, tile) in self.data.iter().enumerate() {
             new_data[i] = *tile as u16;
         }
-        let mut new_reverse_palette : HashMap<TileId, u16> = HashMap::default();
+        let mut new_reverse_palette : UstrMap<u16> = UstrMap::default();
         for (key, value) in self.reverse_palette.iter() {
             new_reverse_palette.insert(*key, *value as u16);
         }
         ChunkLarge { data: new_data,
+            palette: new_palette,
+            reverse_palette: new_reverse_palette,
+            palette_dirty: true,
         }
     }
     /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
@@ -189,6 +194,9 @@ impl ChunkSmall {
 /// Medium chunk structure. 
 pub struct ChunkLarge {
     pub data: Vec<u16>,
+    pub palette: HashMap<u16, TileId>,
+    pub reverse_palette: UstrMap<u16>,
+    pub palette_dirty: bool,
 }
 
 impl ChunkLarge {
@@ -201,12 +209,43 @@ impl ChunkLarge {
         self.get_raw_i(chunk_xyz_to_i(x, y, z))
     }
     #[inline(always)]
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
+        //Get our int data and use it as an index for our palette. Yay constant-time!  
+        self.palette[&self.data[chunk_xyz_to_i(x, y, z)]]
+    }
+    #[inline(always)]
     pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u16) {
         self.data[chunk_xyz_to_i(x, y, z)] = value;
     }
     #[inline(always)]
     pub fn set_raw_i(&mut self, i: usize, value: u16) {
         self.data[i] = value;
+    }
+    #[inline(always)]
+    pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
+        self.reverse_palette.get(&tile).map( #[inline(always)] |i| *i)
+    }
+    #[inline(always)]
+    pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
+        self.palette.get(&idx).map( #[inline(always)] |i| *i)
+    }
+    /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
+    /// If it already exists, return the associated index. If we're out of room, return None.
+    #[inline]
+    pub fn add_to_palette(&mut self, tile: TileId) -> u16 {
+        match self.reverse_palette.get(&tile) {
+            Some(idx) => {
+                //Already in the palette. 
+                *idx as u16
+            },
+            None => {
+                self.palette_dirty = true;
+                let next_idx : u16 = self.palette.len() as u16;
+                self.palette.insert(next_idx, tile);
+                self.reverse_palette.insert(tile, next_idx);
+                next_idx
+            }
+        }
     }
 }
 
@@ -228,7 +267,7 @@ impl Chunk {
     #[inline(always)]
     pub fn get_raw(&self, x: usize, y : usize, z: usize) -> u16 {
         match &self.inner {
-            ChunkInner::Uniform(val) => *val,
+            ChunkInner::Uniform(_) => 0,
             ChunkInner::Small(inner) => inner.get_raw(x,y,z) as u16,
             ChunkInner::Large(inner) => inner.get_raw(x,y,z) as u16,
         }
@@ -236,7 +275,7 @@ impl Chunk {
     #[inline(always)]
     pub fn get_raw_i(&self, i: usize) -> u16 {
         match &self.inner {
-            ChunkInner::Uniform(val) => *val,
+            ChunkInner::Uniform(_) => 0,
             ChunkInner::Small(inner) => inner.get_raw_i(i) as u16,
             ChunkInner::Large(inner) => inner.get_raw_i(i) as u16,
         }
@@ -246,7 +285,7 @@ impl Chunk {
         match &self.inner{
             ChunkInner::Uniform(val) => *val, 
             ChunkInner::Small(inner) => inner.get(x,y,z),
-            ChunkInner::Large(inner) => inner.get_raw(x,y,z),
+            ChunkInner::Large(inner) => inner.get(x,y,z),
         }
     }
     #[inline(always)]
@@ -258,7 +297,7 @@ impl Chunk {
         match &mut self.inner {
             //TODO: Smarter way of handling this case. Currently, just don't. 
             //I don't want to return a result type HERE for performance reasons.
-            ChunkInner::Uniform(val) => if value != *val { panic!("Attempted to set_raw() on a Uniform chunk!")}, 
+            ChunkInner::Uniform(_) => if value != 0 { panic!("Attempted to set_raw() on a Uniform chunk!")}, 
             ChunkInner::Small(ref mut inner) => inner.set_raw(x,y,z, value as u8),
             ChunkInner::Large(ref mut inner) => inner.set_raw(x,y,z, value),
         };
@@ -269,7 +308,7 @@ impl Chunk {
         match &mut self.inner {
             //TODO: Smarter way of handling this case. Currently, just don't. 
             //I don't want to return a result type HERE for performance reasons.
-            ChunkInner::Uniform(val) => if value != *val { panic!("Attempted to set_raw() on a Uniform chunk!")}, 
+            ChunkInner::Uniform(_) => if value != 0 { panic!("Attempted to set_raw() on a Uniform chunk!")}, 
             ChunkInner::Small(ref mut inner) => inner.set_raw_i(i, value as u8),
             ChunkInner::Large(ref mut inner) => inner.set_raw_i(i, value),
         };
@@ -287,7 +326,7 @@ impl Chunk {
                 }
             }, 
             ChunkInner::Small(inner) => inner.index_from_palette(tile),
-            ChunkInner::Large(inner) => Some(tile),
+            ChunkInner::Large(inner) => inner.index_from_palette(tile),
         }
     }
     #[inline(always)]
@@ -302,7 +341,7 @@ impl Chunk {
                 }
             }, 
             ChunkInner::Small(inner) => inner.tile_from_index(idx),
-            ChunkInner::Large(inner) => Some(idx),
+            ChunkInner::Large(inner) => inner.tile_from_index(idx),
         }
     }
     #[inline(always)]
@@ -310,7 +349,7 @@ impl Chunk {
         match &self.inner {
             ChunkInner::Uniform(_) => false,
             ChunkInner::Small(inner) => inner.palette_dirty,
-            ChunkInner::Large(inner) => false,
+            ChunkInner::Large(inner) => inner.palette_dirty,
         }
     }
     #[inline(always)]
@@ -318,7 +357,7 @@ impl Chunk {
         match &mut self.inner {
             ChunkInner::Uniform(_) => {},
             ChunkInner::Small(ref mut inner) => inner.palette_dirty = set_to,
-            ChunkInner::Large(ref mut inner) => {},
+            ChunkInner::Large(ref mut inner) => inner.palette_dirty = set_to,
         }
     }
     #[inline]
@@ -326,7 +365,7 @@ impl Chunk {
         match &mut self.inner {
             ChunkInner::Uniform(val) => {
                 if tile == *val {
-                    *val
+                    0
                 }
                 else {
                     // Convert to a ChunkSmall.
@@ -338,10 +377,12 @@ impl Chunk {
                     assert_eq!(palette.len(), 2);
 
 
-                    let mut reverse_palette: HashMap<TileId, u8> = HashMap::default();
+                    let mut reverse_palette: UstrMap<u8> = UstrMap::default();
                     reverse_palette.insert(*val, 0);
                     reverse_palette.insert(tile, 1);
 
+                    //info!(Mesher, "Upgrading a chunk from uniform to small.");
+                    //info!(Mesher, "Palette is {:?}", palette);
 
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
                         data: data,
@@ -360,12 +401,13 @@ impl Chunk {
                     None => {
                         //We need to expand it.
                         let mut new_inner = Box::new(inner.expand());
+                        let idx = new_inner.add_to_palette(tile); //We just went from u8s to u16s, the ID space has quite certainly 
                         self.inner = ChunkInner::Large(new_inner);
-                        tile
+                        idx
                     },
                 }
             },
-            ChunkInner::Large(inner) => tile,
+            ChunkInner::Large(inner) => inner.add_to_palette(tile),
         }
     }
     #[inline]
@@ -443,27 +485,42 @@ impl Chunk {
             ChunkInner::Uniform(val) => {
                 count=1;
                 let mut idx_bytes : Vec<u8> = Vec::from((0 as u16).to_le_bytes());
-                let mut value_bytes : Vec<u8> = Vec::from(val.to_le_bytes());
-                //let mut value_len_bytes : Vec<u8> = Vec::from((value_bytes.len() as u16).to_le_bytes());
+                let mut name_bytes : Vec<u8> = Vec::from(val.as_str());
+                let mut name_len_bytes : Vec<u8> = Vec::from((name_bytes.len() as u16).to_le_bytes());
                 //Write the index.
                 full_palette_data.append(&mut idx_bytes);
-                // //Write the length of our coming string.
-                // full_palette_data.append(&mut value_len_bytes);
-                //Then, write the value.
-                full_palette_data.append(&mut value_bytes);
+                //Write the length of our coming string.
+                full_palette_data.append(&mut name_len_bytes);
+                //Then, write the string.
+                full_palette_data.append(&mut name_bytes);
             },
             ChunkInner::Small(inner) => {
                 count = inner.palette.len() as u16;
                 for (idx, _val) in inner.palette.iter().enumerate() {
                     let mut idx_bytes : Vec<u8> = Vec::from((idx as u16).to_le_bytes());
-                    let mut value_bytes : Vec<u8> = Vec::from(inner.palette[idx].to_le_bytes());
+                    let mut name_bytes : Vec<u8> = Vec::from(inner.palette[idx].as_str());
+                    let mut name_len_bytes : Vec<u8> = Vec::from((name_bytes.len() as u16).to_le_bytes());
                     //Write the index.
                     full_palette_data.append(&mut idx_bytes);
+                    //Write the length of our coming string.
+                    full_palette_data.append(&mut name_len_bytes);
                     //Then, write the string.
-                    full_palette_data.append(&mut value_bytes);
+                    full_palette_data.append(&mut name_bytes);
                 }
             },
             ChunkInner::Large(inner) => {
+                for (key, value) in &inner.palette { 
+                    count += 1;
+                    let mut idx_bytes : Vec<u8> = Vec::from((*key as u16).to_le_bytes());
+                    let mut name_bytes : Vec<u8> = Vec::from(value.as_str());
+                    let mut name_len_bytes : Vec<u8> = Vec::from((name_bytes.len() as u16).to_le_bytes());
+                    //Write the index.
+                    full_palette_data.append(&mut idx_bytes);
+                    //Write the length of our coming string.
+                    full_palette_data.append(&mut name_len_bytes);
+                    //Then, write the string.
+                    full_palette_data.append(&mut name_bytes);
+                }
             },
         }
         let mut total_written : usize = 0;
@@ -521,7 +578,7 @@ impl Chunk {
 
         //End of header. Now we get to data and palette.
 
-        fn read_palette_entry<RR: Read>(r: &mut RR) -> Result<(usize, u16, TileId), Box<dyn Error>> {
+        fn read_palette_entry<RR: Read>(r: &mut RR) -> Result<(usize, u16, Ustr), Box<dyn Error>> {
             let mut total_read : usize = 0;
             //Read our index
             let mut u16_buf : [u8; 2] = [0;2];
@@ -529,13 +586,20 @@ impl Chunk {
             let index : u16 = u16::from_le_bytes(u16_buf);
             total_read += 2;
 
-            //Read the tile ID
-            let mut u16_buf : [u8; 2] = [0;2];
+            //Read the size of the name coming up.
             r.read_exact(&mut u16_buf)?;
-            let tile : u16 = u16::from_le_bytes(u16_buf);
+            let name_size = u16::from_le_bytes(u16_buf);
             total_read += 2;
 
-            Ok((total_read, index, tile))
+            //Get ready to read the name / tile ID
+            let mut name_buf = vec![0u8; name_size as usize];
+            //Read the name and converty it.
+            r.read_exact(&mut name_buf)?;
+            let name = Ustr::from(std::str::from_utf8(name_buf.as_slice())?);
+
+            total_read += name_size as usize;
+
+            Ok((total_read, index, name))
         }
 
         Ok(match ty { 
@@ -570,8 +634,8 @@ impl Chunk {
                 reader.read_exact(&mut u64_buf)?;
                 let _palette_size : usize = u64::from_le_bytes(u64_buf) as usize;
 
-                let mut palette: Vec<TileId> = vec![0; palette_count as usize];
-                let mut reverse_palette: HashMap<TileId, u8> = HashMap::default();
+                let mut palette: Vec<TileId> = vec![ustr("nil"); palette_count as usize];
+                let mut reverse_palette: UstrMap<u8> = UstrMap::default();
                 //The palette is at the end of the file, so read the rest of it.
                 //4 bytes is the absolute minimum size of a palette entry. u16 idx, u16 name_length (which would be 0 if there's no string).
                 for _ in 0..palette_count {
@@ -601,11 +665,33 @@ impl Chunk {
                     data[i] = u16::from_le_bytes(u16_buf);
                 }
 
+                //----- Palette -----
+                
+                let mut u16_buf : [u8; 2] = [0;2];
+                reader.read_exact(&mut u16_buf)?;
+                let palette_count : u16 = u16::from_le_bytes(u16_buf);
+
+                reader.read_exact(&mut u64_buf)?;
+                let _palette_size_remaining : i32 = u64::from_le_bytes(u64_buf) as i32;
+
+                let mut palette : HashMap<u16, TileId> = HashMap::new();
+
+                let mut reverse_palette: UstrMap<u16> = UstrMap::default();
+                //The palette is at the end of the file, so read the rest of it.
+                //4 bytes is the absolute minimum size of a palette entry. u16 idx, u16 name_length (which would be 0 if there's no string).
+                for _ in 0..palette_count {
+                    let (_, idx, value) = read_palette_entry(reader)?;
+                    palette.insert(idx, value);
+                    reverse_palette.insert(value, idx);
+                }
                 //Here, build a chunk to return. 
                 Chunk{revision: revision,
                     inner: ChunkInner::Large( Box::new(
                         ChunkLarge {
                             data: data,
+                            palette: palette,
+                            reverse_palette: reverse_palette,
+                            palette_dirty: false,
                         }
                     ))
                 }
@@ -654,8 +740,8 @@ mod tests {
 
     #[test]
     fn assignemnts_to_chunk() {
-        let u1 = 1;
-        let u2 = 2;
+        let u1 = Ustr::from("air");
+        let u2 = Ustr::from("stone");
         let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
 
         {
@@ -716,7 +802,8 @@ mod tests {
                 let y = rng.gen_range(0, CHUNK_SZ);
                 let z = rng.gen_range(0, CHUNK_SZ); 
 
-                let tile = (i as u16) + 2u16;
+                let name = format!("{}.test",i);
+                let tile = Ustr::from(name.as_str());
 
                 test_chunk.set(x, y, z, tile);
 
@@ -746,7 +833,8 @@ mod tests {
                 let y = rng.gen_range(0, CHUNK_SZ);
                 let z = rng.gen_range(0, CHUNK_SZ); 
 
-                let tile = i + 2;
+                let name = format!("{}.test",i);
+                let tile = Ustr::from(name.as_str());
                 
                 test_chunk.set(x, y, z, tile);
 
@@ -763,8 +851,8 @@ mod tests {
 
     #[test]
     fn chunk_serialize_deserialize() {
-        let u1 = 1;
-        let u2 = 2;
+        let u1 = Ustr::from("stone");
+        let u2 = Ustr::from("steel");
         let test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
 
         //Serialize it as a uniform. 
@@ -813,7 +901,8 @@ mod tests {
                 let y = rng.gen_range(0, CHUNK_SZ);
                 let z = rng.gen_range(0, CHUNK_SZ); 
 
-                let tile = i as u16;
+                let name = format!("{}.test",i);
+                let tile = Ustr::from(name.as_str());
 
                 chunk_copy.set(x, y, z, tile);
 

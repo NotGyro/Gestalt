@@ -1,1 +1,3 @@
-pub type TileId = u16;
+use ustr::{Ustr};
+
+pub type TileId = Ustr;
