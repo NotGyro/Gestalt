@@ -61,10 +61,10 @@ impl Default for ClientConfig {
 #[allow(unused_variables)]
 #[allow(unused_must_use)]
 pub fn run_client(join: Option<SocketAddr>) -> Result<(), Box<dyn Error>> {
-    let air = ustr("air");
-    let stone = ustr("stone");
-    let dirt = ustr("dirt");
-    let grass = ustr("grass");
+    let air = 0 as u16;
+    let stone = 1 as u16;
+    let dirt = 2 as u16;
+    let grass = 3 as u16;
 
     let mut space = Space::new();
 
@@ -342,8 +342,8 @@ pub fn run_client(join: Option<SocketAddr>) -> Result<(), Box<dyn Error>> {
                     //Get the side our raycast hit.
                     let direction = raycast.get_last_direction();
                     let block_pos = struck_pos.get_neighbor(direction.opposite());
-                    if space.get(block_pos).unwrap() != ustr("stone") {
-                        space.set(block_pos, ustr("stone"));
+                    if space.get(block_pos).unwrap() != 1 {
+                        space.set(block_pos, 1);
                         renderer.notify_remesh(block_pos);
                     }
                     set_action = false;

@@ -18,7 +18,6 @@ extern crate glutin;
 extern crate hashbrown;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate legion;
-extern crate libp2p;
 extern crate num;
 extern crate parking_lot;
 extern crate rand;
