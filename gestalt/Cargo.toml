@@ -16,11 +16,10 @@ clap = "2.33.3"
 crossbeam-channel = "0.3"
 custom_error = "1.7.1"
 enum_dispatch = "0.3.2"
-glium = "0.27.0"
-glutin = { version = "0.24.1", features = ["serde"] }
+glium = "0.28.0"
+glutin = { version = "0.25.1", features = ["serde"] }
 hashbrown = "0.8.2"
 image = "0.23.8"
-laminar = "0.3"
 lazy_static = "1.4.0"
 legion = "0.3.0"
 libp2p = "0.28.1"

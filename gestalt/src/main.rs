@@ -67,10 +67,9 @@ fn main() {
     let is_server: bool = matches.is_present("server");
     if !is_server {
         info!(Core, "Starting as client - join IP is {:?} (singleplayer if none).", ip);
-        crate::client::run_client(ip)
+        crate::client::run_client(ip);
     }
     else {
         info!(Core, "Starting as server - our IP (hosting from) is {:?}.", ip);
-        Ok(())
     }
 }

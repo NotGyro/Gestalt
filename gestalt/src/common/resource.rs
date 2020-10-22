@@ -39,8 +39,8 @@ pub struct ResourceLink {
     pub revision: u64,
     pub target: ResourceLinkTarget,
 }
-
+/*
 pub struct ResourceSystem { 
     //Yes, I know this technically means we're hashing it twice. To be optimized later, I suppose.
-    resources: HashMap<ResourceId, >
-}
+    resources: HashMap<ResourceId, 
+}*/
