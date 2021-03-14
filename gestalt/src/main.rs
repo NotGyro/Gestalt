@@ -3,26 +3,30 @@
 #![feature(drain_filter)]
 #![feature(seek_convenience)]
 #![feature(const_int_pow)]
+#![feature(const_generics)]
+#![feature(const_evaluatable_checked)]
 
 #[macro_use] extern crate hemlock;
 
 #[macro_use] extern crate arr_macro;
+extern crate base16;
 extern crate bincode;
 extern crate blake3;
 extern crate clap;
 extern crate crossbeam_channel;
 #[macro_use] extern crate custom_error;
 #[macro_use] extern crate enum_dispatch;
-#[macro_use] extern crate glium;
-extern crate glutin;
 extern crate hashbrown;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate legion;
 extern crate num;
 extern crate parking_lot;
 extern crate rand;
+extern crate rcgen;
 extern crate semver;
 extern crate serde;
+extern crate sodiumoxide;
+#[macro_use] extern crate tokio;
 extern crate ustr;
 extern crate uuid;
 
@@ -65,7 +69,7 @@ fn main() {
     let is_server: bool = matches.is_present("server");
     if !is_server {
         info!(Core, "Starting as client - join IP is {:?} (singleplayer if none).", ip);
-        crate::client::run_client(ip);
+        trace!(Core, "Client code goes here later.");
     }
     else {
         info!(Core, "Starting as server - our IP (hosting from) is {:?}.", ip);

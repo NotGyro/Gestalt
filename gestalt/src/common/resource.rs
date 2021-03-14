@@ -1,9 +1,11 @@
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
-use super::identity::Identity;
 use uuid::Uuid;
 use ustr::*;
 //use super::message::EventBus;
+
+use crate::common::network::Identity;
+use crate::common::network::SelfIdentity;
 
 /// A Resource is identified by the Blake3 Hash of its contents / file.
 pub type ResourceId = [u8; 32];

@@ -1,7 +1,6 @@
 //! A space made up of multiple chunks - the voxel-only parts of a "world". A "Dimension". Can be multiple per server.
 use crate::world::tile::*;
 use crate::world::chunk::*;
-use crate::world::chunk::CHUNK_SZ;
 use crate::common::voxelmath::*;
 
 use hashbrown::HashMap;
