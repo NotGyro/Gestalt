@@ -11,31 +11,31 @@ arr_macro = "*"
 base16 = "0.2.1"
 bincode = "1.3.1"
 blake3 = "0.3.7"
+bytemuck = { version = "1.4.1", features = [ "derive" ] }
 byteorder = "1.3.4"
 cgmath = "0.17.0"
 clap = "2.33.3"
 crossbeam-channel = "0.5.0"
 custom_error = "1.8.0"
 enum_dispatch = "0.3.3"
-glium = "0.28.0"
-glutin = { version = "0.25.1", features = ["serde"] }
+futures = "0.3.6"
 hashbrown = "0.9.1"
+hecs = "0.3.2"
 image = "0.23.8"
 lazy_static = "1.4.0"
-legion = "0.3.0"
 log = { version = "0.4.11", features = ["std"] }
 num = "0.3.0"
 parking_lot = "0.11.0"
 rand = "0.7"
-rcgen = "0.8.5"
-ron = "0.6.2"
-rusty_v8 = "0.12.0"
 semver = "0.11.0"
-serde = { version = "1.0.115", features = ["derive"] }
+serde = { version = "1.0.108", features = ["derive"] }
+shaderc = "0.7"
 snow = "0.7.2"
 sodiumoxide = "0.2.6"
 tokio = "0.3.1"
 ustr = { version = "0.7.0", features = ["serialization"] }
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
+wgpu = { version = "0.7.0", features = ["vulkan-portability"] }
+winit = "0.23"
 
 #nphysics3d = "0.16.1"

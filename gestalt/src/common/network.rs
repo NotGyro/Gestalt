@@ -5,13 +5,11 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::io::Write;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr};
 use std::path::Path;
 use std::result::Result;
-use std::thread;
-use std::time::{Duration, Instant};
 
-use hashbrown::{HashSet, HashMap};
+use hashbrown::{HashSet};
 use parking_lot::Mutex;
 
 use crate::base16;
@@ -19,15 +17,7 @@ use sodiumoxide::crypto::sign;
 use sodiumoxide::crypto::sign::{PublicKey, SecretKey, Signature};
 use sodiumoxide::crypto::sign::ed25519::*;
 
-//use tokio::{net::TcpListener, net::TcpStream, stream::Stream, stream::StreamExt, io::AsyncWriteExt, io::AsyncReadExt, runtime::Runtime};
-
-use crossbeam_channel::{bounded, self, Receiver, Sender, TryRecvError};
-
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use bincode::serialize;
-use bincode::deserialize;
-
-use super::message::*;
+use serde::{Serialize, Deserialize};
 
 // A chunk has to be requested by a client (or peer server) before it is sent. So, a typical flow would go like this:
 // 1. Client: My revision number on chunk (15, -8, 24) is 732. Can you give me the new stuff if there is any?

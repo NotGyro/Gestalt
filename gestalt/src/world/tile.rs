@@ -6,7 +6,7 @@ pub trait ValidTile : 'static + Sized + Copy + Clone + PartialEq + PartialOrd + 
 impl<T> ValidTile for T where T : 'static + Sized + Copy + Clone + PartialEq + PartialOrd + Hash + fmt::Debug + Default {}
 
 /// Tiles as they are stored in the world - as in, what a Space will return when you call chunk.get(x, y, z)
-pub type TileId = u8;
+pub type TileId = u16;
 
 /// Unlocalized name of a tile.
 pub type TileName = String;

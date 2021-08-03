@@ -1,10 +1,11 @@
-use crate::world::tile::*;
+use crate::world::tile::TileId;
 use crate::common::voxelmath::*;
-//use ustr::{ustr, Ustr, UstrMap};
+//use u16::{u16, u16, u16Map};
 use hashbrown::HashMap;
 
+// Dependencies for testing
 use std::error::Error;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Write, Seek};
 use semver::Version;
 
 pub const SERIALIZED_CHUNK_VERSION_MAJOR: u64 = 0;
@@ -17,222 +18,394 @@ custom_error!{ pub ChunkSerializeError
     InvalidType{ty_id: u8} = "Attempted to load chunk type {ty_id}, which is not supported.",
 }
 
-custom_error!{ pub ChunkVoxelError
-    OutOfBounds{attempted_pos: VoxelPos<usize>, oursize: VoxelPos<usize>}
-     = "Attempted to access position {attempted_pos} in a chunk with size {oursize}",
-}
-
+pub const CHUNK_SZ : usize = 32;
+pub const CHUNK_SQUARED : usize = 1024;
+pub const CHUNK_VOLUME : usize = 32768;
+//The length of each chunk side is 2^5.
 pub const CHUNK_EXP : usize = 5;
-pub const CHUNK_SZ_X : usize = 2usize.pow(CHUNK_EXP as u32);
-pub const CHUNK_SZ_Y : usize = 2usize.pow(CHUNK_EXP as u32);
-pub const CHUNK_SZ_Z : usize = 2usize.pow(CHUNK_EXP as u32);
-pub const CHUNK_VOLUME : usize = CHUNK_SZ_X*CHUNK_SZ_Y*CHUNK_SZ_Z;
 
-pub const CHUNK_RANGE : VoxelRange<i32> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(CHUNK_SZ_X as i32,CHUNK_SZ_Y as i32,CHUNK_SZ_Z as i32)};
-pub const CHUNK_RANGE_USIZE : VoxelRange<usize> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(CHUNK_SZ_X,CHUNK_SZ_Y,CHUNK_SZ_Z)};
+pub const CHUNK_RANGE : VoxelRange<i32> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
+pub const CHUNK_RANGE_USIZE : VoxelRange<usize> = VoxelRange{lower:vpos!(0,0,0), upper:vpos!(32,32,32)};
 
-/// The underlying storage for a standard voxel world chunk. Genericized because I may use this to store more than one type of voxel data. 
-pub struct VoxelArray<T: ValidTile, const SIZE_X: usize, const SIZE_Y: usize, const SIZE_Z: usize> 
-                            where [T; SIZE_X * SIZE_Y * SIZE_Z]: Sized {
-    pub data: [T; SIZE_X * SIZE_Y * SIZE_Z],
+#[inline(always)] 
+pub fn chunk_xyz_to_i(x : usize, y : usize, z : usize) -> usize {
+    (z * CHUNK_SQUARED) + (y * CHUNK_SZ) + x
 }
 
-impl<T: ValidTile, const SIZE_X: usize, const SIZE_Y: usize, const SIZE_Z: usize> VoxelArray<T, SIZE_X, SIZE_Y, SIZE_Z>
-                                where [T; SIZE_X * SIZE_Y * SIZE_Z]: Sized {
-    #[inline(always)] 
-    pub fn chunk_x_to_i_component(x : usize) -> usize {
-        x
-    }
-    #[inline(always)] 
-    pub fn chunk_y_to_i_component(y : usize) -> usize {
-        y * SIZE_X
-    }
-    #[inline(always)] 
-    pub fn chunk_z_to_i_component(z : usize) -> usize {
-        z * SIZE_X * SIZE_Y
-    }
+#[inline(always)] 
+pub fn chunk_i_to_xyz(i : usize) -> (usize, usize, usize) {
+    let x = i % CHUNK_SZ;
+    let z = (i-x)/CHUNK_SQUARED; //The remainder on this (the y value) just gets thrown away, which is good here.
+    let y = (i - (z * CHUNK_SQUARED))/CHUNK_SZ;
+    (x, y, z)
+}
 
-    #[inline(always)] 
-    pub fn chunk_xyz_to_i(x : usize, y : usize, z : usize) -> usize {
-        Self::chunk_z_to_i_component(z) + Self::chunk_y_to_i_component(y) + Self::chunk_x_to_i_component(x)
-    }
+/// A smaller chunk structure for chunks which only need 255 unique values.
+pub struct ChunkSmall {
+    pub data: Vec<u8>,
+    pub palette: [TileId; 256],
+    pub reverse_palette: HashMap<u16, u8>,
+    pub highest_idx: u8,
+    // Used by the serializer to tell if the palette has changed.
+    pub palette_dirty: bool,
+}
 
+impl ChunkSmall {
     #[inline(always)]
-    pub fn chunk_i_to_xyz(i : usize) -> (usize, usize, usize) {
-        let z = i/SIZE_X*SIZE_Y;
-        let y = (i-z*(SIZE_X*SIZE_Y))/SIZE_Z;
-        let x = i - ((z*(SIZE_X*SIZE_Y)) + (y*SIZE_X));
-        (x, y, z)
+    pub fn get_raw(&self, x: usize, y : usize, z: usize) -> u8 {
+        self.data[chunk_xyz_to_i(x, y, z)]
     }
-
-    // Offset stuff. 
     #[inline(always)]
-    pub fn get_pos_x_offset(i : usize) -> Option<usize> {
-        if (i + Self::chunk_x_to_i_component(1) < SIZE_X * SIZE_Y * SIZE_Z) && (Self::chunk_i_to_xyz(i).0 + 1 < SIZE_X) {
-            Some(i + Self::chunk_x_to_i_component(1))
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
+        //Get our int data and use it as an index for our palette. Yay constant-time!  
+        self.palette[self.data[chunk_xyz_to_i(x, y, z)] as usize]
+    }
+    #[inline(always)]
+    pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u8) {
+        self.data[chunk_xyz_to_i(x, y, z)] = value;
+    }
+    #[inline(always)]
+    pub fn index_from_palette(&self, tile: TileId) -> Option<u16> {
+        self.reverse_palette.get(&tile).map( #[inline(always)] |i| *i as u16)
+    }
+    #[inline(always)]
+    pub fn tile_from_index(&self, idx: u16) -> Option<TileId> {
+        if idx > 255 { return None };
+        if idx > self.highest_idx as u16 { return None };
+        Some(self.palette[idx as usize])
+    }
+    ///Use this chunk to construct a chunk with u16 tiles rather than u8 ones. 
+    #[inline]
+    pub fn expand(&self) -> ChunkLarge {
+        let mut new_data : Vec<u16> = vec![0; CHUNK_VOLUME];
+        for (i, tile) in self.data.iter().enumerate() {
+            new_data[i] = self.palette[*tile as usize];
         }
-        else {
-            None 
-        }
+        ChunkLarge { data: new_data, }
     }
-    #[inline(always)]
-    pub fn get_neg_x_offset(i : usize) -> Option<usize> {
-        if Self::chunk_i_to_xyz(i).0.checked_sub(1).is_none() {
-            return None;
-        }
-        i.checked_sub(Self::chunk_x_to_i_component(1))
-    }
-    #[inline(always)]
-    pub fn get_pos_y_offset(i : usize) -> Option<usize> {
-        if (i + Self::chunk_y_to_i_component(1) < SIZE_X * SIZE_Y * SIZE_Z) && (Self::chunk_i_to_xyz(i).1 + 1 < SIZE_Y)  {
-            Some(i + Self::chunk_y_to_i_component(1))
-        }
-        else {
-            None 
-        }
-    }
-    #[inline(always)]
-    pub fn get_neg_y_offset(i : usize) -> Option<usize> {
-        if Self::chunk_i_to_xyz(i).1.checked_sub(1).is_none() {
-            return None;
-        }
-        i.checked_sub(Self::chunk_y_to_i_component(1))
-    }
-    #[inline(always)]
-    pub fn get_pos_z_offset(i : usize) -> Option<usize> {
-        if (i + Self::chunk_z_to_i_component(1) < SIZE_X * SIZE_Y * SIZE_Z) && (Self::chunk_i_to_xyz(i).2 + 1 < SIZE_Z) {
-            Some(i + Self::chunk_z_to_i_component(1))
-        }
-        else {
-            None 
-        }
-    }
-    #[inline(always)]
-    pub fn get_neg_z_offset(i : usize) -> Option<usize> {
-        if Self::chunk_i_to_xyz(i).2.checked_sub(1).is_none() {
-            return None;
-        }
-        i.checked_sub(Self::chunk_z_to_i_component(1))
-    }
-
-    //UNCHECKED offset stuff, to be fast with. Here be dragons. 
-    #[inline(always)]
-    pub fn get_pos_x_offset_unchecked(i : usize) -> usize {
-        i + Self::chunk_x_to_i_component(1)
-    }
-    #[inline(always)]
-    pub fn get_neg_x_offset_unchecked(i : usize) -> usize {
-        i - Self::chunk_x_to_i_component(1)
-    }
-    
-    #[inline(always)]
-    pub fn get_pos_y_offset_unchecked(i : usize) -> usize {
-        i + Self::chunk_y_to_i_component(1)
-    }
-    #[inline(always)]
-    pub fn get_neg_y_offset_unchecked(i : usize) -> usize {
-        i - Self::chunk_y_to_i_component(1)
-    }
-
-    #[inline(always)]
-    pub fn get_pos_z_offset_unchecked(i : usize) -> usize {
-        i + Self::chunk_z_to_i_component(1)
-    }
-    #[inline(always)]
-    pub fn get_neg_z_offset_unchecked(i : usize) -> usize {
-        i - Self::chunk_z_to_i_component(1)
-    }
-
-    #[inline(always)]
-    pub fn get_i(&self, i: usize) -> T { 
-        self.data[i]
-    } 
-    #[inline(always)]
-    pub fn get_xyz(&self, x: usize, y: usize, z: usize) -> T { 
-        self.get_i(Self::chunk_xyz_to_i(x, y, z))
-    }
-    #[inline(always)]
-    pub fn set_i(&self, tile: &T, i: usize) { 
-        self.data[i] = tile.clone();
-    } 
-    #[inline(always)]
-    pub fn set_xyz(&self, tile: &T, x: usize, y: usize, z: usize){ 
-        self.set_i(tile, Self::chunk_xyz_to_i(x, y, z));
-    }
-
-    pub fn new() -> Self {
-        VoxelArray { 
-            data: [T::default(); SIZE_X*SIZE_Y*SIZE_Z],
+    /// Adds a Tile ID to its palette. If we succeeded in adding it, return the associated index. 
+    /// If it already exists, return the associated index. If we're out of room, return None.
+    #[inline]
+    pub fn add_to_palette(&mut self, tile: TileId) -> Option<u16> {
+        match self.reverse_palette.get(&tile) {
+            Some(idx) => {
+                //Already in the palette. 
+                Some(*idx as u16)
+            },
+            None => {
+                self.palette_dirty = true;
+                //We have run out of space.
+                if self.highest_idx >= 255 { 
+                    return None;
+                }
+                else { 
+                    self.highest_idx += 1;
+                    let idx = self.highest_idx;
+                    self.palette[idx as usize] = tile;
+                    self.reverse_palette.insert(tile, idx);
+                    Some(idx as u16)
+                }
+            }
         }
     }
 }
 
-// Swizzle to Z X Y.
-// +2 to each dimension for NEFARIOUS REASONS. (adjacency stuff)
-// each voxel in a chunk which borders another chunk is duplicated, to make it easier to 
-// write code which takes a neighborhood 
-pub const CHUNK_INNER_SZ_1 : usize = CHUNK_SZ_Z+2;
-pub const CHUNK_INNER_SZ_2 : usize = CHUNK_SZ_X+2;
-pub const CHUNK_INNER_SZ_3 : usize = CHUNK_SZ_Y+2;
+/// Medium chunk structure. 
+pub struct ChunkLarge {
+    pub data: Vec<u16>,
+}
 
-type ChunkUnderlying = VoxelArray<ChunkTileId, CHUNK_INNER_SZ_1, CHUNK_INNER_SZ_2, CHUNK_INNER_SZ_3>;
+impl ChunkLarge {
+    #[inline(always)]
+    pub fn get_raw(&self, x: usize, y : usize, z: usize) -> u16 {
+        self.data[chunk_xyz_to_i(x, y, z)]
+    }
+    #[inline(always)]
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
+        //Get our int data and use it as an index for our palette. Yay constant-time!  
+        self.data[chunk_xyz_to_i(x, y, z)]
+    }
+    #[inline(always)]
+    pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u16) {
+        self.data[chunk_xyz_to_i(x, y, z)] = value;
+    }
+}
+
+pub enum ChunkInner {
+    ///Chunk that is all one value (usually this is for chunks that are 100% air). Note that, after being converted, idx 0 maps to 
+    Uniform(TileId),
+    ///Chunk that maps palette to 8-bit values.
+    Small(Box<ChunkSmall>),
+    ///Chunk that maps palette to 16-bit values.
+    Large(Box<ChunkLarge>),
+}
 
 pub struct Chunk {
-    /// Offset of this chunk from world position. 
-    pub offset: VoxelPos<TileCoord>,
-    inner: ChunkUnderlying,
+    pub revision: u64,
+    pub inner: ChunkInner,
 }
 
 impl Chunk {
-    pub fn new(offset: &VoxelPos<TileCoord>) -> Self {
-        Chunk { 
-            offset: offset.clone(),
-            inner: ChunkUnderlying::new(),
+    #[inline(always)]
+    pub fn get_raw(&self, x: usize, y : usize, z: usize) -> usize {
+        match &self.inner {
+            ChunkInner::Uniform(_) => 0,
+            ChunkInner::Small(inner) => inner.get_raw(x,y,z) as usize,
+            ChunkInner::Large(inner) => inner.get_raw(x,y,z) as usize,
         }
     }
-
     #[inline(always)]
-    pub fn xyz_to_inner_i(&self, x: usize, y: usize, z: usize) -> usize {
-        ChunkUnderlying::chunk_xyz_to_i(x, y, z)
+    pub fn get(&self, x: usize, y : usize, z: usize) -> TileId {
+        match &self.inner{
+            ChunkInner::Uniform(val) => *val, 
+            ChunkInner::Small(inner) => inner.get(x,y,z),
+            ChunkInner::Large(inner) => inner.get(x,y,z),
+        }
     }
-
     #[inline(always)]
-    //NOT bounds-checked! beware.
-    pub fn get_raw_i(&self, i: usize) -> ChunkTileId {
-        self.inner.get_i(i)
+    pub fn getv(&self, pos: VoxelPos<usize>) -> TileId {
+        self.get(pos.x, pos.y, pos.z)
     }
-
     #[inline(always)]
-    //NOT bounds-checked! beware.
-    pub fn get_raw(&self, x: usize, y: usize, z: usize) -> ChunkTileId { 
-        // Swizzle to be Z X Y.
-        self.inner.get_xyz(z+1,x+1,y+1)
+    pub fn set_raw(&mut self, x: usize, y : usize, z: usize, value: u16) {
+        match &mut self.inner {
+            //TODO: Smarter way of handling this case. Currently, just don't. 
+            //I don't want to return a result type HERE for performance reasons.
+            ChunkInner::Uniform(_) => if value != 0 { panic!("Attempted to set_raw() on a Uniform chunk!")}, 
+            ChunkInner::Small(ref mut inner) => inner.set_raw(x,y,z, value as u8),
+            ChunkInner::Large(ref mut inner) => inner.set_raw(x,y,z, value),
+        };
     }
-
     #[inline]
-    pub fn get(&self, x: usize, y: usize, z: usize) -> Result<ChunkTileId, ChunkVoxelError> {
-        if (x >= CHUNK_SZ_X) || (z >= CHUNK_SZ_Y) || (z >= CHUNK_SZ_Z) {
-            return Err(ChunkVoxelError::OutOfBounds{attempted_pos: vpos!(x, y, z), 
-                                                    oursize: vpos!(CHUNK_SZ_X, CHUNK_SZ_Y, CHUNK_SZ_Z)});
+    pub fn add_to_palette(&mut self, tile: TileId) -> u16 {
+        match &mut self.inner {
+            ChunkInner::Uniform(val) => {
+                if tile == *val {
+                    tile
+                }
+                else {
+                    // Convert to a ChunkSmall.
+                    let data : Vec<u8> = vec![*val as u8; CHUNK_VOLUME];
+
+                    let mut palette : [TileId; 256] = [*val; 256];
+                    palette[1] = tile;
+                    let mut reverse_palette: HashMap<u16, u8> = HashMap::default();
+                    reverse_palette.insert(*val, 0);
+                    reverse_palette.insert(tile, 1);
+                    self.inner = ChunkInner::Small(Box::new(ChunkSmall {
+                        data: data,
+                        palette: palette,
+                        reverse_palette: reverse_palette,
+                        highest_idx: 1,
+                        palette_dirty: false,
+                    }));
+                    1
+                }
+            },
+            ChunkInner::Small(inner) => {
+                match inner.add_to_palette(tile) {
+                    Some(idx) => {
+                        idx
+                    },
+                    None => {
+                        //We need to expand it.
+                        let new_inner = Box::new(inner.expand());
+                        let idx = tile; //We just went from u8s to u16s, the ID space has quite certainly 
+                        self.inner = ChunkInner::Large(new_inner);
+                        idx
+                    },
+                }
+            },
+            ChunkInner::Large(_) => tile,
         }
-        // self.get_raw already swizzles it, DO NOT SWIZZLE HERE 
-        Ok(self.get_raw(x,y,z))
     }
-
-    #[inline(always)]
-    //NOT bounds-checked! beware.
-    pub fn set_raw(&mut self, tile: ChunkTileId, x: usize, y: usize, z: usize) { 
-        // Swizzle to be Z X Y.
-        self.inner.set_xyz(tile, z+1,x+1,y+1)
-    }
-
     #[inline]
-    pub fn set(&mut self, tile: ChunkTileId, x: usize, y: usize, z: usize) -> Result<_, ChunkVoxelError> {
-        if (x >= CHUNK_SZ_X) || (z >= CHUNK_SZ_Y) || (z >= CHUNK_SZ_Z) {
-            return Err(ChunkVoxelError::OutOfBounds{attempted_pos: vpos!(x, y, z), 
-                                                    oursize: vpos!(CHUNK_SZ_X, CHUNK_SZ_Y, CHUNK_SZ_Z)});
+    pub fn set(&mut self, x: usize, y : usize, z: usize, tile: TileId) {
+        let idx = self.add_to_palette(tile);
+        //Did we just change something?
+        if self.get(x, y, z) != tile {
+            //Increment revision.
+            self.revision += 1;
         }
-        // self.get_raw already swizzles it, DO NOT SWIZZLE HERE 
-        Ok(self.set_raw(tile, x,y,z))
+        self.set_raw(x,y,z, idx)
+    }
+    #[inline(always)]
+    pub fn setv(&mut self, pos: VoxelPos<usize>, tile: TileId) {
+        self.set(pos.x, pos.y, pos.z, tile);
+    }
+
+    // ======= Serialization code below. =======
+    pub fn serialize_header<W: Write + Seek>(&self, writer: &mut W) -> Result<usize, Box<dyn Error>> {
+        //--- Header ---
+        //The header gets to be fixed size.
+        //Header:
+        //    Version: 
+        //        u64 major - 8 bytes
+        //        u64 minor - 8 bytes
+        //        u64 patch - 8 bytes
+        //    u64 type/flags - 8 bytes
+        //    u64 revision number. - 8 bytes
+        const MAGIC_SIZE_NUMBER : usize = 40;
+
+        //Write version - must come first.
+        writer.write(&SERIALIZED_CHUNK_VERSION_MAJOR.to_le_bytes())?;
+        writer.write(&SERIALIZED_CHUNK_VERSION_MINOR.to_le_bytes())?;
+        writer.write(&SERIALIZED_CHUNK_VERSION_PATCH.to_le_bytes())?;
+        
+        //8 bits for type of chunk (more than we'll ever need but I want to keep it byte-aligned for simplicity)
+        let ty = match self.inner {
+            ChunkInner::Uniform(_) => 0, 
+            ChunkInner::Small(_) => 1,
+            ChunkInner::Large(_) => 2,
+        };
+        let flags : u64 = 0 + ty;
+        
+        writer.write(&flags.to_le_bytes())?;
+
+        //--- Revision ---
+        writer.write(&self.revision.to_le_bytes())?;
+        Ok(MAGIC_SIZE_NUMBER)
+    }
+}
+
+
+#[test]
+fn chunk_index_reverse() {
+    use rand::Rng;
+
+    let mut rng = rand::thread_rng();
+    for _ in 0..4096 {
+
+        let x = rng.gen_range(0, CHUNK_SZ);
+        let y = rng.gen_range(0, CHUNK_SZ);
+        let z = rng.gen_range(0, CHUNK_SZ); 
+
+        let i_value = chunk_xyz_to_i(x, y, z);
+        let (x1, y1, z1) = chunk_i_to_xyz(i_value);
+
+        assert_eq!( x, x1 );
+        assert_eq!( y, y1 );
+        assert_eq!( z, z1 );
+    }
+}
+
+#[test]
+fn chunk_index_bounds() {
+    for x in 0..CHUNK_SZ {
+        for y in 0..CHUNK_SZ {
+            for z in 0..CHUNK_SZ {
+                assert!(chunk_xyz_to_i(x, y, z) < CHUNK_VOLUME);
+            }
+        }
+    }
+}
+
+#[test]
+fn assignemnts_to_chunk() {
+    
+    use rand::Rng;
+
+    let u1 = 0;
+    let u2 = 1;
+    let mut test_chunk = Chunk{revision: 0, inner: ChunkInner::Uniform(u1)};
+
+    {
+        test_chunk.set(1, 1, 1, u1);
+        
+        assert_eq!(test_chunk.get(1,1,1), u1);
+    }
+
+    if let ChunkInner::Uniform(_) = test_chunk.inner {} 
+    else {
+        assert!(false);
+    }
+
+    //Make sure Uniform chunks work the way they're supposed to. 
+    
+    for x in 0..CHUNK_SZ {
+        for y in 0..CHUNK_SZ {
+            for z in 0..CHUNK_SZ {
+                assert_eq!(test_chunk.get(x,y,z), u1);
+                //We should also be able to set every tile of the uniform to the uniform's value, and it'll do nothing.
+                test_chunk.set(x,y,z, u1);
+            }
+        }
+    }
+
+    //Implicitly expand it to a Small chunk rather than a Uniform chunk. 
+    {
+        test_chunk.set(2, 2, 2, u2);
+
+        assert_eq!(test_chunk.get(2,2,2), u2);
+    }
+
+    if let ChunkInner::Small(_) = test_chunk.inner {} 
+    else {
+        assert!(false);
+    }
+
+    //Make sure that our new ChunkSmall is still the Uniform's tile everywhere except the position where we assigned something else.
+    for x in 0..CHUNK_SZ {
+        for y in 0..CHUNK_SZ {
+            for z in 0..CHUNK_SZ {
+                if x == 2 && y == 2 && z == 2 {
+                    assert_eq!(test_chunk.get(x,y,z), u2);
+                }
+                else { 
+                    assert_eq!(test_chunk.get(x,y,z), u1);
+                }
+            }
+        }
+    }
+
+    let mut rng = rand::thread_rng();
+
+    {
+        for i in 0..253 {
+            
+            let x = rng.gen_range(0, CHUNK_SZ);
+            let y = rng.gen_range(0, CHUNK_SZ);
+            let z = rng.gen_range(0, CHUNK_SZ); 
+
+            let tile = i + 2;
+
+            test_chunk.set(x, y, z, tile);
+
+            assert_eq!(test_chunk.get(x,y,z), tile);
+        }
+    }
+
+    if let ChunkInner::Small(_) = test_chunk.inner {} 
+    else {
+        assert!(false);
+    }
+
+    //Make sure we can assign to everywhere in our chunk bounds.
+    for x in 0..CHUNK_SZ {
+        for y in 0..CHUNK_SZ {
+            for z in 0..CHUNK_SZ {
+                test_chunk.set(x,y,z, u1);
+                assert_eq!(test_chunk.get(x,y,z), u1);
+            }
+        }
+    }
+
+    {
+        for i in 253..1024 {
+            
+            let x = rng.gen_range(0, CHUNK_SZ);
+            let y = rng.gen_range(0, CHUNK_SZ);
+            let z = rng.gen_range(0, CHUNK_SZ); 
+
+            let tile = i + 2;
+            
+            test_chunk.set(x, y, z, tile);
+
+            assert_eq!(test_chunk.get(x,y,z), tile);
+        }
+    }
+    if let ChunkInner::Large(_) = test_chunk.inner {} 
+    else {
+        assert!(false);
     }
 }

@@ -36,7 +36,7 @@ impl USizeAble for u8 {
     #[inline]
     fn from_usize(val : usize) -> Self {
         val as u8
-    }    
+    }
 }
 impl USizeAble for u16 {
     #[inline]
@@ -46,7 +46,7 @@ impl USizeAble for u16 {
     #[inline]
     fn from_usize(val : usize) -> Self {
         val as u16
-    }    
+    }
 }
 impl USizeAble for u32 {
     #[inline]
@@ -56,7 +56,7 @@ impl USizeAble for u32 {
     #[inline]
     fn from_usize(val : usize) -> Self {
         val as u32
-    }    
+    }
 }
 impl USizeAble for u64 {
     #[inline]
@@ -66,14 +66,14 @@ impl USizeAble for u64 {
     #[inline]
     fn from_usize(val : usize) -> Self {
         val as u64
-    }    
+    }
 }
 
 impl USizeAble for usize {
     #[inline]
     fn as_usize(&self) -> usize { *self }
     #[inline]
-    fn from_usize(val : usize) -> Self { val }    
+    fn from_usize(val : usize) -> Self { val }
 }
 
 /// This should panic if you use it on a negative number.
@@ -91,7 +91,7 @@ impl ToUnsigned<u8> for i8 {
     #[inline]
     fn from_unsigned(val : u8) -> Self {
         val as i8
-    }    
+    }
 }
 
 impl ToUnsigned<u16> for i16 {
@@ -273,47 +273,47 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
     /// Get an iterator which will visit every voxel laying along the selected side of your cuboid.
     /// For example, VoxelAxis::NegaZ will visit all of the voxels in this range where z = self.lower.z
     #[allow(dead_code)]
-    pub fn get_side_iterator(&self, side : VoxelAxis) -> VoxelSideIter<T> {
+    pub fn get_side_iterator(&self, side : VoxelSide) -> VoxelSideIter<T> {
         match side {
-            VoxelAxis::PosiX => { 
+            VoxelSide::PosiX => { 
                 return VoxelSideIter { range : *self, 
-                direction1 : VoxelAxis::PosiY,
-                direction2 : VoxelAxis::PosiZ,
+                direction1 : VoxelSide::PosiY,
+                direction2 : VoxelSide::PosiZ,
                 pos : Some(VoxelPos { x : self.upper.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
                 } 
             },
-            VoxelAxis::NegaX => { 
+            VoxelSide::NegaX => { 
                 return VoxelSideIter { range : *self, 
-                direction1 : VoxelAxis::PosiY,
-                direction2 : VoxelAxis::PosiZ,
+                direction1 : VoxelSide::PosiY,
+                direction2 : VoxelSide::PosiZ,
                 pos : Some(VoxelPos { x : self.lower.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
                 }
             },
-            VoxelAxis::PosiY => { 
+            VoxelSide::PosiY => { 
                 return VoxelSideIter { range : *self, 
-                direction1 : VoxelAxis::PosiX,
-                direction2 : VoxelAxis::PosiZ,
+                direction1 : VoxelSide::PosiX,
+                direction2 : VoxelSide::PosiZ,
                 pos : Some(VoxelPos { x : self.lower.x, y : self.upper.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
                 }
             },
-            VoxelAxis::NegaY => { 
+            VoxelSide::NegaY => { 
                 return VoxelSideIter { range : *self, 
-                direction1 : VoxelAxis::PosiX,
-                direction2 : VoxelAxis::PosiZ,
+                direction1 : VoxelSide::PosiX,
+                direction2 : VoxelSide::PosiZ,
                 pos : Some(VoxelPos { x : self.lower.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
                 }
             },
-            VoxelAxis::PosiZ => { 
+            VoxelSide::PosiZ => { 
                 return VoxelSideIter { range : *self, 
-                direction1 : VoxelAxis::PosiX,
-                direction2 : VoxelAxis::PosiY,
+                direction1 : VoxelSide::PosiX,
+                direction2 : VoxelSide::PosiY,
                 pos : Some(VoxelPos { x: self.lower.x, y : self.lower.y, z : self.upper.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
                 }
             },
-            VoxelAxis::NegaZ => { 
+            VoxelSide::NegaZ => { 
                 return VoxelSideIter { range : *self, 
-                direction1 : VoxelAxis::PosiX,
-                direction2 : VoxelAxis::PosiY,
+                direction1 : VoxelSide::PosiX,
+                direction2 : VoxelSide::PosiY,
                 pos : Some(VoxelPos { x : self.lower.x, y : self.lower.y, z : self.lower.z} ), //Direction 1 & 2 must travel away from the origin's z and y. This is very important.
                 }
             },
@@ -337,14 +337,14 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
     }
     /// Gives you the furthest position inside this VoxelRange along the direction you provide.
     #[inline]
-    pub fn get_bound(&self, direction : VoxelAxis) -> T {
+    pub fn get_bound(&self, direction : VoxelSide) -> T {
         match direction {
-            VoxelAxis::PosiX => return self.upper.x,
-            VoxelAxis::PosiY => return self.upper.y,
-            VoxelAxis::PosiZ => return self.upper.z,
-            VoxelAxis::NegaX => return self.lower.x,
-            VoxelAxis::NegaY => return self.lower.y,
-            VoxelAxis::NegaZ => return self.lower.z,
+            VoxelSide::PosiX => return self.upper.x,
+            VoxelSide::PosiY => return self.upper.y,
+            VoxelSide::PosiZ => return self.upper.z,
+            VoxelSide::NegaX => return self.lower.x,
+            VoxelSide::NegaY => return self.lower.y,
+            VoxelSide::NegaZ => return self.lower.z,
         }
     }
 
@@ -361,7 +361,7 @@ impl <T> VoxelRange<T> where T : VoxelCoord {
     /// Does the voxel you gave lie along the selected side of this rectangle?
     #[inline]
     #[allow(dead_code)]
-    pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelAxis) -> bool {
+    pub fn is_on_side(&self, point : VoxelPos<T>, side : VoxelSide) -> bool {
         let mut edge = self.get_bound(side);
         //Don't trip over off-by-one errors - the positive bounds are one past the valid coordinates. 
         if side.get_sign() == VoxelAxisSign::POSI {
@@ -467,8 +467,8 @@ impl <T> Iterator for VoxelRangeIter<T> where T : VoxelCoord {
 pub struct VoxelSideIter<T : VoxelCoord> {
     range : VoxelRange<T>,
     //origin : VoxelPos<T>,
-    direction1 : VoxelAxis,
-    direction2 : VoxelAxis,
+    direction1 : VoxelSide,
+    direction2 : VoxelSide,
     pos : Option<VoxelPos<T>>,
 }
 
@@ -501,88 +501,234 @@ impl <T> Iterator for VoxelSideIter<T> where T : VoxelCoord + Signed {
     }
 }
 
-/// A signed direction in voxel space. 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub enum VoxelAxis {
-	PosiX,
-	NegaX,
-	PosiY,
-	NegaY,
-	PosiZ,
-	NegaZ,
+// (Index + 3) % 6 flips the sign. 
+macro_rules! posi_x_index {
+    () => { 0 }
 }
-// Just proxy to debug
-impl fmt::Display for VoxelAxis {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+macro_rules! posi_y_index {
+    () => { 1 }
+}
+macro_rules! posi_z_index {
+    () => { 2 }
+}
+macro_rules! nega_x_index {
+    () => { 3 }
+}
+macro_rules! nega_y_index {
+    () => { 4 }
+}
+macro_rules! nega_z_index {
+    () => { 5 }
+}
+
+pub mod axis {
+    use std::fmt;
+
+    //pub mod VoxelAxis {}
+    /// A signed direction in voxel space. 
+    #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+    #[repr(u8)]
+    pub enum VoxelSide {
+        PosiX = posi_x_index!(),
+        NegaX = nega_x_index!(),
+        PosiY = posi_y_index!(),
+        NegaY = nega_y_index!(),
+        PosiZ = posi_z_index!(),
+        NegaZ = nega_z_index!(),
     }
-}
 
-/// Describes an unsigned cartesian axis in 3D space
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub enum VoxelAxisUnsigned {
-	X,
-	Y,
-	Z,
-}
+    impl VoxelSide {
 
-// Just proxy to debug
-impl fmt::Display for VoxelAxisUnsigned {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
+        #[inline(always)]
+        pub const fn opposite(&self) -> VoxelSide{ 
+            match &self {
+                VoxelSide::PosiX => VoxelSide::NegaX,
+                VoxelSide::NegaX => VoxelSide::PosiX,
+                VoxelSide::PosiY => VoxelSide::NegaY,
+                VoxelSide::NegaY => VoxelSide::PosiY,
+                VoxelSide::PosiZ => VoxelSide::NegaZ,
+                VoxelSide::NegaZ => VoxelSide::PosiZ,
+            }
+        }
+            
+        /// Gives you an iterator over each of the 6 cardinal directions in voxel space.
+        #[allow(dead_code)]
+        pub fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
 
-/// Make sure we can "downcast" this enum so it's just the axis and not a direction
-impl From<VoxelAxis> for VoxelAxisUnsigned {
-    #[inline]
-    fn from(axis: VoxelAxis) -> VoxelAxisUnsigned {
-        match axis {
-            VoxelAxis::PosiX => VoxelAxisUnsigned::X,
-            VoxelAxis::NegaX => VoxelAxisUnsigned::X,
-            VoxelAxis::PosiY => VoxelAxisUnsigned::Y,
-            VoxelAxis::NegaY => VoxelAxisUnsigned::Y,
-            VoxelAxis::PosiZ => VoxelAxisUnsigned::Z,
-            VoxelAxis::NegaZ => VoxelAxisUnsigned::Z,
+        #[allow(dead_code)]
+        #[inline(always)]
+        pub const fn get_sign(&self) -> VoxelAxisSign {
+            match *self {
+                VoxelSide::PosiX => return VoxelAxisSign::POSI,
+                VoxelSide::NegaX => return VoxelAxisSign::NEGA,
+                VoxelSide::PosiY => return VoxelAxisSign::POSI,
+                VoxelSide::NegaY => return VoxelAxisSign::NEGA,
+                VoxelSide::PosiZ => return VoxelAxisSign::POSI,
+                VoxelSide::NegaZ => return VoxelAxisSign::NEGA,
+            }
+        }
+
+        #[allow(dead_code)]
+        #[inline(always)]
+        pub const fn split(&self) -> (VoxelAxisSign, VoxelAxis) { (self.get_sign(), self.clone().into())}
+
+        #[allow(dead_code)]
+        #[inline(always)]
+        pub const fn from_parts(sign : VoxelAxisSign, axis : VoxelAxis) -> Self {
+            match axis {
+                VoxelAxis::X => { 
+                    match sign { 
+                        VoxelAxisSign::POSI => return VoxelSide::PosiX,
+                        VoxelAxisSign::NEGA => return VoxelSide::NegaX,
+                    }
+                },
+                VoxelAxis::Y => { 
+                    match sign { 
+                        VoxelAxisSign::POSI => return VoxelSide::PosiY,
+                        VoxelAxisSign::NEGA => return VoxelSide::NegaY,
+                    }
+                },
+                VoxelAxis::Z => { 
+                    match sign { 
+                        VoxelAxisSign::POSI => return VoxelSide::PosiZ,
+                        VoxelAxisSign::NEGA => return VoxelSide::NegaZ,
+                    }
+                },
+            }
+        }
+
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub const fn to_id(&self) -> usize {
+            match self {
+                VoxelSide::PosiX => posi_x_index!(),
+                VoxelSide::PosiY => posi_y_index!(),
+                VoxelSide::PosiZ => posi_z_index!(),
+                VoxelSide::NegaX => nega_x_index!(),
+                VoxelSide::NegaY => nega_y_index!(),
+                VoxelSide::NegaZ => nega_z_index!(),
+            }
+        }
+
+        #[inline(always)]
+        #[allow(dead_code)]
+        pub const fn from_id(val : usize) -> Self { 
+            match val { 
+                posi_x_index!() => VoxelSide::PosiX,
+                posi_z_index!() => VoxelSide::PosiY,
+                posi_y_index!() => VoxelSide::PosiZ,
+                nega_x_index!() => VoxelSide::NegaX,
+                nega_y_index!() => VoxelSide::NegaY,
+                nega_z_index!() => VoxelSide::NegaZ,
+                num => panic!("It should not be possible to get a side-ID greater than or equal to 6! You passed in {}", num),
+            }
+        }
+        
+        /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-X direction?
+        #[allow(dead_code)]
+        pub fn get_2d_x(&self) -> VoxelSide {
+            match self { 
+                VoxelSide::PosiX => VoxelSide::PosiZ,
+                VoxelSide::NegaX => VoxelSide::PosiZ,
+                VoxelSide::PosiY => VoxelSide::PosiX,
+                VoxelSide::NegaY => VoxelSide::PosiX,
+                VoxelSide::PosiZ => VoxelSide::PosiX,
+                VoxelSide::NegaZ => VoxelSide::PosiX,
+            }
+        }
+
+        /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-Y direction?
+        #[allow(dead_code)]
+        pub fn get_2d_y(&self) -> VoxelSide {
+            match self { 
+                VoxelSide::PosiX => VoxelSide::PosiY,
+                VoxelSide::NegaX => VoxelSide::PosiY,
+                VoxelSide::PosiY => VoxelSide::PosiZ,
+                VoxelSide::NegaY => VoxelSide::PosiZ,
+                VoxelSide::PosiZ => VoxelSide::PosiY,
+                VoxelSide::NegaZ => VoxelSide::PosiY,
+            }
         }
     }
-}
-
-/// Represents the sign of a VoxelAxis.
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum VoxelAxisSign {
-    POSI,
-    NEGA,
-}
-
-/// An iterator over each of the 6 cardinal directions in voxel space.
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-pub struct VoxelAxisIter {
-    axis : Option<VoxelAxis>,
-}
-impl VoxelAxisIter {
+    
+    /// Describes an unsigned cartesian axis in 3D space
+    #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+    #[repr(u8)]
+    pub enum VoxelAxis {
+        X = 0,
+        Y = 1,
+        Z = 2,
+    }
+    // Just proxy to debug
+    impl fmt::Display for VoxelSide {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{:?}", self)
+        }
+    }
+    
+    // Just proxy to debug
+    impl fmt::Display for VoxelAxis {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{:?}", self)
+        }
+    }
+    
+    /// Make sure we can "downcast" this enum so it's just the axis and not a direction
+    impl From<VoxelSide> for VoxelAxis {
+        #[inline(always)]
+        fn from(axis: VoxelSide) -> VoxelAxis {
+            match axis {
+                VoxelSide::PosiX => VoxelAxis::X,
+                VoxelSide::NegaX => VoxelAxis::X,
+                VoxelSide::PosiY => VoxelAxis::Y,
+                VoxelSide::NegaY => VoxelAxis::Y,
+                VoxelSide::PosiZ => VoxelAxis::Z,
+                VoxelSide::NegaZ => VoxelAxis::Z,
+            }
+        }
+    }
+    
+    /// Represents the sign of a VoxelAxis.
+    #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
     #[allow(dead_code)]
-    pub fn new() -> Self { VoxelAxisIter { axis: None } }
-}
-impl Iterator for VoxelAxisIter {
-    type Item = VoxelAxis;
-    #[inline(always)]
-    fn next(&mut self) -> Option<VoxelAxis> {
-        let mut result = Some(VoxelAxis::PosiX);
-        match self.axis {
-            None => (), //result = Some(VoxelAxis::PosiX,
-            Some(VoxelAxis::PosiX) => result = Some(VoxelAxis::NegaX),
-            Some(VoxelAxis::NegaX) => result = Some(VoxelAxis::PosiY),
-            Some(VoxelAxis::PosiY) => result = Some(VoxelAxis::NegaY),
-            Some(VoxelAxis::NegaY) => result = Some(VoxelAxis::PosiZ),
-            Some(VoxelAxis::PosiZ) => result = Some(VoxelAxis::NegaZ),
-            Some(VoxelAxis::NegaZ) => result = None,
+    pub enum VoxelAxisSign {
+        POSI,
+        NEGA,
+    }
+    
+    /// An iterator over each of the 6 cardinal directions in voxel space.
+    #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+    pub struct VoxelAxisIter {
+        axis : Option<VoxelSide>,
+    }
+    impl VoxelAxisIter {
+        #[allow(dead_code)]
+        pub fn new() -> Self { VoxelAxisIter { axis: None } }
+    }
+    impl Iterator for VoxelAxisIter {
+        type Item = VoxelSide;
+        #[inline(always)]
+        fn next(&mut self) -> Option<VoxelSide> {
+            let mut result = Some(VoxelSide::PosiX);
+            match self.axis {
+                None => (), //result = Some(VoxelAxis::PosiX,
+                Some(VoxelSide::PosiX) => result = Some(VoxelSide::NegaX),
+                Some(VoxelSide::NegaX) => result = Some(VoxelSide::PosiY),
+                Some(VoxelSide::PosiY) => result = Some(VoxelSide::NegaY),
+                Some(VoxelSide::NegaY) => result = Some(VoxelSide::PosiZ),
+                Some(VoxelSide::PosiZ) => result = Some(VoxelSide::NegaZ),
+                Some(VoxelSide::NegaZ) => result = None,
+            }
+            self.axis = result;
+            return result;
         }
-        self.axis = result;
-        return result;
     }
 }
+
+pub use axis::VoxelAxis;
+pub use axis::VoxelSide;
+pub use axis::VoxelAxisSign;
+pub use axis::VoxelAxisIter;
 
 //VoxelAxis::PosiX => 0,
 //VoxelAxis::PosiY => 1,
@@ -592,55 +738,30 @@ impl Iterator for VoxelAxisIter {
 //VoxelAxis::NegaZ => 5,
 
 #[allow(unused_macros)]
-macro_rules! posi_x_index {
-    () => { 0 }
-}
-#[allow(unused_macros)]
-macro_rules! posi_y_index {
-    () => { 1 }
-}
-#[allow(unused_macros)]
-macro_rules! posi_z_index {
-    () => { 2 }
-}
-#[allow(unused_macros)]
-macro_rules! nega_x_index {
-    () => { 3 }
-}
-#[allow(unused_macros)]
-macro_rules! nega_y_index {
-    () => { 4 }
-}
-#[allow(unused_macros)]
-macro_rules! nega_z_index {
-    () => { 5 }
-}
-
-#[allow(unused_macros)]
 macro_rules! voxel_sides_unroll {
     ($side:ident, $b:block)=> { 
         {
-            const $side : VoxelAxis = VoxelAxis::PosiX;
+            const $side : VoxelSide = VoxelSide::PosiX;
             $b
         }
         {
-            const $side : VoxelAxis = VoxelAxis::NegaX;
+            const $side : VoxelSide = VoxelSide::NegaX;
             $b
         }
         {
-            const $side : VoxelAxis = VoxelAxis::PosiY;
+            const $side : VoxelSide = VoxelSide::PosiY;
             $b
         }
         {
-            const $side : VoxelAxis = VoxelAxis::NegaY;
+            const $side : VoxelSide = VoxelSide::NegaY;
             $b
         }
         {
-            const $side : VoxelAxis = VoxelAxis::PosiZ;
+            const $side : VoxelSide = VoxelSide::PosiZ;
             $b
         }
         {
-            const $side : VoxelAxis = VoxelAxis::NegaZ;
+            const $side : VoxelSide = VoxelSide::NegaZ;
             $b
         }
     };
@@ -712,132 +833,23 @@ macro_rules! enumerated_voxel_side_unroll {
     };
 }
 
-impl VoxelAxis {
-    /// Gives you an iterator over each of the 6 cardinal directions in voxel space.
-    #[allow(dead_code)]
-    pub fn iter_all() -> VoxelAxisIter { VoxelAxisIter::new() }
-
-    #[inline]
-    pub fn opposite(&self) -> Self {
-        match *self {
-            VoxelAxis::PosiX => return VoxelAxis::NegaX,
-            VoxelAxis::NegaX => return VoxelAxis::PosiX,
-            VoxelAxis::PosiY => return VoxelAxis::NegaY,
-            VoxelAxis::NegaY => return VoxelAxis::PosiY,
-            VoxelAxis::PosiZ => return VoxelAxis::NegaZ,
-            VoxelAxis::NegaZ => return VoxelAxis::PosiZ,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn get_sign(&self) -> VoxelAxisSign {
-        match *self {
-            VoxelAxis::PosiX => return VoxelAxisSign::POSI,
-            VoxelAxis::NegaX => return VoxelAxisSign::NEGA,
-            VoxelAxis::PosiY => return VoxelAxisSign::POSI,
-            VoxelAxis::NegaY => return VoxelAxisSign::NEGA,
-            VoxelAxis::PosiZ => return VoxelAxisSign::POSI,
-            VoxelAxis::NegaZ => return VoxelAxisSign::NEGA,
-        }
-    }
-    #[allow(dead_code)]
-    pub fn split(&self) -> (VoxelAxisSign, VoxelAxisUnsigned) { (self.get_sign(), self.clone().into())}
-
-    #[allow(dead_code)]
-    pub fn from_parts(sign : VoxelAxisSign, axis : VoxelAxisUnsigned) -> Self {
-        match axis {
-            VoxelAxisUnsigned::X => { 
-                match sign { 
-                    VoxelAxisSign::POSI => return VoxelAxis::PosiX,
-                    VoxelAxisSign::NEGA => return VoxelAxis::NegaX,
-                }
-            },
-            VoxelAxisUnsigned::Y => { 
-                match sign { 
-                    VoxelAxisSign::POSI => return VoxelAxis::PosiY,
-                    VoxelAxisSign::NEGA => return VoxelAxis::NegaY,
-                }
-            },
-            VoxelAxisUnsigned::Z => { 
-                match sign { 
-                    VoxelAxisSign::POSI => return VoxelAxis::PosiZ,
-                    VoxelAxisSign::NEGA => return VoxelAxis::NegaZ,
-                }
-            },
-        }
-    }
-
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn to_id(&self) -> usize {
-        match self {
-            VoxelAxis::PosiX => 0,
-            VoxelAxis::PosiY => 1,
-            VoxelAxis::PosiZ => 2,
-            VoxelAxis::NegaX => 3,
-            VoxelAxis::NegaY => 4,
-            VoxelAxis::NegaZ => 5,
-        }
-    }
-
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn from_id(val : usize) -> Self { 
-        match val { 
-            0 => VoxelAxis::PosiX,
-            1 => VoxelAxis::PosiY,
-            2 => VoxelAxis::PosiZ,
-            3 => VoxelAxis::NegaX,
-            4 => VoxelAxis::NegaY,
-            5 => VoxelAxis::NegaZ,
-            _ => VoxelAxis::PosiX,
-        }
-    }
-    
-    /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-X direction?
-    #[allow(dead_code)]
-    pub fn get_2d_x(&self) -> VoxelAxis {
-        match self { 
-            VoxelAxis::PosiX => VoxelAxis::PosiZ,
-            VoxelAxis::NegaX => VoxelAxis::PosiZ,
-            VoxelAxis::PosiY => VoxelAxis::PosiX,
-            VoxelAxis::NegaY => VoxelAxis::PosiX,
-            VoxelAxis::PosiZ => VoxelAxis::PosiX,
-            VoxelAxis::NegaZ => VoxelAxis::PosiX,
-        }
-    }
-
-    /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-Y direction?
-    #[allow(dead_code)]
-    pub fn get_2d_y(&self) -> VoxelAxis {
-        match self { 
-            VoxelAxis::PosiX => VoxelAxis::PosiY,
-            VoxelAxis::NegaX => VoxelAxis::PosiY,
-            VoxelAxis::PosiY => VoxelAxis::PosiZ,
-            VoxelAxis::NegaY => VoxelAxis::PosiZ,
-            VoxelAxis::PosiZ => VoxelAxis::PosiY,
-            VoxelAxis::NegaZ => VoxelAxis::PosiY,
-        }
-    }
-}
-
 impl <T> VoxelPos<T> where T : VoxelCoord {
     /// Along the provided axis, what is our coordinate?
     #[inline]
-    pub fn coord_for_axis(&self, direction : VoxelAxisUnsigned) -> T {
+    pub fn coord_for_axis(&self, direction : VoxelAxis) -> T {
         match direction {
-            VoxelAxisUnsigned::X => return self.x,
-            VoxelAxisUnsigned::Y => return self.y,
-            VoxelAxisUnsigned::Z => return self.z,
+            VoxelAxis::X => return self.x,
+            VoxelAxis::Y => return self.y,
+            VoxelAxis::Z => return self.z,
         }
     }
     /// Set our coordinate along the axis you pass.
     #[inline]
-    pub fn set_coord_for_axis(&mut self, direction : VoxelAxisUnsigned, value: T) {
+    pub fn set_coord_for_axis(&mut self, direction : VoxelAxis, value: T) {
         match direction {
-            VoxelAxisUnsigned::X => self.x = value,
-            VoxelAxisUnsigned::Y => self.y = value,
-            VoxelAxisUnsigned::Z => self.z = value,
+            VoxelAxis::X => self.x = value,
+            VoxelAxis::Y => self.y = value,
+            VoxelAxis::Z => self.z = value,
         }
     }
 }
@@ -847,33 +859,33 @@ impl <T> VoxelPos<T> where T : VoxelCoord {
 impl <T> VoxelPos<T> where T : VoxelCoord {
     /// Returns the cell adjacent to this one in the direction passed
     #[inline(always)]
-    pub fn get_neighbor(&self, direction : VoxelAxis) -> VoxelPos<T> {
+    pub const fn get_neighbor(&self, direction : VoxelSide) -> VoxelPos<T> {
         match direction {
-            VoxelAxis::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
-            VoxelAxis::NegaX => return VoxelPos{x : self.x - T::one(), y : self.y, z : self.z },
-            VoxelAxis::PosiY => return VoxelPos{x : self.x, y : self.y + T::one(), z : self.z },
-            VoxelAxis::NegaY => return VoxelPos{x : self.x, y : self.y - T::one(), z : self.z },
-            VoxelAxis::PosiZ => return VoxelPos{x : self.x, y : self.y, z : self.z + T::one() },
-            VoxelAxis::NegaZ => return VoxelPos{x : self.x, y : self.y, z : self.z - T::one() },
+            VoxelSide::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
+            VoxelSide::NegaX => return VoxelPos{x : self.x - T::one(), y : self.y, z : self.z },
+            VoxelSide::PosiY => return VoxelPos{x : self.x, y : self.y + T::one(), z : self.z },
+            VoxelSide::NegaY => return VoxelPos{x : self.x, y : self.y - T::one(), z : self.z },
+            VoxelSide::PosiZ => return VoxelPos{x : self.x, y : self.y, z : self.z + T::one() },
+            VoxelSide::NegaZ => return VoxelPos{x : self.x, y : self.y, z : self.z - T::one() },
         }
     }
     /// Sets this cell to be the cell adjacent to this one in the direction passed
     #[inline(always)]
     #[allow(dead_code)]
-    pub fn go_neighbor(&mut self, direction : VoxelAxis) {
+    pub fn go_neighbor(&mut self, direction : VoxelSide) {
         match direction {
-            VoxelAxis::PosiX => self.x = self.x + T::one(),
-            VoxelAxis::NegaX => self.x = self.x - T::one(),
-            VoxelAxis::PosiY => self.y = self.y + T::one(),
-            VoxelAxis::NegaY => self.y = self.y - T::one(),
-            VoxelAxis::PosiZ => self.z = self.z + T::one(),
-            VoxelAxis::NegaZ => self.z = self.z - T::one(),
+            VoxelSide::PosiX => self.x = self.x + T::one(),
+            VoxelSide::NegaX => self.x = self.x - T::one(),
+            VoxelSide::PosiY => self.y = self.y + T::one(),
+            VoxelSide::NegaY => self.y = self.y - T::one(),
+            VoxelSide::PosiZ => self.z = self.z + T::one(),
+            VoxelSide::NegaZ => self.z = self.z - T::one(),
         }
     }
 }
 #[derive(Debug)]
 pub struct UnsignedUnderflowError {
-    direction : VoxelAxis,
+    direction : VoxelSide,
 }
 
 impl fmt::Display for UnsignedUnderflowError {
@@ -896,24 +908,24 @@ impl <T> VoxelPos<T> where T : VoxelCoord + Unsigned {
     /// Returns the cell adjacent to this one in the direction passed
     #[inline]
     #[allow(dead_code)]
-    pub fn get_neighbor_unsigned(&self, direction : VoxelAxis) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
+    pub fn get_neighbor_unsigned(&self, direction : VoxelSide) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
         match direction {
-            VoxelAxis::PosiX => return Ok(VoxelPos{x : self.x + T::one(), y : self.y, z : self.z }),
-            VoxelAxis::NegaX => {
+            VoxelSide::PosiX => return Ok(VoxelPos{x : self.x + T::one(), y : self.y, z : self.z }),
+            VoxelSide::NegaX => {
                 if self.x == T::zero() {
                     return Err(UnsignedUnderflowError{direction : direction});
                 }
                 return Ok(VoxelPos{x : self.x - T::one(), y : self.y, z : self.z });
             },
-            VoxelAxis::PosiY => return Ok(VoxelPos{x : self.x, y : self.y + T::one(), z : self.z }),
-            VoxelAxis::NegaY => {
+            VoxelSide::PosiY => return Ok(VoxelPos{x : self.x, y : self.y + T::one(), z : self.z }),
+            VoxelSide::NegaY => {
                 if self.y == T::zero() {
                     return Err(UnsignedUnderflowError{direction : direction});
                 }
                 return Ok( VoxelPos{x : self.x, y : self.y - T::one(), z : self.z });
             },
-            VoxelAxis::PosiZ => return Ok(VoxelPos{x : self.x, y : self.y, z : self.z + T::one() }),
-            VoxelAxis::NegaZ => {
+            VoxelSide::PosiZ => return Ok(VoxelPos{x : self.x, y : self.y, z : self.z + T::one() }),
+            VoxelSide::NegaZ => {
                 if self.z == T::zero() {
                     return Err(UnsignedUnderflowError{direction : direction});
                 }
@@ -930,7 +942,7 @@ pub struct VoxelRaycast {
     t_max : Vector3<f64>, //Where does the ray cross the first voxel boundary? (in all directions)
     t_delta : Vector3<f64>, //How far along do we need to move for the length of that movement to equal the width of a voxel?
     step_dir : VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
-    last_direction : VoxelAxisUnsigned,
+    last_direction : VoxelAxis,
 }
 
 /*
@@ -942,21 +954,21 @@ impl VoxelRaycast {
     fn step_x(&mut self) {
         self.pos.x = self.pos.x + self.step_dir.x;
         self.t_max.x= self.t_max.x + self.t_delta.x;
-        self.last_direction = VoxelAxisUnsigned::X; //We will correct the sign on this in a get function, rather than in the loop.
+        self.last_direction = VoxelAxis::X; //We will correct the sign on this in a get function, rather than in the loop.
     }
     #[inline]
     #[allow(dead_code)]
     fn step_y(&mut self) {
         self.pos.y = self.pos.y + self.step_dir.y;
         self.t_max.y = self.t_max.y + self.t_delta.y;
-        self.last_direction = VoxelAxisUnsigned::Y; //We will correct the sign on this in a get function, rather than in the loop.
+        self.last_direction = VoxelAxis::Y; //We will correct the sign on this in a get function, rather than in the loop.
     }
     #[inline]
     #[allow(dead_code)]
     fn step_z(&mut self) {
         self.pos.z = self.pos.z + self.step_dir.z;
         self.t_max.z= self.t_max.z + self.t_delta.z;
-        self.last_direction = VoxelAxisUnsigned::Z; //We will correct the sign on this in a get function, rather than in the loop.  
+        self.last_direction = VoxelAxis::Z; //We will correct the sign on this in a get function, rather than in the loop.  
     }
     #[inline]
     #[allow(dead_code)]
@@ -976,30 +988,30 @@ impl VoxelRaycast {
     }
     #[inline]
     #[allow(dead_code)]
-    pub fn get_last_direction(&self) -> VoxelAxis {
+    pub fn get_last_direction(&self) -> VoxelSide {
         match self.last_direction {
-            VoxelAxisUnsigned::X => {
+            VoxelAxis::X => {
                 if self.step_dir.x < 0 {
-                    return VoxelAxis::NegaX;
+                    return VoxelSide::NegaX;
                 }
                 else {
-                    return VoxelAxis::PosiX;
+                    return VoxelSide::PosiX;
                 }
             },
-            VoxelAxisUnsigned::Y => {
+            VoxelAxis::Y => {
                 if self.step_dir.y < 0 {
-                    return VoxelAxis::NegaY;
+                    return VoxelSide::NegaY;
                 }
                 else {
-                    return VoxelAxis::PosiY;
+                    return VoxelSide::PosiY;
                 }
             },
-            VoxelAxisUnsigned::Z => {
+            VoxelAxis::Z => {
                 if self.step_dir.z < 0 {
-                    return VoxelAxis::NegaZ;
+                    return VoxelSide::NegaZ;
                 }
                 else {
-                    return VoxelAxis::PosiZ;
+                    return VoxelSide::PosiZ;
                 }
             },
         }
@@ -1096,7 +1108,7 @@ impl VoxelRaycast {
             t_max : t_max,
             t_delta : t_delta,
             step_dir : step_dir,
-            last_direction : VoxelAxisUnsigned::Z,
+            last_direction : VoxelAxis::Z,
         }
     }
 }
@@ -1133,7 +1145,7 @@ fn test_side_iteration() {
     let ran : VoxelRange<i32> = VoxelRange{lower: low, upper: high};
 
     let mut counter = 0;
-    for i in ran.get_side_iterator(VoxelAxis::PosiY) {
+    for i in ran.get_side_iterator(VoxelSide::PosiY) {
         assert!( ! (i.x >= side_x) );
         assert!( ! (i.z >= side_z) );
         assert!( i.y == ran.upper.y );
@@ -1143,7 +1155,7 @@ fn test_side_iteration() {
 
     
     counter = 0;
-    for i in ran.get_side_iterator(VoxelAxis::NegaX) {
+    for i in ran.get_side_iterator(VoxelSide::NegaX) {
         assert!( ! (i.y >= side_y) );
         assert!( ! (i.z >= side_z) );
         assert!( i.x == ran.lower.x );
@@ -1154,37 +1166,37 @@ fn test_side_iteration() {
 
 #[test]
 fn test_axis_iteration() {
-    let mut list : Vec<VoxelAxis> = Vec::new();
-    for dir in VoxelAxis::iter_all() {
+    let mut list : Vec<VoxelSide> = Vec::new();
+    for dir in VoxelSide::iter_all() {
         list.push(dir);
     }
     assert!( list.len() == 6 );
-    assert!(list.contains(&VoxelAxis::PosiX));
-    assert!(list.contains(&VoxelAxis::NegaX));
-    assert!(list.contains(&VoxelAxis::PosiY));
-    assert!(list.contains(&VoxelAxis::NegaY));
-    assert!(list.contains(&VoxelAxis::PosiZ));
-    assert!(list.contains(&VoxelAxis::NegaZ));
+    assert!(list.contains(&VoxelSide::PosiX));
+    assert!(list.contains(&VoxelSide::NegaX));
+    assert!(list.contains(&VoxelSide::PosiY));
+    assert!(list.contains(&VoxelSide::NegaY));
+    assert!(list.contains(&VoxelSide::PosiZ));
+    assert!(list.contains(&VoxelSide::NegaZ));
 }
 #[test]
 fn test_axis_iteration_unrolled() {
-    let mut list : Vec<VoxelAxis> = Vec::new();
+    let mut list : Vec<VoxelSide> = Vec::new();
     voxel_sides_unroll!(DIR, {
         list.push(DIR);
     });
     assert!( list.len() == 6 );
-    assert!(list.contains(&VoxelAxis::PosiX));
-    assert!(list.contains(&VoxelAxis::NegaX));
-    assert!(list.contains(&VoxelAxis::PosiY));
-    assert!(list.contains(&VoxelAxis::NegaY));
-    assert!(list.contains(&VoxelAxis::PosiZ));
-    assert!(list.contains(&VoxelAxis::NegaZ));
+    assert!(list.contains(&VoxelSide::PosiX));
+    assert!(list.contains(&VoxelSide::NegaX));
+    assert!(list.contains(&VoxelSide::PosiY));
+    assert!(list.contains(&VoxelSide::NegaY));
+    assert!(list.contains(&VoxelSide::PosiZ));
+    assert!(list.contains(&VoxelSide::NegaZ));
 }
 
 #[test]
 fn test_get_neighbor() {
     let initial : VoxelPos<i32> = VoxelPos{x : 1, y : 4, z : 1};
-    let neighbor = initial.get_neighbor(VoxelAxis::PosiZ);
+    let neighbor = initial.get_neighbor(VoxelSide::PosiZ);
     assert!( neighbor.z == 2 );
 }
 

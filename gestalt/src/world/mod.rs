@@ -20,16 +20,11 @@ pub type TilePos = VoxelPos<TileCoord>;
 pub type ChunkCoord = i32;
 pub type ChunkPos = VoxelPos<ChunkCoord>;
 
-use crate::entity::*;
-use crate::common::message::*;
 use std::error::Error;
-use std::time::{Instant, Duration};
+use std::time::{Instant};
 
 pub struct World {
     pub space : Space,
-    pub entity_world : legion::World,
-    pub schedule : legion::Schedule,
-    pub entity_resources : legion::Resources,
     pub last_update : Instant,
     pub tick : u64,
 }
@@ -38,19 +33,15 @@ impl World {
     pub fn new() -> Self { 
         World {
             space: Space::new(),
-            entity_world: legion::world::World::default(),
-            schedule : legion::Schedule::builder().add_system(update_positions_system()).build(),
-            entity_resources: legion::Resources::default(),
+
             last_update : Instant::now(),
             tick : 0,
         }
     }
 
     pub fn update(&mut self) -> Result<(), Box<dyn Error>> {
-        let elapsed = self.last_update.elapsed();
+        let _elapsed = self.last_update.elapsed();
         self.last_update = Instant::now();
-        self.entity_resources.insert(TimeStep{0: elapsed.as_secs_f32()});
-        self.schedule.execute(&mut self.entity_world, &mut self.entity_resources);
         Ok(())
     }
 }
