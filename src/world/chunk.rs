@@ -276,9 +276,9 @@ fn chunk_index_reverse() {
     let mut rng = rand::thread_rng();
     for _ in 0..4096 {
 
-        let x = rng.gen_range(0, CHUNK_SZ);
-        let y = rng.gen_range(0, CHUNK_SZ);
-        let z = rng.gen_range(0, CHUNK_SZ); 
+        let x = rng.gen_range(0..CHUNK_SZ);
+        let y = rng.gen_range(0..CHUNK_SZ);
+        let z = rng.gen_range(0..CHUNK_SZ); 
 
         let i_value = chunk_xyz_to_i(x, y, z);
         let (x1, y1, z1) = chunk_i_to_xyz(i_value);
@@ -363,9 +363,9 @@ fn assignemnts_to_chunk() {
     {
         for i in 0..253 {
             
-            let x = rng.gen_range(0, CHUNK_SZ);
-            let y = rng.gen_range(0, CHUNK_SZ);
-            let z = rng.gen_range(0, CHUNK_SZ); 
+            let x = rng.gen_range(0..CHUNK_SZ);
+            let y = rng.gen_range(0..CHUNK_SZ);
+            let z = rng.gen_range(0..CHUNK_SZ); 
 
             let tile = i + 2;
 
@@ -393,9 +393,9 @@ fn assignemnts_to_chunk() {
     {
         for i in 253..1024 {
             
-            let x = rng.gen_range(0, CHUNK_SZ);
-            let y = rng.gen_range(0, CHUNK_SZ);
-            let z = rng.gen_range(0, CHUNK_SZ); 
+            let x = rng.gen_range(0..CHUNK_SZ);
+            let y = rng.gen_range(0..CHUNK_SZ);
+            let z = rng.gen_range(0..CHUNK_SZ); 
 
             let tile = i + 2;
             

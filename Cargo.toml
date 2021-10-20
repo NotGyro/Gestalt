@@ -1,6 +1,37 @@
-[workspace]
+[package]
+name = "gestalt"
+version = "0.0.1"
+authors = ["Sam 'Gyro' C. <gyrocoder@gmail.com>", "trashbyte"]
+edition = "2018"
 
-members = [
-    "hemlock",
-    "gestalt",
-]
+[dependencies]
+arr_macro = "*"
+base16 = "0.2.1"
+bincode = "1.3.1"
+blake3 = "1.0.0"
+bytemuck = { version = "1.4.1", features = [ "derive" ] }
+byteorder = "1.3.4"
+cgmath = "0.18.0"
+clap = "2.33.3"
+crossbeam-channel = "0.5.0"
+custom_error = "1.8.0"
+enum_dispatch = "0.3.3"
+futures = "0.3.6"
+hashbrown = "0.11.2"
+hecs = "0.6.5"
+image = "0.23.8"
+lazy_static = "1.4.0"
+log = { version = "0.4.11", features = ["std"] }
+num = "0.4.0"
+parking_lot = "0.11.0"
+rand = "0.8.4"
+semver = "1.0.4"
+serde = { version = "1.0.108", features = ["derive"] }
+shaderc = "0.7"
+snow = "0.8"
+sodiumoxide = "0.2.6"
+ustr = { version = "0.8.1", features = ["serialization"] }
+uuid = { version = "0.8.1", features = ["serde", "v4"] }
+winit = "0.25"
+
+#nphysics3d = "0.16.1"

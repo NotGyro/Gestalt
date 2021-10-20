@@ -47,7 +47,6 @@ use winit::{
 };
 
 #[macro_use] pub mod common;
-pub mod client;
 pub mod entity;
 pub mod world;
 /// The main purpose of the Logger module is to define our Hemlock scopes. 
