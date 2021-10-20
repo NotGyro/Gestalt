@@ -10,7 +10,7 @@ use std::result::Result;
 
 use crate::world::voxelstorage::*;
 use crate::world::{ChunkCoord, ChunkPos, TileCoord, TilePos};
-
+/*
 pub struct Space {
     /// HashMap<chunk position, chunk>
     pub chunks: HashMap<ChunkPos, Chunk>,
@@ -115,4 +115,4 @@ impl Space {
     pub fn get_loaded_chunks(&self) -> Vec<ChunkPos> {
         self.chunks.keys().map(|c| c.clone()).collect()
     }
-}
+}*/

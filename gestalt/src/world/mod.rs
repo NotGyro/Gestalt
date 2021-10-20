@@ -7,7 +7,7 @@ pub mod voxelevent;
 pub use tile::TileId;
 pub use tile::TileCoord;
 pub use chunk::*;
-pub use space::Space;
+//pub use space::Space;
 pub use voxelstorage::VoxelError;
 pub use voxelstorage::VoxelErrorKind;
 pub use voxelstorage::VoxelStorage;
@@ -22,7 +22,7 @@ pub type ChunkPos = VoxelPos<ChunkCoord>;
 
 use std::error::Error;
 use std::time::{Instant};
-
+/*
 pub struct World {
     pub space : Space,
     pub last_update : Instant,
@@ -44,4 +44,4 @@ impl World {
         self.last_update = Instant::now();
         Ok(())
     }
-}
+}*/

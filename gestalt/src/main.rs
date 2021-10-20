@@ -5,6 +5,7 @@
 #![feature(drain_filter)]
 #![feature(const_generics)]
 #![feature(const_evaluatable_checked)]
+#![feature(associated_type_bounds)]
 
 #[macro_use] extern crate hemlock;
 
@@ -56,7 +57,7 @@ pub mod logger;
 
 #[allow(unused_must_use)]
 fn main() {
-    
+    /*
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let mut screen_state = match block_on(ScreenState::new(&window)) {
@@ -147,4 +148,5 @@ fn main() {
     }
     info!(Core, "Ustr cache used {} bytes of memory.", ustr::total_allocated());
     std::thread::sleep(std::time::Duration::from_millis(100));
+    */
 }

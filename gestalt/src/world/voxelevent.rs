@@ -1,7 +1,7 @@
 use std::result::Result;
 use std::error::Error;
 use std::fmt::Debug;
-
+/*
 use crate::common::voxelmath::*;
 use crate::common::message::*;
 use crate::world::{TilePos, TileCoord};
@@ -163,4 +163,4 @@ fn test_voxel_message_system() {
     assert_eq!(count, 2);
     assert_eq!(space.get(vpos!(0,0,0)).unwrap(), id);
     assert_eq!(space.get(vpos!(5,5,5)).unwrap(), id2);
-}
+}*/

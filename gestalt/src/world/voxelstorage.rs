@@ -52,8 +52,8 @@ impl Error for VoxelError {
 }
 
 
-pub trait Voxel : Clone + Debug + Eq {}
-impl<T> Voxel for T where T : Clone + Debug + Eq {}
+pub trait Voxel : Clone + Debug + PartialEq {}
+impl<T> Voxel for T where T : Clone + Debug + PartialEq {}
 
 /// A basic trait for any 3d grid data structure.
 /// Type arguments are type of element, type of position.
@@ -81,10 +81,55 @@ pub trait VoxelStorageBounded<T: Voxel, P: VoxelCoord> : VoxelStorage<T, P> {
     fn get_bounds(&self) -> VoxelRange<P>;
 }
 
+pub trait VsBulkOps<T: Voxel, P: VoxelCoord> : VoxelStorageBounded<T, P> {
+    /// Iterate over each voxel in this area.
+    fn each_voxel<F: FnMut(T) -> ()>(&self, func: F);
+    /// Iterate over each voxel and its (local to this chunk!) coordinate in this area.
+    fn each_cell<F: FnMut(T, P) -> ()>(&self, func: F);
+    /// Iterate over each voxel, yielding a new voxel to replace it in this chunk.
+    fn map_voxels<F: FnOnce(T) -> T>(&mut self, func: F);
+    /// Iterate over each voxel and its (local to this chunk!) coordinate, yielding a new voxel to replace it in this chunk.
+    fn map_cells<F: FnOnce(T, P) -> T>(&mut self, func: F);
+}
+
+
+/// Like Into but it may panic.
+pub trait UnwrapInto<T> { 
+    fn unwrap_into(self) -> T;
+}
+impl<T> UnwrapInto<T> for Option<T> {
+    fn unwrap_into(self) -> T {
+        self.unwrap()
+    }
+}
+impl<T> UnwrapInto<T> for T {
+    fn unwrap_into(self) -> T {
+        self
+    }
+}
+impl<T, E> UnwrapInto<T> for Result<T, E> where E: std::fmt::Debug {
+    fn unwrap_into(self) -> T {
+        self.unwrap()
+    }
+}
+
+/// A voxel and adjacent voxels in 6 cardinal directions. Type arguments: T (The type we store) and V (the voxel type we map to / from).
+pub trait VoxelNeighborhood : Clone {
+    type SourceVoxel : Voxel;
+    type OurVoxel : UnwrapInto<Self::SourceVoxel>;
+    fn new(center: Self::SourceVoxel, posi_x: Self::SourceVoxel, posi_y: Self::SourceVoxel, posi_z: Self::SourceVoxel, nega_x: Self::SourceVoxel, nega_y: Self::SourceVoxel, nega_z: Self::SourceVoxel) -> Self;
+    fn get_center(&self) -> &Self::OurVoxel;
+    fn get(&self, neighbor: VoxelSide) -> &Self::OurVoxel;
+}
+
+pub trait VsNeighborhoodOps<T: Voxel, P: VoxelCoord> : VoxelStorageBounded<T, P> {
+    type NeighborhoodType : VoxelNeighborhood<SourceVoxel=T>;
+}
+
 /// Copy voxels from one storage to another.
 #[allow(dead_code)]
-pub fn voxel_blit<T: Voxel, P: VoxelCoord>(source_range : VoxelRange<P>, source: &dyn VoxelStorage<T, P>,
-                                           dest_origin: VoxelPos<P>, dest: &mut dyn VoxelStorage<T,P>)  -> Result<(), VoxelError> {
+pub fn voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStorage<T, P>>(source_range : VoxelRange<P>, source: &VA,
+                                           dest_origin: VoxelPos<P>, dest: &mut VB)  -> Result<(), VoxelError> {
     for pos in source_range {
         let voxel = source.get(pos)?;
         let offset_pos = (pos - source_range.lower) + dest_origin;

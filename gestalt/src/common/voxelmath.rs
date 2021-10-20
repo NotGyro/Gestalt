@@ -567,10 +567,22 @@ pub mod axis {
                 VoxelSide::NegaZ => return VoxelAxisSign::NEGA,
             }
         }
+        #[allow(dead_code)]
+        #[inline(always)]
+        pub const fn get_axis(&self) -> VoxelAxis {
+            match *self {
+                VoxelSide::PosiX => return VoxelAxis::X,
+                VoxelSide::NegaX => return VoxelAxis::X,
+                VoxelSide::PosiY => return VoxelAxis::Y,
+                VoxelSide::NegaY => return VoxelAxis::Y,
+                VoxelSide::PosiZ => return VoxelAxis::Z,
+                VoxelSide::NegaZ => return VoxelAxis::Z,
+            }
+        }
 
         #[allow(dead_code)]
         #[inline(always)]
-        pub const fn split(&self) -> (VoxelAxisSign, VoxelAxis) { (self.get_sign(), self.clone().into())}
+        pub const fn split(&self) -> (VoxelAxisSign, VoxelAxis) { (self.get_sign(), self.get_axis())}
 
         #[allow(dead_code)]
         #[inline(always)]
@@ -620,7 +632,7 @@ pub mod axis {
                 nega_x_index!() => VoxelSide::NegaX,
                 nega_y_index!() => VoxelSide::NegaY,
                 nega_z_index!() => VoxelSide::NegaZ,
-                num => panic!("It should not be possible to get a side-ID greater than or equal to 6! You passed in {}", num),
+                _ => VoxelSide::PosiX, //panic!("It should not be possible to get a side-ID greater than or equal to 6! You passed in {}", num),
             }
         }
         
@@ -859,7 +871,7 @@ impl <T> VoxelPos<T> where T : VoxelCoord {
 impl <T> VoxelPos<T> where T : VoxelCoord {
     /// Returns the cell adjacent to this one in the direction passed
     #[inline(always)]
-    pub const fn get_neighbor(&self, direction : VoxelSide) -> VoxelPos<T> {
+    pub fn get_neighbor(&self, direction : VoxelSide) -> VoxelPos<T> {
         match direction {
             VoxelSide::PosiX => return VoxelPos{x : self.x + T::one(), y : self.y, z : self.z },
             VoxelSide::NegaX => return VoxelPos{x : self.x - T::one(), y : self.y, z : self.z },
