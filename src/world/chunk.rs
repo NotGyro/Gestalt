@@ -12,7 +12,7 @@ pub const SERIALIZED_CHUNK_VERSION_MAJOR: u64 = 0;
 pub const SERIALIZED_CHUNK_VERSION_MINOR: u64 = 1;
 pub const SERIALIZED_CHUNK_VERSION_PATCH: u64 = 0;
 
-custom_error!{ pub ChunkSerializeError
+custom_error::custom_error!{ pub ChunkSerializeError
     VersionMismatch{attempted_load_ver: Version, our_ver: Version}
      = "Attempted to load a chunk of version {attempted_load_ver} into our chunk with version {our_ver}",
     InvalidType{ty_id: u8} = "Attempted to load chunk type {ty_id}, which is not supported.",
