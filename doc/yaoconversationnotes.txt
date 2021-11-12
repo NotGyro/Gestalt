@@ -1,0 +1,5 @@
+Physics volume and culling volume share tracking of which region (biiig bounding box) of the world the entity is in.
+In voxel world, culling is "can you see chunk from other chunk"
+Only "system"s in the ECS sense have mutable access to entities, the way scripts and non-ECS code writes to compnents / entities is through events.  
+UUIDs used thoroughly.
+Permissions/capabilities system used thoroughly (so long as they don't screw with performance).

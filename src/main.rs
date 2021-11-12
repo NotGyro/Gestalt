@@ -7,29 +7,25 @@
 #![feature(const_evaluatable_checked)]
 #![feature(associated_type_bounds)]
 
-use std::{error::Error, fs::File};
-use log::{LevelFilter, info, trace};
-use clap::{Arg, App};
-use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger};
-use std::net::SocketAddr;
-use futures::executor::block_on;
+use std::{fs::File};
+use log::{LevelFilter};
 
+use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger};
+/*
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
     window::Window,
 };
-
+*/
 #[macro_use] pub mod common;
-pub mod entity;
 pub mod world;
 
 #[allow(unused_must_use)]
 fn main() {
-    let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
-    
+    //let event_loop = EventLoop::new();
+    //let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     CombinedLogger::init(
         vec![
@@ -38,25 +34,32 @@ fn main() {
         ]
     ).unwrap();
 
-    
-    let matches = App::new("Gestalt Engine")
-        .arg(Arg::with_name("server")
-            .short("s")
-            .long("server")
-            .help("Starts a server version of this engine, headless."))
-        .arg(Arg::with_name("ip")
-            .short("i")
-            .long("ip")
-            .value_name("IP")
-            .help("Joins a server at the selected IP address and socket if client, hosts from IP and socket if server.")
-            .takes_value(true))
-        .get_matches();
 
-    let ip: Option<SocketAddr> = matches.value_of("ip").map(|i| i.parse()
-                                        .map_err(|e| panic!("Unable to parse provided IP address: {:?}", e)).unwrap());
-    
-    let is_server: bool = matches.is_present("server");
-    let mut last_updated = std::time::Instant::now();
+    // Silly wasmtime engine test stuff. 
+    let engine = wasmtime::Engine::default();
+    let wat = r#"
+        (module
+            (import "host" "hello" (func $host_hello (param i32)))
+
+            (func (export "hello")
+                i32.const 3
+                call $host_hello)
+        )
+    "#;
+    let module = wasmtime::Module::new(&engine, wat).unwrap();
+
+    // Build our "store", which holds data that comes in from the host for the instance.
+    let mut store = wasmtime::Store::new(&engine, 4);
+    // Make a function we will expose to the client 
+    let host_hello = wasmtime::Func::wrap(&mut store, |caller: wasmtime::Caller<'_, u32>, param: i32| {
+        println!("Got {} from WebAssembly", param);
+        println!("my host state is: {}", caller.data());
+    });
+
+    let instance = wasmtime::Instance::new(&mut store, &module, &[host_hello.into()]).unwrap();
+    let hello = instance.get_typed_func::<(), (), _>(&mut store, "hello").unwrap();
+
+    hello.call(&mut store, ()).unwrap();
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 }
