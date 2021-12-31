@@ -3,8 +3,6 @@
 #![allow(incomplete_features)]
 
 #![feature(drain_filter)]
-#![feature(const_generics)]
-#![feature(const_evaluatable_checked)]
 #![feature(associated_type_bounds)]
 
 use std::{fs::File};
