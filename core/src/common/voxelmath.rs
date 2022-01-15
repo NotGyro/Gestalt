@@ -1,3 +1,5 @@
+// This file is the oldest surviving element of the Gestalt engine. It's practically a dinosaur! 
+
 use std::iter::{IntoIterator, Iterator};
 
 use num::{Integer, Signed, Unsigned};
