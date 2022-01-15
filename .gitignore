@@ -45,3 +45,6 @@ latest.log
 # IDEA project stuff
 .idea
 *.iml
+
+# Ignore Cargo lock
+Cargo.lock
