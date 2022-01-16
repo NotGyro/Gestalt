@@ -1,122 +1,37 @@
-use std::{ops::{Add, Sub, AddAssign}, fmt::{Debug, Display}};
+use std::fmt::Debug;
 
+use glam::f32::{Vec3, Quat, Mat4};
 use serde::{Serialize, Deserialize};
 use shipyard::{IntoIter, EntityId};
 
-pub type EntityCoord = f32;
-
-//TODO: Replace with some external implementation of a vector3 (for example one with a SIMD implementation)
-#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
-#[repr(C)]
-pub struct Vec3 {
-    pub x: EntityCoord,
-    pub y: EntityCoord,
-    pub z: EntityCoord,
-}
-
-impl Vec3 {
-    /// Returns the dot product between this vector and the vector passed in as an argument
-    pub fn dot_product(&self, other: &Vec3) -> EntityCoord {
-        (self.x * other.x) + (self.y * other.y) + (self.z * other.z)
-    }
-    /// Get magnitude (length of line from 0 to (x, y, z))
-    pub fn mag(&self) -> EntityCoord { 
-        EntityCoord::sqrt( self.x*self.x + self.y*self.y + self.z*self.z )
-    }
-    /// Normalize this vector, returning the normalized version
-    pub fn normalize(&self) -> Vec3 { 
-        //Prevent division by zero.
-        if (self.x == 0.0) && (self.y == 0.0) && (self.z == 0.0) {
-            return Vec3 { 
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            };
-        }
-
-        //Get length
-        let mag = self.mag();
-
-        Vec3 { 
-            x: self.x / mag,
-            y: self.y / mag,
-            z: self.z / mag,
-        }
-    }
-    /// Normalize this vector in place, mutably
-    pub fn normalize_in_place(&mut self) { 
-        //Prevent division by zero.
-        if (self.x == 0.0) && (self.y == 0.0) && (self.z == 0.0) {
-            // No operation
-            return;
-        }
-        //Get length
-        let mag = self.mag();
-        
-        self.x = self.x / mag;
-        self.y = self.y / mag;
-        self.z = self.z / mag;
-    }
-}
-
-impl Display for Vec3 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({}, {}, {})", self.x, self.y, self.z)
-    }
-}
-
-impl Add<Vec3> for Vec3 {
-    type Output = Vec3;
-    fn add(self, other: Vec3) -> Vec3 { 
-        Vec3{
-            x: self.x + other.x,
-            y: self.y + other.y,
-            z: self.z + other.z,
-        }
-    }
-}
-impl AddAssign<Vec3> for Vec3 {
-    fn add_assign(&mut self, other: Vec3) { 
-        self.x += other.x;
-        self.y += other.y;
-        self.z += other.z;
-    }
-}
-
-impl Sub<Vec3> for Vec3 {
-    type Output = Vec3;
-    fn sub(self, other: Vec3) -> Vec3 { 
-        Vec3{
-            x: self.x - other.x,
-            y: self.y - other.y,
-            z: self.z - other.z,
-        }
-    }
-}
-
-impl<T> From<(T,T,T)> for Vec3 where T:Into<EntityCoord> {
-    fn from(val: (T,T,T)) -> Self {
-        Vec3 { 
-            x: val.0.into(),
-            y: val.1.into(), 
-            z: val.2.into(),
-        }
-    }
-}
-
-impl<T> From<Vec3> for (T,T,T) where T:From<EntityCoord> {
-    fn from(val: Vec3) -> Self {
-        (val.x.into(), val.y.into(), val.z.into())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct EntityVel(Vec3);
+pub struct Velocity(Vec3);
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Transform { 
+    pub position: Vec3,
+    pub rotation: Quat,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct EntityPos(Vec3);
+pub struct Scale(Vec3);
+
+impl Transform {
+    pub fn new(position: Vec3) -> Self { 
+        Transform {
+            position,
+            rotation: Quat::IDENTITY,
+        }
+    }
+    pub fn to_matrix(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(Vec3::ONE, self.rotation, self.position)
+    }
+    pub fn to_matrix_scaled(&self, scale: Vec3) -> Mat4 {
+        Mat4::from_scale_rotation_translation(scale, self.rotation, self.position)
+    }
+}
 
 pub struct Health {
     pub current: u32,
@@ -150,9 +65,9 @@ impl Health {
     }
 }
 
-pub fn update_moving(mut positions: shipyard::ViewMut<EntityPos>, velocities: shipyard::View<EntityVel> ) { 
-    for (mut pos, vel) in (&mut positions, &velocities).iter() {
-        pos.0 = pos.0 + vel.0;
+pub fn update_moving(mut transforms: shipyard::ViewMut<Transform>, velocities: shipyard::View<Velocity> ) { 
+    for (mut transform, vel) in (&mut transforms, &velocities).iter() {
+        transform.position += vel.0;
     }
 }
 
@@ -222,15 +137,15 @@ pub mod message {
             match self {
                 ChangePosition::Set(id, _) => id,
                 ChangePosition::Move(id, _) => id,
-            } 
+            }
         }
-        pub fn apply(&self, val: &mut EntityPos) { 
+        pub fn apply(&self, val: &mut Transform) { 
             match self {
                 ChangePosition::Set(_, v) => {
-                    val.0 = *v;
+                    val.position = *v;
                 },
                 ChangePosition::Move(_, v) => {
-                    val.0 += *v;
+                    val.position += *v;
                 },
             }
         }
@@ -251,7 +166,7 @@ pub mod message {
                 ChangeVelocity::Accelerate(id, _) => id,
             } 
         }
-        pub fn apply(&self, val: &mut EntityVel) { 
+        pub fn apply(&self, val: &mut Velocity) { 
             match self {
                 ChangeVelocity::Set(_, v) => {
                     val.0 = *v;
@@ -265,13 +180,13 @@ pub mod message {
 
     impl ModifyEntity for ChangePosition {
         type Error = Infallible;
-        type Component = EntityPos;
+        type Component = Transform;
 
         fn get_target(&self) -> Result<&EntityId, Self::Error> {
             Ok(self.get_target())
         }
 
-        fn apply(&self, component: &mut EntityPos) -> Result<(), Self::Error> {
+        fn apply(&self, component: &mut Transform) -> Result<(), Self::Error> {
             self.apply(component);
             Ok(())
         }
@@ -279,60 +194,17 @@ pub mod message {
 
     impl ModifyEntity for ChangeVelocity {
         type Error = Infallible;
-        type Component = EntityVel;
+        type Component = Velocity;
 
         fn get_target(&self) -> Result<&EntityId, Self::Error> {
             Ok(self.get_target())
         }
 
-        fn apply(&self, component: &mut EntityVel) -> Result<(), Self::Error> {
+        fn apply(&self, component: &mut Velocity) -> Result<(), Self::Error> {
             self.apply(component);
             Ok(())
         }
     }
-}
-
-
-#[test] 
-fn test_vec_magnitude() {
-    // Simple 3 4 5 triangle
-    let pos = Vec3 { 
-        x: 3.0,
-        y: 4.0, 
-        z: 0.0,
-    }; 
-    assert!( pos.mag() == 5.0 );
-    
-    //3 dimensions. 
-    let pos = Vec3 { 
-        x: 2.0,
-        y: 3.0, 
-        z: 6.0,
-    };
-    assert!( pos.mag() == 7.0 );
-    
-    //Negative numbers shouldn't matter. 
-    let pos = Vec3 { 
-        x: -2.0,
-        y: -3.0, 
-        z: -6.0,
-    };
-    assert!( pos.mag() == 7.0 );
-}
-
-#[test] 
-fn test_vec_dot_product() {
-    let pos_a = Vec3 { 
-        x: 1.0,
-        y: 2.0, 
-        z: 3.0,
-    }; 
-    let pos_b = Vec3 { 
-        x: 4.0,
-        y: 5.0, 
-        z: 6.0,
-    }; 
-    assert!( pos_a.dot_product(&pos_b) == 32.0 );
 }
 
 #[test]
@@ -340,40 +212,44 @@ fn test_move_event() {
     use message::*;
     use shipyard::{ViewMut, Get};
 
-    let entity_position = EntityPos(Vec3 { 
-        x: 4.0,
-        y: 5.0, 
-        z: 6.0,
-    });
+    let entity_position = Transform{
+        position: Vec3::new(
+        4.0, 
+        5.0, 
+        6.0),
+        rotation: Quat::default(),
+    };
     
-    let entity_2_position = EntityPos(Vec3 { 
-        x: 4.0,
-        y: 5.0, 
-        z: 6.0,
-    });
+    let entity_2_position = Transform{
+        position: Vec3::new(
+        4.0, 
+        5.0, 
+        6.0),
+        rotation: Quat::default(),
+    };
     
     let mut world = shipyard::World::new();
     world.add_entity( (entity_2_position,) );
     let entity_id = world.add_entity( (entity_position,) );
     
-    let new_position = Vec3 { 
-        x: 1.0,
-        y: 1.0, 
-        z: 1.0,
-    };
+    let new_position = Vec3::new(
+        1.0, 
+        1.0, 
+        1.0,
+    );
 
     {
         let change_position_message = ChangePosition::Set(entity_id, new_position); 
 
         let message_list = vec![change_position_message];
-        let mut entities = world.borrow::<ViewMut<EntityPos>>().unwrap();
+        let mut entities = world.borrow::<ViewMut<Transform>>().unwrap();
 
         apply_entity_changes(&mut entities, message_list.into_iter() ).unwrap();
     }
 
-    let entities = world.borrow::<shipyard::View<EntityPos>>().unwrap();
+    let entities = world.borrow::<shipyard::View<Transform>>().unwrap();
 
     //Does the entity reflect our new position as passed in through a message? If so, apply_entity_changes() worked.
     let entity_pos = entities.fast_get(entity_id).unwrap();
-    assert!(entity_pos.0 == new_position);
+    assert!(entity_pos.position == new_position);
 }

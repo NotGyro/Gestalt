@@ -26,17 +26,11 @@ pub struct PackageDescriptor {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-/// Manifest for a script package. package.toml
+/// Manifest for a script package. package.ron, for instance
 pub struct PackageManifest {
     /// Version of the package manifest format we're using.
     #[serde(with = "crate::common::version_string")]
     pub manifest_format: Version,
     pub package: PackageDescriptor,
     pub dependencies: Vec<ResourceId>,
-}
-
-pub struct ScriptResource { 
-    /// A resource descriptor representing this script module.
-    pub resource: ResourceDescriptor,
-
 }

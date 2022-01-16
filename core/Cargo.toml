@@ -2,32 +2,39 @@
 name = "gestalt"
 version = "0.0.1"
 authors = ["Emily 'Gyro' C. <gyrocoder@gmail.com>", "trashbyte"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 base64 = "0.13.0"
 byteorder = "1.3.4"
 crossbeam-channel = "0.5.2"
+glam = {version = "0.19.0", features = ["serde", "rand"]}
 hashbrown = { version = "0.11.2", features = ["serde"] }
 lazy_static = "1.4.0"
 log = "0.4.11"
 num = "0.4.0"
 parking_lot = "0.11.0"
+pollster = "0.2.1" # Provides `block_on()` to wait for futures from sync code
 rand = "0.8.4"
 rmp = "0.8.10"
 rmp-serde = "0.15.5"
+ron = "0.7.0"
 serde = { version = "1.0.108", features = ["derive"] }
 sha2 = "0.10.1"
 shipyard = {version = "0.5.0", features = ["parallel", "serde1"]}
-simplelog = "0.11"
+simplelog = "0.11.2"
 string_cache = "0.8"
+tar = "0.4.38"
 thiserror = "1.0.30"
-toml = "0.5.8"
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
-#winit = "0.25"
 
 # Scripting
 mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "serialize"] }
+
+# Rendering 
+rend3 = "0.2.3"
+rend3-pbr = "0.2.2"
+winit = "0.26.1"
 
 # Image loading
 # image = "0.23.8"
@@ -35,6 +42,3 @@ mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "seria
 # Possible options for cryptography... 
 # snow = "0.8"
 # sodiumoxide = "0.2.6"
-
-# Delete this later, just for early testing
-rustyline = "9.1.2"
