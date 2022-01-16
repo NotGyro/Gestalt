@@ -40,10 +40,25 @@ impl <T:Voxel> VoxelArray<T> {
             bounds : bnd
         }
 	}
+    /// Does not bounds check
+    pub(crate) fn get_raw(&self, coord: VoxelPos<u16>) -> &T {
+        &self.data[chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, self.size as usize)]
+    }
+    /// Does not bounds check
+    pub(crate) fn set_raw(&mut self, coord: VoxelPos<u16>, value: T) {
+    	(*self.data.get_mut(chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, self.size as usize) ).unwrap()) = value;
+    }
+    
+    pub(crate) fn get_raw_i(&self, i: usize) -> &T {
+        &self.data[i]
+    }
+    pub(crate) fn set_raw_i(&mut self, i: usize, value: T) {
+    	(*self.data.get_mut(i).unwrap()) = value;
+    }
 }
 
 impl <T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
-    fn get(&self, coord: VoxelPos<u16>) -> Result<T, VoxelError> {
+    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, VoxelError> {
     	//Bounds-check.
     	if (coord.x >= self.size) ||
     		(coord.y >= self.size) ||
@@ -59,7 +74,7 @@ impl <T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
     	}
     	//Packed array access
     	let result : Option<&T> = self.data.get(chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, self.size as usize) );
-    	return Ok(result.unwrap().clone())
+    	return Ok(result.unwrap())
     }
 
     fn set(&mut self, coord: VoxelPos<u16>, value: T) -> Result<(), super::voxelstorage::VoxelError> {
@@ -74,7 +89,7 @@ impl <T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
                     z: coord.z as i32,
                 }));
     	}
-    	//u16acked array access
+    	//packed array access
     	*self.data.get_mut(chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, self.size as usize ) ).unwrap() = value;
 
         Ok(())
@@ -83,7 +98,7 @@ impl <T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
 
 impl <T: Voxel> VoxelStorageBounded<T, u16> for VoxelArray<T> { 
     fn get_bounds(&self) -> VoxelRange<u16> { 
-        return self.bounds;
+        self.bounds
     }
 }
 
@@ -101,10 +116,25 @@ impl <T: Voxel + Copy, const SIZE: usize> VoxelArrayStatic<T, SIZE> where [u8; S
             data: [default_value; SIZE*SIZE*SIZE],
         }
     }
+    /// Does not bounds check
+    pub(crate) fn get_raw(&self, coord: VoxelPos<u16>) -> &T {
+        &self.data[chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, SIZE)]
+    }
+    /// Does not bounds check
+    pub(crate) fn set_raw(&mut self, coord: VoxelPos<u16>, value: T) {
+    	(*self.data.get_mut(chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, SIZE) ).unwrap()) = value;
+    }
+    
+    pub(crate) fn get_raw_i(&self, i: usize) -> &T {
+        &self.data[i]
+    }
+    pub(crate) fn set_raw_i(&mut self, i: usize, value: T) {
+    	(*self.data.get_mut(i).unwrap()) = value;
+    }
 }
 
 impl <T: Voxel + Copy, const SIZE: usize> VoxelStorage<T, u16> for VoxelArrayStatic<T, SIZE> where [u8; SIZE*SIZE*SIZE]: Sized {
-    fn get(&self, coord: VoxelPos<u16>) -> Result<T, VoxelError> {
+    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, VoxelError> {
     	//Bounds-check.
     	if (coord.x >= SIZE as u16) ||
     		(coord.y >= SIZE as u16) ||
@@ -120,7 +150,7 @@ impl <T: Voxel + Copy, const SIZE: usize> VoxelStorage<T, u16> for VoxelArraySta
     	}
     	//Packed array access
     	let result : Option<&T> = self.data.get(chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, SIZE) );
-    	return Ok(result.unwrap().clone())
+    	return Ok(result.unwrap())
     }
 
     fn set(&mut self, coord: VoxelPos<u16>, value: T) -> Result<(), super::voxelstorage::VoxelError> {
@@ -135,7 +165,7 @@ impl <T: Voxel + Copy, const SIZE: usize> VoxelStorage<T, u16> for VoxelArraySta
                     z: coord.z as i32,
                 }));
     	}
-    	//u16acked array access
+    	//packed array access
     	(*self.data.get_mut(chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, SIZE) ).unwrap()) = value;
 
         Ok(())
@@ -144,7 +174,7 @@ impl <T: Voxel + Copy, const SIZE: usize> VoxelStorage<T, u16> for VoxelArraySta
 
 impl <T: Voxel + Copy, const SIZE: usize> VoxelStorageBounded<T, u16> for VoxelArrayStatic<T, SIZE> where [u8; SIZE*SIZE*SIZE]: Sized { 
     fn get_bounds(&self) -> VoxelRange<u16> { 
-        return VoxelRange {
+        VoxelRange {
             lower: VoxelPos {
                 x: 0,
                 y: 0,
@@ -155,7 +185,7 @@ impl <T: Voxel + Copy, const SIZE: usize> VoxelStorageBounded<T, u16> for VoxelA
                 y: SIZE as u16,
                 z: SIZE as u16,
             }
-        };
+        }
     }
 }
 
@@ -169,9 +199,9 @@ fn test_array_raccess() {
 
     let mut test_va : VoxelArray<u16> = VoxelArray::load_new(16, test_chunk);
 
-    assert!(test_va.get(vpos!(14,14,14)).unwrap() == 3822);
+    assert!(*test_va.get(vpos!(14,14,14)).unwrap() == 3822);
     test_va.set(vpos!(14,14,14),9).unwrap();
-    assert!(test_va.get(vpos!(14,14,14)).unwrap() == 9);
+    assert!(*test_va.get(vpos!(14,14,14)).unwrap() == 9);
 }
 
 #[test]
@@ -189,11 +219,11 @@ fn test_array_iterative() {
 	for x in 0 .. xsz as u16 {
 		for y in 0 .. ysz as u16 {
 			for z in 0 .. zsz as u16 {
-				assert!(test_va.get(vpos!(x,y,z)).unwrap() == 16);
+				assert!(*test_va.get(vpos!(x,y,z)).unwrap() == 16);
 				test_va.set(vpos!(x,y,z), x as u16 % 10).unwrap();
 			}
 		}
 	}
-	assert!(test_va.get(vpos!(10,0,0)).unwrap() == 0);
-	assert!(test_va.get(vpos!(11,0,0)).unwrap() == 1);
+	assert!(*test_va.get(vpos!(10,0,0)).unwrap() == 0);
+	assert!(*test_va.get(vpos!(11,0,0)).unwrap() == 1);
 }

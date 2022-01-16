@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 
 use crate::common::voxelmath::*;
 use crate::world::{ChunkPos, TilePos};
@@ -55,8 +56,8 @@ impl Error for VoxelError {
     }
 }
 
-pub trait Voxel: Clone + Debug + PartialEq {}
-impl<T> Voxel for T where T: Clone + Debug + PartialEq {}
+pub trait Voxel: Clone + Debug + PartialEq + Eq + Hash {}
+impl<T> Voxel for T where T: Clone + Debug + PartialEq + Eq + Hash {}
 
 /// A basic trait for any 3d grid data structure.
 /// Type arguments are type of element, type of position.
@@ -72,7 +73,7 @@ impl<T> Voxel for T where T: Clone + Debug + PartialEq {}
 /// calling these methods / treating them as "flat" voxel
 /// structures implies acting on a level of detail of 0.
 pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
-    fn get(&self, coord: VoxelPos<P>) -> Result<T, VoxelError>;
+    fn get(&self, coord: VoxelPos<P>) -> Result<&T, VoxelError>;
     fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), VoxelError>;
 }
 
@@ -150,7 +151,7 @@ pub fn voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStor
     for pos in source_range {
         let voxel = source.get(pos)?;
         let offset_pos = (pos - source_range.lower) + dest_origin;
-        dest.set(offset_pos, voxel)?;
+        dest.set(offset_pos, voxel.clone())?;
     }
     Ok(())
 }

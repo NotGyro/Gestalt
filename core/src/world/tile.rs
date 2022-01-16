@@ -1,7 +1,3 @@
-use hashbrown::HashMap;
-use std::fmt;
-use std::hash::Hash;
-
 //pub trait ValidTile: 'static + Sized + Copy + Clone + PartialEq + PartialOrd + Hash + fmt::Debug + Default {}
 //impl<T> ValidTile for T where T: 'static + Sized + Copy + Clone + PartialEq + PartialOrd + Hash + fmt::Debug + Default {}
 
