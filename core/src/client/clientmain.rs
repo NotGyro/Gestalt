@@ -156,5 +156,4 @@ pub fn run_client(mut client: GameClient, event_loop: &EventLoop<()>) {
     //We will now track focus. Enter a known-good state.
     client.window.focus_window();
     client.has_focus = true;
-
 }

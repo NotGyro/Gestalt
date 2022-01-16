@@ -2,6 +2,8 @@
 #![feature(drain_filter)]
 #![feature(adt_const_params)]
 #![feature(string_remove_matches)]
+#![feature(generic_const_exprs)]
+#![feature(const_fn_trait_bound)]
 
 #[macro_use]
 pub mod common;

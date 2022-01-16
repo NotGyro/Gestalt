@@ -10,6 +10,7 @@ pub enum VoxelErrorKind {
     OutOfBounds,
     ChunkBoundIssue,
     NotYetLoaded,
+    PaletteIssue,
     Other,
 }
 /// An error reported upon trying to get or set a voxel outside of our range.
@@ -19,6 +20,7 @@ pub enum VoxelError {
     OutOfBounds(TilePos),
     ChunkBoundIssue(TilePos, ChunkPos),
     NotYetLoaded(TilePos),
+    PaletteIssue(usize, usize),
     Other(Box<dyn Error + 'static>),
 }
 
@@ -29,6 +31,7 @@ impl VoxelError {
             VoxelError::OutOfBounds(_) => VoxelErrorKind::OutOfBounds,
             VoxelError::ChunkBoundIssue(_, _) => VoxelErrorKind::ChunkBoundIssue,
             VoxelError::NotYetLoaded(_) => VoxelErrorKind::NotYetLoaded,
+            VoxelError::PaletteIssue(_, _) => VoxelErrorKind::PaletteIssue,
             VoxelError::Other(_) => VoxelErrorKind::Other,
         }
     }
@@ -41,6 +44,7 @@ impl Display for VoxelError {
             VoxelError::ChunkBoundIssue(pos, chunkpos) =>
                 write!(f, "Attempted to access a voxel at position {}, on chunk cell {}, which did not accept this as in-bounds.", pos, chunkpos),
             VoxelError::NotYetLoaded(pos) => write!(f, "Attempted to access a voxel position {}, which is not yet loaded.", pos),
+            VoxelError::PaletteIssue(val, palette_size) => write!(f, "No palette entry for {}! Palette only has {} entries. Possible map corruption.", val, palette_size),
             VoxelError::Other(err) => write!(f, "Other voxel error: {}", err),
         }
     }
