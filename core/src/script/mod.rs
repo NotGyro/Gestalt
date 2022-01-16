@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::common::{
-    resource::{ResourceDescriptor, ResourceId},
     Version,
 };
+use crate::resource::{ResourceDescriptor, ResourceId};
 
 pub mod lua;
 

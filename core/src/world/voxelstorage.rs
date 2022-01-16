@@ -83,6 +83,12 @@ pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
 /// Usually, this implies that the voxel storage is not paged.
 pub trait VoxelStorageBounded<T: Voxel, P: VoxelCoord>: VoxelStorage<T, P> {
     fn get_bounds(&self) -> VoxelRange<P>;
+    /// A count of the total number of voxels in this storage. 
+    fn get_area(&self) -> P { 
+        (self.get_bounds().upper.x - self.get_bounds().lower.x) *
+        (self.get_bounds().upper.y - self.get_bounds().lower.y) *
+        (self.get_bounds().upper.z - self.get_bounds().lower.z)
+    }
 }
 
 pub trait VsBulkOps<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {

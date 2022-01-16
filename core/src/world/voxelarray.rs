@@ -4,20 +4,86 @@ extern crate num;
 use super::voxelstorage::*;
 use crate::common::voxelmath::*;
 
-/// X, Y, and Z coords to standard buffer index.
+
 #[inline(always)] 
-pub const fn chunk_xyz_to_i(x : usize, y : usize, z : usize, chunk_size: usize) -> usize {
-    (z * (chunk_size*chunk_size) ) + (y * chunk_size) + x
+pub const fn chunk_x_to_i_component(x : usize, chunk_size: usize) -> usize {
+    x
+}
+#[inline(always)] 
+pub const fn chunk_y_to_i_component(y : usize, chunk_size: usize) -> usize {
+    y * chunk_size
+}
+#[inline(always)] 
+pub const fn chunk_z_to_i_component(z : usize, chunk_size: usize) -> usize {
+    z * (chunk_size*chunk_size)
 }
 
-/// Chunk buffer index to XYZ coords.
 #[inline(always)] 
+pub const fn chunk_xyz_to_i(x : usize, y : usize, z : usize, chunk_size: usize) -> usize {
+    chunk_z_to_i_component(z, chunk_size) + chunk_y_to_i_component(y, chunk_size) + chunk_x_to_i_component(x, chunk_size)
+}
+
+#[inline(always)]
 pub const fn chunk_i_to_xyz(i : usize, chunk_size: usize) -> (usize, usize, usize) {
-    let x = i % chunk_size;
-    let z = (i-x)/(chunk_size*chunk_size); //The remainder on this (the y value) just gets thrown away, which is good here.
-    let y = (i - (z * (chunk_size*chunk_size) ))/chunk_size;
+    let chunk_squared = chunk_size*chunk_size;
+    let z = i/(chunk_squared);
+    let y = (i-z*chunk_squared)/chunk_size;
+    let x = i - ((z*chunk_squared) + (y*chunk_size));
     (x, y, z)
 }
+
+#[inline(always)]
+pub const fn get_pos_x_offset(i : usize, chunk_size: usize) -> Option<usize> {
+    let chunk_volume = chunk_size*chunk_size*chunk_size;
+    if (i + chunk_x_to_i_component(1, chunk_size) < chunk_volume) && (chunk_i_to_xyz(i, chunk_size).0 + 1 < chunk_size) {
+        Some(i + chunk_x_to_i_component(1, chunk_size))
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub const fn get_neg_x_offset(i : usize, chunk_size: usize) -> Option<usize> {
+    if chunk_i_to_xyz(i, chunk_size).0.checked_sub(1).is_none() {
+        return None;
+    }
+    i.checked_sub(chunk_x_to_i_component(1, chunk_size))
+}
+#[inline(always)]
+pub const fn get_pos_y_offset(i : usize, chunk_size: usize) -> Option<usize> {
+    let chunk_volume = chunk_size*chunk_size*chunk_size;
+    if (i + chunk_y_to_i_component(1, chunk_size) < chunk_volume) && (chunk_i_to_xyz(i, chunk_size).1 + 1 < chunk_size)  {
+        Some(i + chunk_y_to_i_component(1, chunk_size))
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub const fn get_neg_y_offset(i : usize, chunk_size: usize) -> Option<usize> {
+    if chunk_i_to_xyz(i, chunk_size).1.checked_sub(1).is_none() {
+        return None;
+    }
+    i.checked_sub(chunk_y_to_i_component(1, chunk_size))
+}
+#[inline(always)]
+pub const fn get_pos_z_offset(i : usize, chunk_size: usize) -> Option<usize> {
+    let chunk_volume = chunk_size*chunk_size*chunk_size;
+    if (i + chunk_z_to_i_component(1, chunk_size) < chunk_volume) && (chunk_i_to_xyz(i, chunk_size).2 + 1 < chunk_size) {
+        Some(i + chunk_z_to_i_component(1, chunk_size))
+    }
+    else {
+        None 
+    }
+}
+#[inline(always)]
+pub const fn get_neg_z_offset(i : usize, chunk_size: usize) -> Option<usize> {
+    if chunk_i_to_xyz(i, chunk_size).2.checked_sub(1).is_none() {
+        return None;
+    }
+    i.checked_sub(chunk_z_to_i_component(1, chunk_size))
+}
+
 
 /// A 3D packed array of voxels - it's a single flat buffer in memory,
 /// which is indexed by voxel positions with some math done on them. 
@@ -226,4 +292,39 @@ fn test_array_iterative() {
 	}
 	assert!(*test_va.get(vpos!(10,0,0)).unwrap() == 0);
 	assert!(*test_va.get(vpos!(11,0,0)).unwrap() == 1);
+}
+
+
+#[test]
+fn chunk_index_reverse() {
+    use rand::Rng;
+
+    let chunk_sz = 16 as usize;
+    let mut rng = rand::thread_rng();
+    for _ in 0..4096 {
+
+        let x = rng.gen_range(0..16);
+        let y = rng.gen_range(0..16);
+        let z = rng.gen_range(0..16); 
+
+        let i_value = chunk_xyz_to_i(x, y, z, chunk_sz);
+        let (x1, y1, z1) = chunk_i_to_xyz(i_value, chunk_sz);
+
+        assert_eq!( x, x1 );
+        assert_eq!( y, y1 );
+        assert_eq!( z, z1 );
+    }
+}
+
+#[test]
+fn chunk_index_bounds() {
+    let chunk_sz = 16 as usize;
+    let chunk_volume = chunk_sz*chunk_sz*chunk_sz;
+    for x in 0..chunk_sz {
+        for y in 0..chunk_sz {
+            for z in 0..chunk_sz {
+                assert!(chunk_xyz_to_i(x, y, z, chunk_sz) < chunk_volume);
+            }
+        }
+    }
 }

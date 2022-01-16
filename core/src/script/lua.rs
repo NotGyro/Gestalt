@@ -1,6 +1,5 @@
 use super::SupportedLanguages;
 use mlua::Lua;
-use crate::common::resource::ResourceDescriptor;
 
 /*
 // A ScriptProvider loads and builds `ScriptContext`s, including any build tasks required to compile, 

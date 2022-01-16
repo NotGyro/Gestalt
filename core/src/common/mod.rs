@@ -1,6 +1,5 @@
 pub mod identity;
 pub mod message;
-pub mod resource;
 #[macro_use]
 pub mod voxelmath;
 

@@ -1,8 +1,11 @@
-use super::identity::{NodeIdentity, Signature};
+use crate::common::identity::{NodeIdentity, Signature};
 
+use hashbrown::HashMap;
+use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
-use std::{cmp::PartialEq, hash::Hash};
+use std::{cmp::PartialEq, hash::Hash, sync::Arc};
 use sha2::Digest;
+use lazy_static::lazy_static;
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
@@ -188,7 +191,7 @@ pub mod resourceid_base64_string {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd)]
 pub struct ResourceDescriptor {
     /// Which resource?
-    #[serde(with = "crate::common::resource::resourceid_base64_string")]
+    #[serde(with = "crate::resource::resourceid_base64_string")]
     pub id: ResourceId,
     /// Which user did we get this resource from? Who signed it, who is the authority on it?
     pub origin: NodeIdentity,
@@ -278,4 +281,50 @@ fn resource_id_to_string() {
 
     assert_eq!(after_split.len(), 3); 
     assert_eq!(u64::from_str_radix(after_split.get(1).unwrap(), 10).unwrap(), BUF_SIZE as u64);
+}
+
+lazy_static!{ 
+    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceDescriptor>>> = { 
+        Arc::new( 
+            Mutex::new( 
+                HashMap::default()
+            )
+        )
+    };
+}
+
+pub fn update_resource_metadata(id: &ResourceId, info: ResourceDescriptor) { 
+    RESOURCE_METADATA.lock().insert(id.clone(), info.clone());
+}
+
+pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> { 
+    let guard = RESOURCE_METADATA.lock();
+    guard.get(id).map(|v| v.clone())
+}
+#[derive(Clone)]
+pub enum ResourceIdOrMeta { 
+    Id(ResourceId), 
+    Meta(ResourceDescriptor)
+}
+
+impl std::fmt::Debug for ResourceIdOrMeta { 
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self { 
+            ResourceIdOrMeta::Id(id) => write!(f, "ResourceId {} (metadata not found)", id),
+            ResourceIdOrMeta::Meta(m) => write!(f, "{:?}", m)
+        }
+    }
+}
+
+macro_rules! resource_debug {
+    ($rid:expr) => {
+        { 
+            use crate::resource::*;
+            let rid_eval = ($rid).clone();
+            match get_resource_metadata(&rid_eval) {
+                Some(m) => ResourceIdOrMeta::Meta(m.clone()), 
+                None => ResourceIdOrMeta::Id(rid_eval.clone()),
+            }
+        }
+    };
 }

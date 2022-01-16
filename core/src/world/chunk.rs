@@ -1,11 +1,37 @@
 use hashbrown::HashMap;
 
-use crate::common::voxelmath::VoxelPos;
+use crate::common::voxelmath::*;
 
-use super::{voxelstorage::Voxel, voxelarray::VoxelArrayStatic, VoxelError, VoxelStorage};
+use super::{voxelstorage::Voxel, voxelarray::VoxelArrayStatic, VoxelError, VoxelStorage, VoxelStorageBounded};
 
 pub const CHUNK_SIZE: usize = 16;
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE*CHUNK_SIZE*CHUNK_SIZE;
+
+pub const CHUNK_RANGE_USIZE: VoxelRange<usize> = VoxelRange {
+    lower: vpos!(0,0,0), 
+    upper: vpos!(CHUNK_SIZE,CHUNK_SIZE,CHUNK_SIZE),
+};
+
+pub const CHUNK_RANGE_U16: VoxelRange<u16> = VoxelRange {
+    lower: vpos!(0,0,0),
+    upper: vpos!(CHUNK_SIZE as u16, CHUNK_SIZE as u16, CHUNK_SIZE as u16),
+};
+
+pub use super::voxelarray::{
+    chunk_x_to_i_component,
+    chunk_y_to_i_component,
+    chunk_z_to_i_component,
+
+    chunk_xyz_to_i,
+
+    chunk_i_to_xyz,
+    get_pos_x_offset,
+    get_neg_x_offset,
+    get_pos_y_offset,
+    get_neg_y_offset,
+    get_pos_z_offset,
+    get_neg_z_offset,
+};
 
 pub struct ChunkSmall<T:Voxel>  {
     //Attempting to use the constant causes Rust to freak out for some reason
@@ -23,6 +49,11 @@ impl<T:Voxel> ChunkSmall<T> {
     pub fn get_raw(&self, coord: VoxelPos<u16>) -> &u8 {
         //The intent here is so that bounds checking is only done ONCE for this structure. 
         self.inner.get_raw(coord)
+    }
+    #[inline(always)]
+    pub fn get_raw_i(&self, i: usize) -> &u8 {
+        //The intent here is so that bounds checking is only done ONCE for this structure. 
+        self.inner.get_raw_i(i)
     }
     #[inline(always)]
     pub fn get(&self, coord: VoxelPos<u16>) -> &T {
@@ -115,6 +146,11 @@ impl<T:Voxel> ChunkLarge<T> {
         &self.palette[&self.inner.get_raw(coord)]
     }
     #[inline(always)]
+    pub fn get_raw_i(&self, i: usize) -> &u16 {
+        //The intent here is so that bounds checking is only done ONCE for this structure. 
+        self.inner.get_raw_i(i)
+    }
+    #[inline(always)]
     pub fn set_raw(&mut self, coord: VoxelPos<u16>, value: u16) {
         self.inner.set_raw(coord, value);
     }
@@ -166,6 +202,15 @@ impl<T:Voxel> Chunk<T> {
         Chunk{
             revision: 0,
             data: ChunkData::Uniform(default_voxel),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_raw_i(&self, i: usize) -> u16 {
+        match &self.data {
+            ChunkData::Uniform(_) => 0,
+            ChunkData::Small(inner) => *inner.get_raw_i(i) as u16,
+            ChunkData::Large(inner) => *inner.get_raw_i(i),
         }
     }
 
@@ -304,6 +349,15 @@ impl<T: Voxel> VoxelStorage<T, u16> for Chunk<T> {
         self.set_raw(pos, idx);
 
         Ok(())
+    }
+}
+
+impl<T: Voxel> VoxelStorageBounded<T, u16> for Chunk<T> {
+    fn get_bounds(&self) -> VoxelRange<u16> {
+        VoxelRange { 
+            lower: vpos!(0,0,0), 
+            upper: vpos!(CHUNK_SIZE as u16, CHUNK_SIZE as u16, CHUNK_SIZE as u16),
+        }
     }
 }
 

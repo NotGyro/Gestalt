@@ -24,6 +24,8 @@
 /map/
 
 # Other data generated at runtime.
+config.ron
+client_config.ron
 client.ron
 /keys/
 /target/keys/

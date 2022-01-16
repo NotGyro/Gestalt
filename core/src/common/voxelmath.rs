@@ -1347,6 +1347,35 @@ impl VoxelRaycast {
         }
     }
 }*/
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SidesArray<T> where T: Clone + std::fmt::Debug {
+    pub data: [T;6],
+}
+
+impl<T> SidesArray<T> where T: Clone + std::fmt::Debug { 
+    pub fn new_uniform(value: &T) -> Self {
+        SidesArray {
+            data: [value.clone(), value.clone(), value.clone(), value.clone(), value.clone(), value.clone()]
+        }
+    }
+    pub fn new(posi_x: T, posi_y: T, posi_z: T, nega_x: T, nega_y: T, nega_z: T) -> Self {
+        SidesArray {
+            data: [posi_x, posi_y, posi_z, nega_x, nega_y, nega_z]
+        }
+    }
+    pub const fn get(&self, dir: VoxelSide) -> &T {
+        &self.data[dir.to_id()]
+    }
+    pub const fn get_i(&self, i: usize) -> &T {
+        &self.data[i]
+    }
+    pub fn set(&mut self, value: T, dir: VoxelSide) {
+        (*self.data.get_mut(dir.to_id()).unwrap() ) = value; 
+    }
+    pub fn set_i(&mut self, value: T, i: usize) {
+        (*self.data.get_mut(i).unwrap() ) = value; 
+    }
+}
 
 #[test]
 fn test_voxel_range_iteration() {
