@@ -29,7 +29,7 @@ pub struct ResourceId {
 pub enum ParseResourceIdError {
     #[error("tried to parse {0} into a ResourceId but it contained no ':' separator.")]
     NoSeparator(String),
-    #[error("tried to parse {0} into a ResourceId but was a non-2 number ':' separators")]
+    #[error("tried to parse {0} into a ResourceId but was a non-3 number of ':' separators")]
     TooManySeparators(String),
     #[error("string `{0}` is not a valid resource ID because it contains whitespace")]
     ContainsWhitespace(String),
@@ -193,10 +193,12 @@ pub struct ResourceDescriptor {
     /// Which resource?
     #[serde(with = "crate::resource::resourceid_base64_string")]
     pub id: ResourceId,
+    /// What did the "origin" user call this resource?
+    pub filename: String,
+    /// Directory structure leading up to "filename", to disambiguate it.
+    pub path: Option<Vec<String>>,
     /// Which user did we get this resource from? Who signed it, who is the authority on it?
     pub origin: NodeIdentity,
-    /// What did the "origin" user call this resource?
-    pub name: String,
     /// Name of origin user and friends who made this resource.
     pub authors: String,
     /// Signature verifying our binary blob as good, signed with the public key from NodeIdentity.
