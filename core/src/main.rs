@@ -21,7 +21,7 @@ use mlua::{MultiValue, LuaOptions};
 use winit::event::{VirtualKeyCode, ElementState};
 use std::{fs::File, sync::Arc, time::Instant};
 
-use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
+//use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
 use glam::{Vec3, Quat};
 
@@ -29,6 +29,7 @@ use client::camera as camera;
 
 #[allow(unused_must_use)]
 fn main() {
+    /*
     let mut log_config_builder = ConfigBuilder::default();
     log_config_builder.set_target_level(LevelFilter::Error);
     let log_config = log_config_builder.build();
@@ -41,11 +42,11 @@ fn main() {
             ColorChoice::Auto,
         ),
         WriteLogger::new(
-            LevelFilter::Debug,
+            LevelFilter::Warn,
             log_config.clone(),
             File::create("latest.log").unwrap(),
         ),
-    ]).unwrap();
+    ]).unwrap();*/
     
     let lua_stdlibs = mlua::StdLib::BIT | mlua::StdLib::STRING | mlua::StdLib::TABLE | mlua::StdLib::IO | mlua::StdLib::OS | mlua::StdLib::JIT | mlua::StdLib::PACKAGE;
     let vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();

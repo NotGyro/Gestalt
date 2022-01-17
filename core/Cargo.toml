@@ -22,22 +22,24 @@ ron = "0.7.0"
 serde = { version = "1.0.108", features = ["derive"] }
 sha2 = "0.10.1"
 shipyard = {version = "0.5.0", features = ["parallel", "serde1"]}
-simplelog = "0.11.2"
-string_cache = "0.8"
-tar = "0.4.38"
+#simplelog = "0.11.2"
+#string_cache = "0.8"
+#tar = "0.4.38"
 thiserror = "1.0.30"
 uuid = { version = "0.8.1", features = ["serde", "v4"] }
+
+#bytemuck = "1.7.3"
 
 # Scripting
 mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "serialize"] }
 
 # Rendering 
-rend3 = { git = "https://github.com/BVE-Reborn/rend3", rev = "c42f758d07e1d9c650d2d5239527bd97f7111cb8" }
-rend3-routine = { git = "https://github.com/BVE-Reborn/rend3", rev = "c42f758d07e1d9c650d2d5239527bd97f7111cb8" }
-wgpu = "0.12"
+rend3 = { version = "^0.2.0", git = "https://github.com/BVE-Reborn/rend3", rev = "c42f758d07e1d9c650d2d5239527bd97f7111cb8" }
+rend3-routine = { version = "^0.2.0", git = "https://github.com/BVE-Reborn/rend3", rev = "c42f758d07e1d9c650d2d5239527bd97f7111cb8" }
+wgpu = { version = "0.12", features = ["spirv"] }
 winit = "0.26.1"
-profiling = {version = "1", features = ["profile-with-tracy"] }
-tracing-tracy = "0.8.0"
+#profiling = {version = "1", features = ["profile-with-tracy"] }
+#tracing-tracy = "0.8.0"
 
 # Image loading
 # image = "0.23.8"

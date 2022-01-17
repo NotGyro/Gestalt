@@ -8,8 +8,6 @@ use serde::{Serialize, Deserialize};
 use wgpu::Backend;
 use winit::{event_loop::{EventLoop, ControlFlow}, window::{Window, Fullscreen}, event::{ElementState, DeviceEvent}, dpi::PhysicalPosition};
 
-use profiling::finish_frame;
-
 use super::camera;
 
 pub const WINDOW_TITLE: &'static str = "Gestalt";
@@ -228,9 +226,8 @@ pub fn run_client() {
     
     // Create the Instance, Adapter, and Device. We can specify preferred backend,
     // device name, or rendering mode. In this case we let rend3 choose for us.
-    let iad = pollster::block_on(rend3::create_iad(Some(Backend::Vulkan), config.display_properties.device.clone().map(|name| name.to_lowercase()), None, None)).unwrap();
+    let iad = pollster::block_on(rend3::create_iad(Some(Backend::Vulkan), config.display_properties.device.clone().map(|name| name.to_lowercase()), Some(rend3::RendererMode::GpuPowered), None)).unwrap();
 
-    println!("Launching with rendering device: {:?}", &iad.info);
     
     // The one line of unsafe needed. We just need to guarentee that the window
     // outlives the use of the surface.
@@ -253,6 +250,8 @@ pub fn run_client() {
     )
     .unwrap();
     
+    println!("Launching with rendering device: {:?}", &renderer.adapter_info);
+
     // Create the pbr pipeline with the same internal resolution and 4x multisampling
     let mut base_render_graph = rend3_routine::base::BaseRenderGraph::new(
         &renderer,
@@ -477,13 +476,13 @@ pub fn run_client() {
                 let total_time = game_start_time.elapsed(); 
                 let current_fps = (total_frames as f64)/(total_time.as_secs_f64());
                 if (total_time.as_secs() % 5 == 0) && (fps_counter_print_times < (total_time.as_secs()/5) ) {
+                    println!("Render device is: {:?}", &renderer.adapter_info);
                     println!("Average frames per second, total runtime of the program, is {}", current_fps);
                     println!("Last frame took {} millis", elapsed_time.as_millis());
                     println!("{} millis of that was spent updating the camera", camera_update_time.as_millis());
                     println!("{} millis were spent drawing the frame.", draw_time.as_millis());
                     fps_counter_print_times += 1; 
                 }
-                finish_frame!();
             },
             winit::event::Event::LoopDestroyed => {
                 // Cleanup on quit. 
