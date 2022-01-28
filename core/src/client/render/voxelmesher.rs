@@ -746,19 +746,19 @@ pub fn mesh_step(drawable : CollectCullOutput) -> MeshStepOutput {
 
             //Do our UV the hacky way.
             if (vert_iter == 2) || (vert_iter == 3) {
-                u = voxel_face.uv.lower_u;
+                u = voxel_face.uv.higher_u;
                 v = voxel_face.uv.higher_v;
             }
             else if (vert_iter == 0) || (vert_iter == 5) {
-                u = voxel_face.uv.higher_u;
-                v = voxel_face.uv.lower_v;
-            }
-            else if vert_iter == 1 {
                 u = voxel_face.uv.lower_u;
                 v = voxel_face.uv.lower_v;
             }
-            else if vert_iter == 4 {
+            else if vert_iter == 1 {
                 u = voxel_face.uv.higher_u;
+                v = voxel_face.uv.lower_v;
+            }
+            else if vert_iter == 4 {
+                u = voxel_face.uv.lower_u;
                 v = voxel_face.uv.higher_v;
             }
 
