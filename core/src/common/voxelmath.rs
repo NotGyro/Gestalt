@@ -1,6 +1,7 @@
 // This file is the oldest surviving element of the Gestalt engine. It's practically a dinosaur! 
 
 use std::iter::{IntoIterator, Iterator};
+use std::marker::PhantomData;
 
 use num::{Integer, Signed, Unsigned};
 
@@ -1374,6 +1375,42 @@ impl<T> SidesArray<T> where T: Clone + std::fmt::Debug {
     }
     pub fn set_i(&mut self, value: T, i: usize) {
         (*self.data.get_mut(i).unwrap() ) = value; 
+    }
+
+    pub fn iter<'a>(&'a self) -> SidesArrayIterator<'a, T> { 
+        SidesArrayIterator { 
+            next_index:0,
+            data: &self,
+        }
+    } 
+}
+
+impl<T> Default for SidesArray<T> where T: Clone + std::fmt::Debug + Default {
+    fn default() -> Self {
+        Self { data: Default::default() }
+    }
+} 
+
+impl<T> Copy for SidesArray<T> where T: Clone + std::fmt::Debug + Copy {}
+
+pub struct SidesArrayIterator<'a, T> where T: Clone + std::fmt::Debug  { 
+    next_index: usize,
+    data: &'a SidesArray<T>,
+}
+
+impl<'a, T> Iterator for SidesArrayIterator<'a, T> where T: Clone + std::fmt::Debug  { 
+    type Item = &'a T;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next_index < 6 {
+            let output = self.data.get_i(self.next_index);
+            self.next_index += 1;
+
+            Some(output)
+        }
+        else {
+            // Past the end.
+            None
+        }
     }
 }
 

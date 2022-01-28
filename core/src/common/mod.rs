@@ -3,7 +3,9 @@ pub mod message;
 #[macro_use]
 pub mod voxelmath;
 
-use std::fmt::Display;
+use std::{fmt::Display, pin::Pin, future::Future};
+
+pub type DynFuture<T> = Pin<Box<dyn Future<Output=T>>>;
 
 macro_rules! version {
     ($major:expr,$minor:expr,$patch:expr,$build:expr) => {

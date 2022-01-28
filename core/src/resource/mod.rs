@@ -4,8 +4,11 @@ use hashbrown::HashMap;
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use std::{cmp::PartialEq, hash::Hash, sync::Arc};
+use std::fmt::{Debug, Display};
 use sha2::Digest;
 use lazy_static::lazy_static;
+
+pub mod image;
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
@@ -199,6 +202,8 @@ pub struct ResourceDescriptor {
     pub path: Option<Vec<String>>,
     /// Which user did we get this resource from? Who signed it, who is the authority on it?
     pub origin: NodeIdentity,
+    /// Expected type. 
+    pub resource_type: String, 
     /// Name of origin user and friends who made this resource.
     pub authors: String,
     /// Signature verifying our binary blob as good, signed with the public key from NodeIdentity.
@@ -222,6 +227,107 @@ impl PartialEq for ResourceDescriptor {
 }
 
 impl Eq for ResourceDescriptor {}
+
+pub enum ResourceStatus<T, E> where T: Send + Sync + Clone, E: std::error::Error + Debug {
+    Pending,
+    ///Encountered a problem while trying to load this resource.
+    Errored(E),
+    Ready(T),
+}
+
+impl<T, E> From<Result<T,E>> for ResourceStatus<T,E> where T: Send+Sync+Clone, E: std::error::Error {
+    fn from(r: Result<T,E>) -> Self {
+        match r { 
+            Ok(v) => Self::Ready(v),
+            Err(e) => Self::Errored(e),
+        }
+    }
+}
+impl<T, E> From<Option<Result<T,E>>> for ResourceStatus<T,E> where T: Send+Sync+Clone, E: std::error::Error {
+    fn from(r: Option<Result<T,E>>) -> Self {
+        match r {
+            Some(Ok(v)) => Self::Ready(v),
+            Some(Err(e)) => Self::Errored(e),
+            None => Self::Pending,
+        }
+    }
+}
+
+impl<T, E> From<ResourceStatus<T,E>> for Option<Result<T,E>>  where T: Send+Sync+Clone, E: std::error::Error {
+    fn from(r: ResourceStatus<T,E>) -> Self {
+        match r { 
+            ResourceStatus::Ready(v) => Some(Ok(v)),
+            ResourceStatus::Errored(e) => Some(Err(e)),
+            ResourceStatus::Pending => None,
+        }
+    }
+}
+
+/*pub trait ResourceProvider<T: Send + Sync + Clone> { 
+    type Error: std::error::Error + Debug;
+    ///Checks the status of the resource, returning a reference to it if it's ready.
+    fn lookup<'a>(&'a self, id: &ResourceId) -> ResourceStatus<&'a T, Self::Error>;
+    ///Get the resource if it's already loaded, or load it.
+    fn load<'a>(&'a mut self, id: &ResourceId) -> ResourceStatus<&'a T, Self::Error>;
+    ///Get the resource if it's already loaded, or load it, aborting with an error if it take longer than a duration of `timeout`.
+    fn load_timeout<'a>(&'a mut self, id: &ResourceId, ) -> ResourceStatus<&'a T, Self::Error>;
+}*/
+
+lazy_static!{
+    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceDescriptor>>> = {
+        Arc::new(
+            Mutex::new(
+                HashMap::default()
+            )
+        )
+    };
+}
+
+pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceDescriptor) { 
+    RESOURCE_METADATA.lock().insert(id.clone(), info.clone());
+}
+
+pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> { 
+    let guard = RESOURCE_METADATA.lock();
+    guard.get(id).map(|v| v.clone())
+}
+
+#[derive(Clone)]
+pub enum ResourceIdOrMeta { 
+    Id(ResourceId), 
+    Meta(ResourceDescriptor)
+}
+impl ResourceIdOrMeta { 
+    pub fn short_name(&self) -> String { 
+        match self {
+            ResourceIdOrMeta::Id(id) => format!("ResourceId {} (metadata not found)", id),
+            ResourceIdOrMeta::Meta(meta) => format!("{} (from user {:?})", meta.filename, meta.origin),
+        }
+    }
+}
+
+impl std::fmt::Debug for ResourceIdOrMeta { 
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self { 
+            ResourceIdOrMeta::Id(id) => write!(f, "ResourceId {} (metadata not found)", id),
+            ResourceIdOrMeta::Meta(m) => write!(f, "{:?}", m)
+        }
+    }
+}
+
+macro_rules! resource_debug {
+    ($rid:expr) => {
+        { 
+            use crate::resource::*;
+            let rid_eval = ($rid).clone();
+            let ridom = match get_resource_metadata(&rid_eval) {
+                Some(m) => ResourceIdOrMeta::Meta(m.clone()), 
+                None => ResourceIdOrMeta::Id(rid_eval.clone()),
+            };
+            ridom.short_name()
+        }
+    };
+}
 
 #[test]
 fn resource_id_generate() { 
@@ -283,50 +389,4 @@ fn resource_id_to_string() {
 
     assert_eq!(after_split.len(), 3); 
     assert_eq!(u64::from_str_radix(after_split.get(1).unwrap(), 10).unwrap(), BUF_SIZE as u64);
-}
-
-lazy_static!{ 
-    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceDescriptor>>> = { 
-        Arc::new( 
-            Mutex::new( 
-                HashMap::default()
-            )
-        )
-    };
-}
-
-pub fn update_resource_metadata(id: &ResourceId, info: ResourceDescriptor) { 
-    RESOURCE_METADATA.lock().insert(id.clone(), info.clone());
-}
-
-pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> { 
-    let guard = RESOURCE_METADATA.lock();
-    guard.get(id).map(|v| v.clone())
-}
-#[derive(Clone)]
-pub enum ResourceIdOrMeta { 
-    Id(ResourceId), 
-    Meta(ResourceDescriptor)
-}
-
-impl std::fmt::Debug for ResourceIdOrMeta { 
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self { 
-            ResourceIdOrMeta::Id(id) => write!(f, "ResourceId {} (metadata not found)", id),
-            ResourceIdOrMeta::Meta(m) => write!(f, "{:?}", m)
-        }
-    }
-}
-
-macro_rules! resource_debug {
-    ($rid:expr) => {
-        { 
-            use crate::resource::*;
-            let rid_eval = ($rid).clone();
-            match get_resource_metadata(&rid_eval) {
-                Some(m) => ResourceIdOrMeta::Meta(m.clone()), 
-                None => ResourceIdOrMeta::Id(rid_eval.clone()),
-            }
-        }
-    };
 }

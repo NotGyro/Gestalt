@@ -4,6 +4,7 @@
 #![feature(string_remove_matches)]
 #![feature(generic_const_exprs)]
 #![feature(const_fn_trait_bound)]
+#![feature(int_roundings)]
 
 #[macro_use]
 pub mod common;
@@ -16,6 +17,7 @@ pub mod script;
 pub mod world;
 
 use hashbrown::HashSet;
+use image::ImageFormat;
 use log::{LevelFilter, info, error};
 use mlua::{MultiValue, LuaOptions};
 use winit::event::{VirtualKeyCode, ElementState};
