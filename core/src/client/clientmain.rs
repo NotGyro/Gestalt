@@ -263,7 +263,7 @@ pub fn run_client() {
     }
 
     let testpos = vpos!(7, 15, 7);
-    test_chunk.set(testpos, grass_id).unwrap();
+    //test_chunk.set(testpos, grass_id).unwrap();
     // Print this thing out
     for y in 0 .. CHUNK_SIZE { 
         println!("---------------");

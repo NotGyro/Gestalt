@@ -1,1 +1,1 @@
-![alt text](https://github.com/NotGyro/Gestalt/blob/master/doc/screenshot.png "A simple screenshot")
+![alt text](https://github.com/NotGyro/Gestalt/blob/main/doc/screenshot.png "A simple screenshot")
