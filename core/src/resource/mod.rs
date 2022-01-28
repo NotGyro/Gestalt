@@ -1,18 +1,18 @@
 use crate::common::identity::{NodeIdentity, Signature};
 
 use hashbrown::HashMap;
-use parking_lot::Mutex;
-use serde::{Serialize, Deserialize};
-use std::{cmp::PartialEq, hash::Hash, sync::Arc};
-use std::fmt::{Debug, Display};
-use sha2::Digest;
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
+use serde::{Deserialize, Serialize};
+use sha2::Digest;
+use std::fmt::Debug;
+use std::{cmp::PartialEq, hash::Hash, sync::Arc};
 
 pub mod image;
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
-/// Content-addressed identifier for a Gestalt resource. 
+/// Content-addressed identifier for a Gestalt resource.
 /// String representation starts with a version number for the
 /// ResourceId structure, then a `:` delimeter, then the size (number of bytes)
 /// in the resource, then the 32-byte Sha256-512 hash encoded in base-64.
@@ -22,7 +22,7 @@ pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 pub struct ResourceId {
     /// Which version of the ResourceId struct is this?
     pub version: u8,
-    /// Length in bytes of the resource. 
+    /// Length in bytes of the resource.
     pub length: u64,
     /// 32-byte Sha256-512 hash
     pub hash: [u8; 32],
@@ -57,31 +57,34 @@ pub enum VerifyResourceError {
 }
 impl ResourceId {
     /// Make a ResourceId. Use from_buf() if you have a buffer fully loaded into memory already.
-    /// ResourceId::new(), on the other hand, is ideal for if you have a 
+    /// ResourceId::new(), on the other hand, is ideal for if you have a
     pub fn new(length: usize, hash: [u8; 32]) -> Self {
         ResourceId {
-            version: CURRENT_RESOURCE_ID_FORMAT, 
+            version: CURRENT_RESOURCE_ID_FORMAT,
             length: length as u64,
             hash,
         }
     }
     /// Generate a ResourceID for a buffer which is fully loaded into memory.
-    pub fn from_buf(buf: &[u8]) -> Self { 
+    pub fn from_buf(buf: &[u8]) -> Self {
         // Make a hash
         let mut hasher = sha2::Sha512_256::new();
         hasher.update(buf);
         let buffer_hash = hasher.finalize();
         // Done, here's a ResourceId
         ResourceId {
-            version: CURRENT_RESOURCE_ID_FORMAT, 
+            version: CURRENT_RESOURCE_ID_FORMAT,
             length: buf.len() as u64,
             hash: buffer_hash.into(),
         }
     }
     pub fn verify(&self, buf: &[u8]) -> Result<(), VerifyResourceError> {
         //Correct length?
-        if buf.len() as u64 != self.length { 
-            return Err(VerifyResourceError::WrongLength( self.length, buf.len() as u64 ));
+        if buf.len() as u64 != self.length {
+            return Err(VerifyResourceError::WrongLength(
+                self.length,
+                buf.len() as u64,
+            ));
         }
         //Check hash
         let mut hasher = sha2::Sha512_256::new();
@@ -102,28 +105,34 @@ impl ResourceId {
         }
 
         let fields: Vec<&str> = value.split(':').collect();
-        if fields.len() != 3 { 
+        if fields.len() != 3 {
             return Err(ParseResourceIdError::TooManySeparators(value.to_string()));
         }
 
         let version = u8::from_str_radix(*fields.get(0).unwrap(), 10)
-            .map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;  
-        if version != CURRENT_RESOURCE_ID_FORMAT { 
-            return Err(ParseResourceIdError::UnrecognizedVersion(value.to_string(), version));
+            .map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;
+        if version != CURRENT_RESOURCE_ID_FORMAT {
+            return Err(ParseResourceIdError::UnrecognizedVersion(
+                value.to_string(),
+                version,
+            ));
         }
 
         let length = u64::from_str_radix(*fields.get(1).unwrap(), 10)
-            .map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;  
+            .map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;
 
-        let bytes = base64::decode(fields.get(2).unwrap() )?;
-        if bytes.len() != 32 { 
-            return Err(ParseResourceIdError::BufferWrongSize(value.to_string(), bytes.len()));
+        let bytes = base64::decode(fields.get(2).unwrap())?;
+        if bytes.len() != 32 {
+            return Err(ParseResourceIdError::BufferWrongSize(
+                value.to_string(),
+                bytes.len(),
+            ));
         }
 
         let mut hash: [u8; 32] = [0; 32];
-        hash.copy_from_slice(&bytes[0..32]); 
-        Ok(ResourceId { 
-            version, 
+        hash.copy_from_slice(&bytes[0..32]);
+        Ok(ResourceId {
+            version,
             length,
             hash,
         })
@@ -149,7 +158,13 @@ impl Eq for ResourceId {}
 
 impl std::fmt::Display for ResourceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}:{}", self.version, self.length, base64::encode(&self.hash))
+        write!(
+            f,
+            "{}:{}:{}",
+            self.version,
+            self.length,
+            base64::encode(&self.hash)
+        )
     }
 }
 
@@ -160,13 +175,19 @@ impl std::fmt::Debug for ResourceId {
 }
 
 // For use with serde
-pub mod resourceid_base64_string { 
+pub mod resourceid_base64_string {
+    use serde::{
+        de::{self, Visitor},
+        Deserializer, Serializer,
+    };
     use std::fmt;
-    use serde::{Serializer, Deserializer, de::{Visitor, self}};
 
     use super::*;
 
-    pub fn serialize<S>(val: &ResourceId, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    pub fn serialize<S>(val: &ResourceId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         serializer.serialize_str(val.to_string().as_str())
     }
 
@@ -180,13 +201,18 @@ pub mod resourceid_base64_string {
         }
 
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where E: de::Error, {
+        where
+            E: de::Error,
+        {
             ResourceId::parse(v).map_err(E::custom)
         }
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<ResourceId, D::Error> where D: Deserializer<'de> {
-        deserializer.deserialize_string(ResourceIdVisitor{})
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ResourceId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_string(ResourceIdVisitor {})
     }
 }
 
@@ -202,8 +228,8 @@ pub struct ResourceDescriptor {
     pub path: Option<Vec<String>>,
     /// Which user did we get this resource from? Who signed it, who is the authority on it?
     pub origin: NodeIdentity,
-    /// Expected type. 
-    pub resource_type: String, 
+    /// Expected type.
+    pub resource_type: String,
     /// Name of origin user and friends who made this resource.
     pub authors: String,
     /// Signature verifying our binary blob as good, signed with the public key from NodeIdentity.
@@ -228,23 +254,35 @@ impl PartialEq for ResourceDescriptor {
 
 impl Eq for ResourceDescriptor {}
 
-pub enum ResourceStatus<T, E> where T: Send + Sync + Clone, E: std::error::Error + Debug {
+pub enum ResourceStatus<T, E>
+where
+    T: Send + Sync + Clone,
+    E: std::error::Error + Debug,
+{
     Pending,
     ///Encountered a problem while trying to load this resource.
     Errored(E),
     Ready(T),
 }
 
-impl<T, E> From<Result<T,E>> for ResourceStatus<T,E> where T: Send+Sync+Clone, E: std::error::Error {
-    fn from(r: Result<T,E>) -> Self {
-        match r { 
+impl<T, E> From<Result<T, E>> for ResourceStatus<T, E>
+where
+    T: Send + Sync + Clone,
+    E: std::error::Error,
+{
+    fn from(r: Result<T, E>) -> Self {
+        match r {
             Ok(v) => Self::Ready(v),
             Err(e) => Self::Errored(e),
         }
     }
 }
-impl<T, E> From<Option<Result<T,E>>> for ResourceStatus<T,E> where T: Send+Sync+Clone, E: std::error::Error {
-    fn from(r: Option<Result<T,E>>) -> Self {
+impl<T, E> From<Option<Result<T, E>>> for ResourceStatus<T, E>
+where
+    T: Send + Sync + Clone,
+    E: std::error::Error,
+{
+    fn from(r: Option<Result<T, E>>) -> Self {
         match r {
             Some(Ok(v)) => Self::Ready(v),
             Some(Err(e)) => Self::Errored(e),
@@ -253,9 +291,13 @@ impl<T, E> From<Option<Result<T,E>>> for ResourceStatus<T,E> where T: Send+Sync+
     }
 }
 
-impl<T, E> From<ResourceStatus<T,E>> for Option<Result<T,E>>  where T: Send+Sync+Clone, E: std::error::Error {
-    fn from(r: ResourceStatus<T,E>) -> Self {
-        match r { 
+impl<T, E> From<ResourceStatus<T, E>> for Option<Result<T, E>>
+where
+    T: Send + Sync + Clone,
+    E: std::error::Error,
+{
+    fn from(r: ResourceStatus<T, E>) -> Self {
+        match r {
             ResourceStatus::Ready(v) => Some(Ok(v)),
             ResourceStatus::Errored(e) => Some(Err(e)),
             ResourceStatus::Pending => None,
@@ -263,7 +305,7 @@ impl<T, E> From<ResourceStatus<T,E>> for Option<Result<T,E>>  where T: Send+Sync
     }
 }
 
-/*pub trait ResourceProvider<T: Send + Sync + Clone> { 
+/*pub trait ResourceProvider<T: Send + Sync + Clone> {
     type Error: std::error::Error + Debug;
     ///Checks the status of the resource, returning a reference to it if it's ready.
     fn lookup<'a>(&'a self, id: &ResourceId) -> ResourceStatus<&'a T, Self::Error>;
@@ -273,79 +315,74 @@ impl<T, E> From<ResourceStatus<T,E>> for Option<Result<T,E>>  where T: Send+Sync
     fn load_timeout<'a>(&'a mut self, id: &ResourceId, ) -> ResourceStatus<&'a T, Self::Error>;
 }*/
 
-lazy_static!{
-    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceDescriptor>>> = {
-        Arc::new(
-            Mutex::new(
-                HashMap::default()
-            )
-        )
-    };
+lazy_static! {
+    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceDescriptor>>> =
+        Arc::new(Mutex::new(HashMap::default()));
 }
 
-pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceDescriptor) { 
+pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceDescriptor) {
     RESOURCE_METADATA.lock().insert(id.clone(), info.clone());
 }
 
-pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> { 
+pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> {
     let guard = RESOURCE_METADATA.lock();
     guard.get(id).map(|v| v.clone())
 }
 
 #[derive(Clone)]
-pub enum ResourceIdOrMeta { 
-    Id(ResourceId), 
-    Meta(ResourceDescriptor)
+pub enum ResourceIdOrMeta {
+    Id(ResourceId),
+    Meta(ResourceDescriptor),
 }
-impl ResourceIdOrMeta { 
-    pub fn short_name(&self) -> String { 
+impl ResourceIdOrMeta {
+    pub fn short_name(&self) -> String {
         match self {
             ResourceIdOrMeta::Id(id) => format!("ResourceId {} (metadata not found)", id),
-            ResourceIdOrMeta::Meta(meta) => format!("{} (from user {:?})", meta.filename, meta.origin),
+            ResourceIdOrMeta::Meta(meta) => {
+                format!("{} (from user {:?})", meta.filename, meta.origin)
+            }
         }
     }
 }
 
-impl std::fmt::Debug for ResourceIdOrMeta { 
+impl std::fmt::Debug for ResourceIdOrMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self { 
+        match self {
             ResourceIdOrMeta::Id(id) => write!(f, "ResourceId {} (metadata not found)", id),
-            ResourceIdOrMeta::Meta(m) => write!(f, "{:?}", m)
+            ResourceIdOrMeta::Meta(m) => write!(f, "{:?}", m),
         }
     }
 }
 
 macro_rules! resource_debug {
-    ($rid:expr) => {
-        { 
-            use crate::resource::*;
-            let rid_eval = ($rid).clone();
-            let ridom = match get_resource_metadata(&rid_eval) {
-                Some(m) => ResourceIdOrMeta::Meta(m.clone()), 
-                None => ResourceIdOrMeta::Id(rid_eval.clone()),
-            };
-            ridom.short_name()
-        }
-    };
+    ($rid:expr) => {{
+        use crate::resource::*;
+        let rid_eval = ($rid).clone();
+        let ridom = match get_resource_metadata(&rid_eval) {
+            Some(m) => ResourceIdOrMeta::Meta(m.clone()),
+            None => ResourceIdOrMeta::Id(rid_eval.clone()),
+        };
+        ridom.short_name()
+    }};
 }
 
 #[test]
-fn resource_id_generate() { 
+fn resource_id_generate() {
     use rand::rngs::OsRng;
     use rand::Rng;
 
     let mut rng = OsRng::default();
 
-    let mut buf1: [u8; 1024] = [0; 1024]; 
+    let mut buf1: [u8; 1024] = [0; 1024];
     let mut buf2: [u8; 1024] = [0; 1024];
 
     {
-        rng.fill(&mut buf1); 
+        rng.fill(&mut buf1);
         rng.fill(&mut buf2);
     }
-    
-    let rid1= ResourceId::from_buf(&buf1);
-    let rid2= ResourceId::from_buf(&buf2);
+
+    let rid1 = ResourceId::from_buf(&buf1);
+    let rid2 = ResourceId::from_buf(&buf2);
 
     assert_eq!(rid1.length, 1024);
     assert_eq!(rid2.length, 1024);
@@ -358,22 +395,22 @@ fn resource_id_generate() {
 }
 
 #[test]
-fn resource_id_to_string() { 
+fn resource_id_to_string() {
     use rand::rngs::OsRng;
     use rand::Rng;
 
     let mut rng = OsRng::default();
 
-    const BUF_SIZE:usize = 2048;
+    const BUF_SIZE: usize = 2048;
 
-    let mut buf1: [u8; BUF_SIZE] = [0; BUF_SIZE]; 
+    let mut buf1: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
     {
         rng.fill(&mut buf1);
     }
     drop(rng);
-    
-    let rid1= ResourceId::from_buf(&buf1);
+
+    let rid1 = ResourceId::from_buf(&buf1);
 
     let stringified = rid1.to_string();
 
@@ -387,6 +424,9 @@ fn resource_id_to_string() {
 
     let after_split: Vec<&str> = stringified.split(":").collect();
 
-    assert_eq!(after_split.len(), 3); 
-    assert_eq!(u64::from_str_radix(after_split.get(1).unwrap(), 10).unwrap(), BUF_SIZE as u64);
+    assert_eq!(after_split.len(), 3);
+    assert_eq!(
+        u64::from_str_radix(after_split.get(1).unwrap(), 10).unwrap(),
+        BUF_SIZE as u64
+    );
 }

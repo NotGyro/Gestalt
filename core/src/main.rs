@@ -16,18 +16,7 @@ pub mod entity;
 pub mod script;
 pub mod world;
 
-use hashbrown::HashSet;
-use image::ImageFormat;
-use log::{LevelFilter, info, error};
-use mlua::{MultiValue, LuaOptions};
-use winit::event::{VirtualKeyCode, ElementState};
-use std::{fs::File, sync::Arc, time::Instant};
-
-//use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
-
-use glam::{Vec3, Quat};
-
-use client::camera as camera;
+use mlua::LuaOptions;
 
 #[allow(unused_must_use)]
 fn main() {
@@ -49,9 +38,15 @@ fn main() {
             File::create("latest.log").unwrap(),
         ),
     ]).unwrap();*/
-    
-    let lua_stdlibs = mlua::StdLib::BIT | mlua::StdLib::STRING | mlua::StdLib::TABLE | mlua::StdLib::IO | mlua::StdLib::OS | mlua::StdLib::JIT | mlua::StdLib::PACKAGE;
-    let vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
+
+    let lua_stdlibs = mlua::StdLib::BIT
+        | mlua::StdLib::STRING
+        | mlua::StdLib::TABLE
+        | mlua::StdLib::IO
+        | mlua::StdLib::OS
+        | mlua::StdLib::JIT
+        | mlua::StdLib::PACKAGE;
+    let _vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
 
     client::clientmain::run_client();
 

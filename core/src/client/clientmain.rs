@@ -1,34 +1,57 @@
-use std::{io::{BufReader, Read, Write}, time::Instant, sync::Arc, error::Error};
+use std::{
+    error::Error,
+    io::{BufReader, Read, Write},
+    sync::Arc,
+    time::Instant,
+};
 
-use glam::{Vec3, Quat, Vec4};
-use hashbrown::{HashSet, HashMap};
+use glam::{Vec3, Vec4};
+use hashbrown::{HashMap, HashSet};
 use image::RgbaImage;
-use log::{warn, error};
-use rend3::types::{MeshValidationError, Handedness, MeshBuilder};
-use serde::{Serialize, Deserialize};
+use log::{error, warn};
+use rend3::types::{Handedness, MeshBuilder};
+use serde::{Deserialize, Serialize};
 use wgpu::Backend;
-use winit::{event_loop::ControlFlow, window::Fullscreen, event::{ElementState, DeviceEvent}, dpi::PhysicalPosition};
+use winit::{
+    event::{DeviceEvent, ElementState},
+    event_loop::ControlFlow,
+    window::Fullscreen,
+};
 
-use crate::{world::{chunk::{Chunk, CHUNK_SIZE}, VoxelStorageBounded, VoxelStorage, TileId}, resource::{ResourceId, image::{ImageProvider, InternalImage, RetrieveImageError}, ResourceStatus, update_global_resource_metadata, ResourceDescriptor}, common::identity::NodeIdentity, client::render::{CubeArt, voxelmesher::{make_mesh, MeshStepOutput}, tiletextureatlas::build_tile_atlas}};
 use crate::common::voxelmath::VoxelPos;
+use crate::{
+    client::render::{
+        tiletextureatlas::build_tile_atlas,
+        voxelmesher::{make_mesh_completely, ChunkMesh},
+        CubeArt,
+    },
+    common::identity::NodeIdentity,
+    resource::{
+        image::{ImageProvider, InternalImage, RetrieveImageError},
+        update_global_resource_metadata, ResourceDescriptor, ResourceId, ResourceStatus,
+    },
+    world::{
+        chunk::{Chunk, CHUNK_SIZE},
+        TileId, VoxelStorage, VoxelStorageBounded,
+    },
+};
 
 use super::camera;
 
 pub const WINDOW_TITLE: &'static str = "Gestalt";
 pub const CLIENT_CONFIG_FILENAME: &'static str = "client_config.ron";
 
-// Core / main part of the game client. Windowing and event dispatching lives here. 
-// Input events come in through here. 
+// Core / main part of the game client. Windowing and event dispatching lives here.
+// Input events come in through here.
 // Very important that input does not live on the same thread as any heavy compute tasks!
-// We need to still be able to read input when the weird stuff is happening. 
-
+// We need to still be able to read input when the weird stuff is happening.
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum WindowMode { 
-    Windowed{
+pub enum WindowMode {
+    Windowed {
         /// If windowed, can this be resized with the OS' drag-and-drop controls?
         resizable: bool,
-        /// Maximized upon creation? 
+        /// Maximized upon creation?
         maximized: bool,
     },
     BorderlessFullscreen,
@@ -36,18 +59,21 @@ pub enum WindowMode {
 }
 impl Default for WindowMode {
     fn default() -> Self {
-        WindowMode::Windowed{resizable: true, maximized: false}
+        WindowMode::Windowed {
+            resizable: true,
+            maximized: false,
+        }
     }
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub struct DisplaySize { 
+pub struct DisplaySize {
     pub width: u32,
     pub height: u32,
 }
 impl Default for DisplaySize {
     fn default() -> Self {
-        DisplaySize { 
+        DisplaySize {
             width: 1024,
             height: 768,
         }
@@ -55,45 +81,43 @@ impl Default for DisplaySize {
 }
 impl From<DisplaySize> for winit::dpi::Size {
     fn from(size: DisplaySize) -> Self {
-        winit::dpi::Size::Physical(
-            winit::dpi::PhysicalSize { 
-                width: size.width, 
-                height: size.height,
-            }
-        )
+        winit::dpi::Size::Physical(winit::dpi::PhysicalSize {
+            width: size.width,
+            height: size.height,
+        })
     }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DisplayConfig { 
+pub struct DisplayConfig {
     pub size: DisplaySize,
     pub window_mode: WindowMode,
     ///Corresponds to winit::MonitorHandle.name()
     pub monitor: Option<String>,
-    /// Which graphics card? 
+    /// Which graphics card?
     pub device: Option<String>,
 }
 
 impl DisplayConfig {
-    pub fn to_window_builder(&self) -> winit::window::WindowBuilder { 
+    pub fn to_window_builder(&self) -> winit::window::WindowBuilder {
         //TODO: Select device
         let builder = winit::window::WindowBuilder::new()
             .with_title(WINDOW_TITLE)
             .with_inner_size(self.size);
         match self.window_mode {
-            WindowMode::Windowed { resizable, maximized } => {
-                builder.with_resizable(resizable)
-                    .with_maximized(maximized)
-                    .with_fullscreen(None)
-            },
+            WindowMode::Windowed {
+                resizable,
+                maximized,
+            } => builder
+                .with_resizable(resizable)
+                .with_maximized(maximized)
+                .with_fullscreen(None),
             WindowMode::BorderlessFullscreen => {
-                builder.with_fullscreen(
-                    Some( Fullscreen::Borderless(None) )
-                )
-            },
+                builder.with_fullscreen(Some(Fullscreen::Borderless(None)))
+            }
             WindowMode::ExclusiveFullscreen => {
                 todo!()
-            },
+            }
         }
     }
 }
@@ -107,7 +131,11 @@ pub struct ClientConfig {
 
 impl Default for ClientConfig {
     fn default() -> Self {
-        Self { display_properties: Default::default(), mouse_sensitivity_x: 1.0, mouse_sensitivity_y: 1.0 }
+        Self {
+            display_properties: Default::default(),
+            mouse_sensitivity_x: 1.0,
+            mouse_sensitivity_y: 1.0,
+        }
     }
 }
 
@@ -118,20 +146,25 @@ pub enum StartClientError {
     #[error("Attempted to create channel {0}, which exists already.")]
     CouldntParseConfig(#[from] ron::Error),
     #[error("Could not initialize display: {0:?}")]
-    CreateWindowError(#[from] winit::error::OsError)
+    CreateWindowError(#[from] winit::error::OsError),
 }
 
 // Loads images for the purposes of testing in development.
-pub struct DevImageLoader { 
-    pub(crate) images: HashMap<ResourceId, RgbaImage>,  
-    pub(crate) metadata: HashMap<ResourceId, ResourceDescriptor>,  
+pub struct DevImageLoader {
+    pub(crate) images: HashMap<ResourceId, RgbaImage>,
+    pub(crate) metadata: HashMap<ResourceId, ResourceDescriptor>,
 }
 
 impl ImageProvider for DevImageLoader {
-    fn load_image(&mut self, image: &ResourceId) -> ResourceStatus<&InternalImage,RetrieveImageError> {
-        match self.images.get(image) { 
-            Some(v) => ResourceStatus::Ready(v), 
-            None => ResourceStatus::Errored(RetrieveImageError::DoesNotExist(resource_debug!(image)))
+    fn load_image(
+        &mut self,
+        image: &ResourceId,
+    ) -> ResourceStatus<&InternalImage, RetrieveImageError> {
+        match self.images.get(image) {
+            Some(v) => ResourceStatus::Ready(v),
+            None => {
+                ResourceStatus::Errored(RetrieveImageError::DoesNotExist(resource_debug!(image)))
+            }
         }
     }
 
@@ -141,24 +174,22 @@ impl ImageProvider for DevImageLoader {
 }
 
 impl DevImageLoader {
-    pub fn new() -> Self { 
-        Self { 
-            images: HashMap::default(), 
+    pub fn new() -> Self {
+        Self {
+            images: HashMap::default(),
             metadata: HashMap::default(),
         }
     }
 
     //A simple function for the purposes of testing in development
     #[no_mangle]
-    fn preload_image_file(&mut self, filename: &str) -> Result<ResourceId, Box<dyn Error>> { 
+    fn preload_image_file(&mut self, filename: &str) -> Result<ResourceId, Box<dyn Error>> {
         let mut open_options = std::fs::OpenOptions::new();
-        open_options
-            .read(true)
-            .create(false);
+        open_options.read(true).create(false);
 
         let mut file = open_options.open(filename)?;
-        let mut buf: Vec<u8> = Vec::default(); 
-        let _len = file.read_to_end(&mut buf)?; 
+        let mut buf: Vec<u8> = Vec::default();
+        let _len = file.read_to_end(&mut buf)?;
 
         let rid = ResourceId::from_buf(buf.as_slice());
 
@@ -170,7 +201,7 @@ impl DevImageLoader {
             id: rid.clone(),
             filename: filename.to_string(),
             path: None,
-            origin: NodeIdentity{},
+            origin: NodeIdentity {},
             resource_type: "image/png".to_string(),
             authors: "".to_string(),
             signature: (),
@@ -189,37 +220,35 @@ pub fn run_client() {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
     let mut open_options = std::fs::OpenOptions::new();
-    open_options
-        .read(true)
-        .append(true)
-        .create(true);
+    open_options.read(true).append(true).create(true);
 
-    let config_maybe: Result<ClientConfig, StartClientError> = open_options.open(CLIENT_CONFIG_FILENAME)
-        .map_err( |e| StartClientError::from(e) )
+    let config_maybe: Result<ClientConfig, StartClientError> = open_options
+        .open(CLIENT_CONFIG_FILENAME)
+        .map_err(|e| StartClientError::from(e))
         .and_then(|file| {
             let mut buf_reader = BufReader::new(file);
             let mut contents = String::new();
-            buf_reader.read_to_string(&mut contents)
-                .map_err(|e| StartClientError::from(e))?; 
+            buf_reader
+                .read_to_string(&mut contents)
+                .map_err(|e| StartClientError::from(e))?;
             Ok(contents)
         })
-        .and_then(|e| { 
-            Ok(ron::from_str(e.as_str())
-                .map_err(|e| StartClientError::from(e))?)
-        });
-    //If that didn't load, just use built-in defaults. 
+        .and_then(|e| Ok(ron::from_str(e.as_str()).map_err(|e| StartClientError::from(e))?));
+    //If that didn't load, just use built-in defaults.
     let config: ClientConfig = match config_maybe {
         Ok(c) => c,
         Err(e) => {
-            warn!("Couldn't open client config, using defaults. Error was: {:?}", e); 
+            warn!(
+                "Couldn't open client config, using defaults. Error was: {:?}",
+                e
+            );
             ClientConfig::default()
-        },
+        }
     };
 
-    // Set up window and event loop. 
+    // Set up window and event loop.
     let window_builder = config.display_properties.to_window_builder();
-    let window = window_builder
-        .build(&event_loop).unwrap();
+    let window = window_builder.build(&event_loop).unwrap();
 
     let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
     let mut camera = camera::Camera::new(view_location);
@@ -227,57 +256,61 @@ pub fn run_client() {
     camera.sensitivity = 1.0;
     camera.speed = 0.5;
 
-    let window_size = window.inner_size();    
+    let window_size = window.inner_size();
     let mut resolution = glam::UVec2::new(window_size.width, window_size.height);
 
     {
         let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let adapters: Vec<wgpu::AdapterInfo> = instance.enumerate_adapters(wgpu::Backends::all()).map(|a| a.get_info()).collect();
+        let adapters: Vec<wgpu::AdapterInfo> = instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .map(|a| a.get_info())
+            .collect();
         println!("Available rendering adapters are: {:?}", adapters);
         drop(adapters);
-        drop(instance); 
+        drop(instance);
     }
 
-    //Set up a test chunk. 
-    let air_id = 0; 
-    let stone_id = 1; 
-    let dirt_id = 2; 
-    let grass_id = 3; 
-    let dome_thing_id = 4; 
+    //Set up a test chunk.
+    let air_id = 0;
+    let stone_id = 1;
+    let dirt_id = 2;
+    let grass_id = 3;
+    let dome_thing_id = 4;
     let mut test_chunk: Chunk<u32> = Chunk::new(air_id);
-    for i in test_chunk.get_bounds() { 
-        if i.y >= (CHUNK_SIZE as u16)/2 { 
-            let vec = Vec3::new((i.x as i32 - (CHUNK_SIZE as i32)/2) as f32, (i.y as i32 - (CHUNK_SIZE as i32)/2)  as f32, (i.z as i32 - (CHUNK_SIZE as i32)/2) as f32);
-            if vec.length_squared() <= 7.0f32*7.0f32 {
+    for i in test_chunk.get_bounds() {
+        if i.y >= (CHUNK_SIZE as u16) / 2 {
+            let vec = Vec3::new(
+                (i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32,
+                (i.y as i32 - (CHUNK_SIZE as i32) / 2) as f32,
+                (i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32,
+            );
+            if vec.length_squared() <= 7.0f32 * 7.0f32 {
                 test_chunk.set(i, dome_thing_id).unwrap();
             }
-        }
-        else { 
-            if i.y > 5 { 
+        } else {
+            if i.y > 5 {
                 test_chunk.set(i, dirt_id).unwrap();
-            }
-            else { 
+            } else {
                 test_chunk.set(i, stone_id).unwrap();
             }
         }
     }
 
-    let testpos = vpos!(7, 15, 7);
+    //let testpos = vpos!(7, 15, 7);
     //test_chunk.set(testpos, grass_id).unwrap();
     // Print this thing out
-    for y in 0 .. CHUNK_SIZE { 
+    for y in 0..CHUNK_SIZE {
         println!("---------------");
-        for z in 0 .. CHUNK_SIZE {
-            let mut row_string = String::default(); 
-            for x in 0 .. CHUNK_SIZE { 
+        for z in 0..CHUNK_SIZE {
+            let mut row_string = String::default();
+            for x in 0..CHUNK_SIZE {
                 let pos = vpos!(x as u16, y as u16, z as u16);
-                let out  = test_chunk.get(pos).unwrap();
-                if *out == 0 { 
+                let out = test_chunk.get(pos).unwrap();
+                if *out == 0 {
                     row_string.push_str("#");
-                }
-                else {
-                    let outstr = format!("{}", out); 
-                    row_string.push_str( outstr.as_str() );
+                } else {
+                    let outstr = format!("{}", out);
+                    row_string.push_str(outstr.as_str());
                 }
             }
             println!("{}", row_string);
@@ -289,17 +322,21 @@ pub fn run_client() {
     let test_grass_image_id = image_loader.preload_image_file("testgrass.png").unwrap();
     let test_stone_image_id = image_loader.preload_image_file("teststone.png").unwrap();
     let test_dirt_image_id = image_loader.preload_image_file("testdirt.png").unwrap();
+    //let testlet_image_id = image_loader.preload_image_file("testlet.png").unwrap();
 
     let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
-    
-    tiles_to_art.insert(air_id, CubeArt::airlike() );
-    tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id) );
-    tiles_to_art.insert(dirt_id, CubeArt::simple_solid_block(&test_dirt_image_id) );
-    tiles_to_art.insert(grass_id, CubeArt::simple_solid_block(&test_grass_image_id) );
-    tiles_to_art.insert(dome_thing_id, CubeArt::simple_solid_block(&test_dome_thing_image_id) );
+
+    tiles_to_art.insert(air_id, CubeArt::airlike());
+    tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id));
+    tiles_to_art.insert(dirt_id, CubeArt::simple_solid_block(&test_dirt_image_id));
+    tiles_to_art.insert(grass_id, CubeArt::simple_solid_block(&test_grass_image_id));
+    tiles_to_art.insert(
+        dome_thing_id,
+        CubeArt::simple_solid_block(&test_dome_thing_image_id),
+    );
 
     let mesh_start = Instant::now();
-    let (chunk_mesh, atlas) = make_mesh(64, &test_chunk, &tiles_to_art).unwrap();
+    let (chunk_mesh, atlas) = make_mesh_completely(64, &test_chunk, &tiles_to_art).unwrap();
     let millis = (mesh_start.elapsed().as_micros() as f32) / 1000.0;
     println!("Took {} milliseconds to mesh a chunk", millis);
 
@@ -320,8 +357,18 @@ pub fn run_client() {
 
     // Create the Instance, Adapter, and Device. We can specify preferred backend,
     // device name, or rendering mode. In this case we let rend3 choose for us.
-    let iad = pollster::block_on(rend3::create_iad(Some(Backend::Vulkan), config.display_properties.device.clone().map(|name| name.to_lowercase()), Some(rend3::RendererMode::GpuPowered), None)).unwrap();
-    
+    let iad = pollster::block_on(rend3::create_iad(
+        Some(Backend::Vulkan),
+        config
+            .display_properties
+            .device
+            .clone()
+            .map(|name| name.to_lowercase()),
+        Some(rend3::RendererMode::GpuPowered),
+        None,
+    ))
+    .unwrap();
+
     // The one line of unsafe needed. We just need to guarentee that the window
     // outlives the use of the surface.
     let surface = Arc::new(unsafe { iad.instance.create_surface(&window) });
@@ -342,25 +389,34 @@ pub fn run_client() {
         Some(window_size.width as f32 / window_size.height as f32),
     )
     .unwrap();
-    
-    println!("Launching with rendering device: {:?}", &renderer.adapter_info);
 
-    // Create the pbr pipeline with the same internal resolution and 4x multisampling
-    let mut base_render_graph = rend3_routine::base::BaseRenderGraph::new(
-        &renderer,
+    println!(
+        "Launching with rendering device: {:?}",
+        &renderer.adapter_info
     );
 
+    // Create the pbr pipeline with the same internal resolution and 4x multisampling
+    let base_render_graph = rend3_routine::base::BaseRenderGraph::new(&renderer);
+
     let mut data_core = renderer.data_core.lock();
-    let pbr_routine = rend3_routine::pbr::PbrRoutine::new(&renderer, &mut data_core, &base_render_graph.interfaces);
+    let pbr_routine = rend3_routine::pbr::PbrRoutine::new(
+        &renderer,
+        &mut data_core,
+        &base_render_graph.interfaces,
+    );
     drop(data_core);
-    let tonemapping_routine =
-        rend3_routine::tonemapping::TonemappingRoutine::new(&renderer, &base_render_graph.interfaces, format);
+    let tonemapping_routine = rend3_routine::tonemapping::TonemappingRoutine::new(
+        &renderer,
+        &base_render_graph.interfaces,
+        format,
+    );
 
     // Create mesh
-    let MeshStepOutput { verticies, uv } = chunk_mesh;
-    let mesh = MeshBuilder::new( verticies, Handedness::Left)
+    let ChunkMesh { verticies, uv } = chunk_mesh;
+    let mesh = MeshBuilder::new(verticies, Handedness::Left)
         .with_vertex_uv0(uv)
-        .build().unwrap();
+        .build()
+        .unwrap();
 
     // Add mesh to renderer's world.
     // All handles are refcounted, so we only need to hang onto the handle until we make an object.
@@ -370,13 +426,13 @@ pub fn run_client() {
 
     // Add PBR material with all defaults except a single color.
     let material = rend3_routine::pbr::PbrMaterial {
-            albedo: rend3_routine::pbr::AlbedoComponent::Texture(chunk_texture_handle),
-            unlit: true,
-            sample_type: rend3_routine::pbr::SampleType::Nearest,
-            ..rend3_routine::pbr::PbrMaterial::default()
+        albedo: rend3_routine::pbr::AlbedoComponent::Texture(chunk_texture_handle),
+        unlit: true,
+        sample_type: rend3_routine::pbr::SampleType::Nearest,
+        ..rend3_routine::pbr::PbrMaterial::default()
     };
     let material_handle = renderer.add_material(material);
-    
+
     // Combine the mesh and the material with a location to give an object.
     let object = rend3::types::Object {
         mesh: mesh_handle,
@@ -384,14 +440,11 @@ pub fn run_client() {
         transform: glam::Mat4::IDENTITY,
     };
 
-    let cube_yaw_speed = 1.0f32;
-    let mut cube_yaw = 0.0f32;
-
     // Creating an object will hold onto both the mesh and the material
     // even if they are deleted.
     //
     // We need to keep the object handle alive.
-    let object_handle = renderer.add_object(object);
+    let _object_handle = renderer.add_object(object);
 
     let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
     let mut camera = camera::Camera::new(view_location);
@@ -401,7 +454,10 @@ pub fn run_client() {
 
     // Set camera's location
     renderer.set_camera_data(rend3::types::Camera {
-        projection: rend3::types::CameraProjection::Perspective { vfov: 90.0, near: 0.1 },
+        projection: rend3::types::CameraProjection::Perspective {
+            vfov: 90.0,
+            near: 0.1,
+        },
         view: camera.get_view_matrix(),
     });
 
@@ -416,16 +472,16 @@ pub fn run_client() {
     let mut previous_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
     let mut current_down = HashSet::new();
 
-    let mut prev_frame_time = Instant::now();
+    //let mut prev_frame_time = Instant::now();
 
-    let first_frame_time = Instant::now();
+    //let first_frame_time = Instant::now();
 
     let game_start_time = Instant::now();
     let mut prev_frame_time = Instant::now();
 
-    let mut previous_mouse_position: Option<PhysicalPosition<f64>> = None;
+    //let mut previous_mouse_position: Option<PhysicalPosition<f64>> = None;
 
-    let mut ambient_light = Vec4::new(0.0, 0.4, 0.1, 0.0);
+    let ambient_light = Vec4::new(0.0, 0.4, 0.1, 0.0);
 
     let mut total_frames: u64 = 0;
     let mut fps_counter_print_times: u64 = 0;
@@ -452,7 +508,7 @@ pub fn run_client() {
             //DeviceEvent is better for gameplay-related movement / camera controls 
             winit::event::Event::DeviceEvent {
                 event: DeviceEvent::MouseMotion { 
-                    delta,
+                    delta: _,
                     ..
                 },
                 ..
@@ -518,17 +574,6 @@ pub fn run_client() {
                 //All input handled, do per-frame behavior. 
                 let elapsed_time = prev_frame_time.elapsed();
                 prev_frame_time = Instant::now();
-                let elapsed_secs = elapsed_time.as_secs_f32();
-
-                //Make the spinning cube spin 
-                /*
-                cube_yaw = cube_yaw + (cube_yaw_speed * elapsed_secs);
-                let (scale, _rotation, translation) = glam::Mat4::IDENTITY.to_scale_rotation_translation();
-                let new_scale = scale * 1.2 + ( (game_start_time.elapsed().as_secs_f32() * 2.0).sin() / 4.0);
-                let new_rotation = Quat::from_rotation_y(cube_yaw);
-                let new_transform = glam::Mat4::from_scale_rotation_translation(new_scale, new_rotation, translation);
-                renderer.set_object_transform(&object_handle, new_transform);
-                */
         
                 let camera_update_start = Instant::now();
                 //Move camera
@@ -585,7 +630,7 @@ pub fn run_client() {
             },
             winit::event::Event::LoopDestroyed => {
                 // Cleanup on quit. 
-                let mut cfg_string = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::default() ).unwrap();
+                let cfg_string = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::default() ).unwrap();
                 let mut open_options = std::fs::OpenOptions::new();
                 open_options
                     .write(true)

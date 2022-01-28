@@ -1,16 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use crate::common::{
-    Version,
-};
-use crate::resource::{ResourceDescriptor, ResourceId};
+use crate::common::Version;
+use crate::resource::ResourceId;
 
 pub mod lua;
 
-pub const SCRIPT_PACKAGE_MANIFEST_VERSION: Version = version!(0,0,1);
+pub const SCRIPT_PACKAGE_MANIFEST_VERSION: Version = version!(0, 0, 1);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SupportedLanguages { 
+pub enum SupportedLanguages {
     Lua,
     /// Transpiles to Lua
     Moon,
@@ -21,7 +19,7 @@ pub enum SupportedLanguages {
 pub struct PackageDescriptor {
     pub name: String,
     #[serde(with = "crate::common::version_string")]
-    pub version: Version, 
+    pub version: Version,
     pub language: SupportedLanguages,
 }
 

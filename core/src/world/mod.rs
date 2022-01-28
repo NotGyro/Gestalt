@@ -1,7 +1,7 @@
 pub mod chunk;
 pub mod tile;
-pub mod voxelstorage;
 pub mod voxelarray;
+pub mod voxelstorage;
 
 pub use tile::TileCoord;
 pub use tile::TileId;
