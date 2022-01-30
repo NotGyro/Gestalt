@@ -5,6 +5,8 @@ pub mod voxelmath;
 
 use std::{fmt::Display, future::Future, pin::Pin};
 
+use serde::{Deserialize, Serialize};
+
 pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
 macro_rules! version {
@@ -17,7 +19,7 @@ macro_rules! version {
 }
 
 ///Array of 4 u32s stored in little-endian byte order (least significant to most): build, patch, minor, major.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct Version {
     inner: u128,
@@ -59,6 +61,9 @@ impl Version {
         Version {
             inner: u128::from_le_bytes(*bytes),
         }
+    }
+    pub const fn as_bytes(&self) -> [u8; 16] {
+        self.inner.to_le_bytes()
     }
     pub const fn major(&self) -> u32 {
         let bytes = &self.inner.to_le_bytes();

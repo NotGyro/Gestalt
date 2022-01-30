@@ -14,9 +14,9 @@ pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
 /// Content-addressed identifier for a Gestalt resource.
 /// String representation starts with a version number for the
-/// ResourceId structure, then a `:` delimeter, then the size (number of bytes)
+/// ResourceId structure, then a `-` delimeter, then the size (number of bytes)
 /// in the resource, then the 32-byte Sha256-512 hash encoded in base-64.
-/// For example, `1:2048:J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA` would be a version 1 ResourceID.
+/// For example, `1-2048-J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA` would be a version 1 ResourceID.
 #[repr(C)]
 #[derive(Copy, Clone, PartialOrd, Serialize, Deserialize)]
 pub struct ResourceId {
@@ -30,9 +30,9 @@ pub struct ResourceId {
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ParseResourceIdError {
-    #[error("tried to parse {0} into a ResourceId but it contained no ':' separator.")]
+    #[error("tried to parse {0} into a ResourceId but it contained no '-' separator.")]
     NoSeparator(String),
-    #[error("tried to parse {0} into a ResourceId but was a non-3 number of ':' separators")]
+    #[error("tried to parse {0} into a ResourceId but was a non-3 number of '-' separators")]
     TooManySeparators(String),
     #[error("string `{0}` is not a valid resource ID because it contains whitespace")]
     ContainsWhitespace(String),
@@ -100,11 +100,11 @@ impl ResourceId {
     }
 
     pub fn parse(value: &str) -> Result<Self, ParseResourceIdError> {
-        if !value.contains(':') {
+        if !value.contains('-') {
             return Err(ParseResourceIdError::NoSeparator(value.to_string()));
         }
 
-        let fields: Vec<&str> = value.split(':').collect();
+        let fields: Vec<&str> = value.split('-').collect();
         if fields.len() != 3 {
             return Err(ParseResourceIdError::TooManySeparators(value.to_string()));
         }
@@ -160,7 +160,7 @@ impl std::fmt::Display for ResourceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}:{}:{}",
+            "{}-{}-{}",
             self.version,
             self.length,
             base64::encode(&self.hash)
@@ -197,7 +197,7 @@ pub mod resourceid_base64_string {
         type Value = ResourceId;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a resource ID string following the form format_version:size_in_bytes:hash_of_resource ")
+            formatter.write_str("a resource ID string following the form format_version-size_in_bytes-hash_of_resource ")
         }
 
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -422,7 +422,7 @@ fn resource_id_to_string() {
     let format_string = format!("{}", CURRENT_RESOURCE_ID_FORMAT);
     assert!(stringified.starts_with(&format_string));
 
-    let after_split: Vec<&str> = stringified.split(":").collect();
+    let after_split: Vec<&str> = stringified.split("-").collect();
 
     assert_eq!(after_split.len(), 3);
     assert_eq!(

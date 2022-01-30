@@ -108,14 +108,16 @@ impl VoxelError for VoxelArrayError {
 /// Should have a fixed, constant size after creation.
 #[derive(Clone, Debug)]
 pub struct VoxelArray<T: Voxel> {
-    size: u16,
-    data: Vec<T>,
-    bounds: VoxelRange<u16>,
+    pub(crate) size: u16,
+    pub(crate) data: Vec<T>,
+    pub(crate) bounds: VoxelRange<u16>,
 }
 
 #[allow(dead_code)]
 impl<T: Voxel> VoxelArray<T> {
     pub fn load_new(size: u16, dat: Vec<T>) -> VoxelArray<T> {
+        let num_elements = size as usize; 
+        assert!(dat.len() < (num_elements * num_elements * num_elements) );
         let bnd = VoxelRange::<u16> {
             lower: VoxelPos::<u16> { x: 0, y: 0, z: 0 },
             upper: VoxelPos {
@@ -223,13 +225,18 @@ pub struct VoxelArrayStatic<T: Voxel + Copy, const SIZE: usize>
 where
     [u8; SIZE * SIZE * SIZE]: Sized,
 {
-    data: [T; SIZE * SIZE * SIZE],
+    pub(crate) data: [T; SIZE * SIZE * SIZE],
 }
 
 impl<T: Voxel + Copy, const SIZE: usize> VoxelArrayStatic<T, SIZE>
 where
     [u8; SIZE * SIZE * SIZE]: Sized,
 {
+    pub fn load_new(data: [T; SIZE * SIZE * SIZE]) -> Self { 
+        VoxelArrayStatic {
+            data,
+        }
+    }
     pub fn new(default_value: T) -> Self {
         VoxelArrayStatic {
             data: [default_value; SIZE * SIZE * SIZE],

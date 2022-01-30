@@ -24,3 +24,8 @@ pub type WorldId = Uuid;
 
 use string_cache::DefaultAtom as Atom;
 pub type TileName = Atom;
+/*
+pub struct World { 
+    space: VoxelSpace,
+
+}*/
