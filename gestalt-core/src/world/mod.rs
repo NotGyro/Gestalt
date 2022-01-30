@@ -22,6 +22,5 @@ pub type ChunkPos = VoxelPos<ChunkCoord>;
 
 pub type WorldId = Uuid;
 
-
 use string_cache::DefaultAtom as Atom;
 pub type TileName = Atom;
