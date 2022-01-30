@@ -1,63 +1,27 @@
-use std::error::Error;
-use std::fmt;
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug};
 use std::hash::Hash;
 
 use crate::common::voxelmath::*;
-use crate::world::{ChunkPos, TilePos};
-
-#[allow(dead_code)]
-pub enum VoxelErrorKind {
-    OutOfBounds,
-    ChunkBoundIssue,
-    NotYetLoaded,
-    PaletteIssue,
-    Other,
-}
-/// An error reported upon trying to get or set a voxel outside of our range.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub enum VoxelError {
-    OutOfBounds(TilePos),
-    ChunkBoundIssue(TilePos, ChunkPos),
-    NotYetLoaded(TilePos),
-    PaletteIssue(usize, usize),
-    Other(Box<dyn Error + 'static>),
-}
-
-impl VoxelError {
-    #[allow(dead_code)]
-    fn kind(&self) -> VoxelErrorKind {
-        match self {
-            VoxelError::OutOfBounds(_) => VoxelErrorKind::OutOfBounds,
-            VoxelError::ChunkBoundIssue(_, _) => VoxelErrorKind::ChunkBoundIssue,
-            VoxelError::NotYetLoaded(_) => VoxelErrorKind::NotYetLoaded,
-            VoxelError::PaletteIssue(_, _) => VoxelErrorKind::PaletteIssue,
-            VoxelError::Other(_) => VoxelErrorKind::Other,
-        }
-    }
-}
-
-impl Display for VoxelError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            VoxelError::OutOfBounds(pos) => write!(f, "Attempted to access a voxel at position {}, which is out of bounds on this space.", pos),
-            VoxelError::ChunkBoundIssue(pos, chunkpos) =>
-                write!(f, "Attempted to access a voxel at position {}, on chunk cell {}, which did not accept this as in-bounds.", pos, chunkpos),
-            VoxelError::NotYetLoaded(pos) => write!(f, "Attempted to access a voxel position {}, which is not yet loaded.", pos),
-            VoxelError::PaletteIssue(val, palette_size) => write!(f, "No palette entry for {}! Palette only has {} entries. Possible map corruption.", val, palette_size),
-            VoxelError::Other(err) => write!(f, "Other voxel error: {}", err),
-        }
-    }
-}
-impl Error for VoxelError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None //I would love to have it to handle Other correctly but nope, the sized variablre requirement isn't having it.
-    }
-}
 
 pub trait Voxel: Clone + Debug + PartialEq + Eq + Hash {}
 impl<T> Voxel for T where T: Clone + Debug + PartialEq + Eq + Hash {}
+
+/// Abstract categories of voxel errors allowing you to check 
+/// ANY voxel error to see things like, say, is this recoverable? 
+/// Can we ignore this? Do we need to perform some kind of data
+/// corruption check? Etc.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
+pub enum VoxelErrorCategory { 
+    OutOfBounds,
+    NotYetLoaded,
+    InvalidTileInput,
+    PaletteIssue,
+    Other,
+}
+
+pub trait VoxelError: std::error::Error + std::fmt::Debug { 
+    fn kind(&self) -> VoxelErrorCategory; 
+}
 
 /// A basic trait for any 3d grid data structure.
 /// Type arguments are type of element, type of position.
@@ -73,8 +37,9 @@ impl<T> Voxel for T where T: Clone + Debug + PartialEq + Eq + Hash {}
 /// calling these methods / treating them as "flat" voxel
 /// structures implies acting on a level of detail of 0.
 pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
-    fn get(&self, coord: VoxelPos<P>) -> Result<&T, VoxelError>;
-    fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), VoxelError>;
+    type Error: VoxelError;
+    fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error>;
+    fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), Self::Error>;
 }
 
 /// Any VoxelStorage which has defined, finite bounds.
@@ -146,6 +111,7 @@ pub trait VsNeighborhoodOps<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> 
     type NeighborhoodType: VoxelNeighborhood<SourceVoxel = T>;
 }
 
+/*
 /// Copy voxels from one storage to another.
 #[allow(dead_code)]
 pub fn voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStorage<T, P>>(
@@ -160,4 +126,4 @@ pub fn voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStor
         dest.set(offset_pos, voxel.clone())?;
     }
     Ok(())
-}
+}*/

@@ -280,11 +280,11 @@ pub fn run_client() {
     for i in test_chunk.get_bounds() {
         if i.y >= (CHUNK_SIZE as u16) / 2 {
             let vec = Vec3::new(
-                (i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32,
-                (i.y as i32 - (CHUNK_SIZE as i32) / 2) as f32,
-                (i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32,
+                (i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+                (i.y as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+                (i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
             );
-            if vec.length_squared() <= 7.0f32 * 7.0f32 {
+            if vec.length_squared() <= 6.5f32 * 6.5f32 {
                 test_chunk.set(i, dome_thing_id).unwrap();
             }
         } else {

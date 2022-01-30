@@ -1,6 +1,7 @@
 pub mod chunk;
 pub mod tile;
 pub mod voxelarray;
+pub mod voxelspace;
 pub mod voxelstorage;
 
 pub use tile::TileCoord;
@@ -8,8 +9,6 @@ pub use tile::TileId;
 use uuid::Uuid;
 
 //pub use space::Space;
-pub use voxelstorage::VoxelError;
-pub use voxelstorage::VoxelErrorKind;
 pub use voxelstorage::VoxelStorage;
 pub use voxelstorage::VoxelStorageBounded;
 
@@ -22,3 +21,7 @@ pub type ChunkCoord = i32;
 pub type ChunkPos = VoxelPos<ChunkCoord>;
 
 pub type WorldId = Uuid;
+
+
+use string_cache::DefaultAtom as Atom;
+pub type TileName = Atom;

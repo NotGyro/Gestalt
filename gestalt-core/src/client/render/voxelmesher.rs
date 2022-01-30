@@ -12,7 +12,7 @@ use crate::{
         ResourceId,
     },
     world::{
-        chunk::{Chunk, ChunkData, CHUNK_SIZE},
+        chunk::{Chunk, ChunkInner, CHUNK_SIZE},
         voxelstorage::Voxel,
         TileId,
     },
@@ -406,9 +406,9 @@ impl<'a> MesherState<'a> {
         tiles_to_art: &A,
         atlas: &mut TileAtlasLayout,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let (inner, mut textures_needed): (ArtCacheHolder, HashSet<ResourceId>) = match &chunk.data
+        let (inner, mut textures_needed): (ArtCacheHolder, HashSet<ResourceId>) = match &chunk.inner
         {
-            ChunkData::Uniform(val) => {
+            ChunkInner::Uniform(val) => {
                 let missing_texture = art_cache_missing_texture(atlas);
                 let mut textures_needed = HashSet::new();
                 let cube_art = match tiles_to_art.get_art_for_tile(val) {
@@ -430,7 +430,7 @@ impl<'a> MesherState<'a> {
 
                 (ArtCacheHolder::Uniform(art_cache), textures_needed)
             }
-            ChunkData::Small(chunk_inner) => {
+            ChunkInner::Small(chunk_inner) => {
                 let missing_texture = art_cache_missing_texture(atlas);
                 let mut textures_needed = HashSet::new();
                 let mut art_palette: [ArtCacheEntry; 256] = [ArtCacheEntry::default(); 256];
@@ -458,7 +458,7 @@ impl<'a> MesherState<'a> {
                 let art_cache = ArtCacheSmall::new(art_palette, missing_texture);
                 (ArtCacheHolder::Small(art_cache), textures_needed)
             }
-            ChunkData::Large(chunk_inner) => {
+            ChunkInner::Large(chunk_inner) => {
                 let missing_texture = art_cache_missing_texture(atlas);
                 let mut textures_needed = HashSet::new();
                 let mut art_palette: HashMap<u16, ArtCacheEntry> =

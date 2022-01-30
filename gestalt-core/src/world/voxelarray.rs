@@ -89,6 +89,20 @@ pub const fn get_neg_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
     i.checked_sub(chunk_z_to_i_component(1, chunk_size))
 }
 
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum VoxelArrayError {
+    #[error("Attempted to access a voxel at position {0}, which is out of bounds on this chunk.")]
+    OutOfBounds(VoxelPos<u16>),
+}
+
+impl VoxelError for VoxelArrayError {
+    fn kind(&self) -> VoxelErrorCategory {
+        match self {
+            VoxelArrayError::OutOfBounds(_) => VoxelErrorCategory::OutOfBounds,
+        }
+    }
+}
+
 /// A 3D packed array of voxels - it's a single flat buffer in memory,
 /// which is indexed by voxel positions with some math done on them.
 /// Should have a fixed, constant size after creation.
@@ -148,13 +162,14 @@ impl<T: Voxel> VoxelArray<T> {
 }
 
 impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
-    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, VoxelError> {
+    type Error = VoxelArrayError;
+    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, Self::Error> {
         //Bounds-check.
         if (coord.x >= self.size) || (coord.y >= self.size) || (coord.z >= self.size) {
-            return Err(VoxelError::OutOfBounds(VoxelPos {
-                x: coord.x as i32,
-                y: coord.y as i32,
-                z: coord.z as i32,
+            return Err(Self::Error::OutOfBounds(VoxelPos {
+                x: coord.x,
+                y: coord.y,
+                z: coord.z,
             }));
         }
         //Packed array access
@@ -171,12 +186,12 @@ impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
         &mut self,
         coord: VoxelPos<u16>,
         value: T,
-    ) -> Result<(), super::voxelstorage::VoxelError> {
+    ) -> Result<(), Self::Error> {
         if (coord.x >= self.size) || (coord.y >= self.size) || (coord.z >= self.size) {
-            return Err(VoxelError::OutOfBounds(VoxelPos {
-                x: coord.x as i32,
-                y: coord.y as i32,
-                z: coord.z as i32,
+            return Err(Self::Error::OutOfBounds(VoxelPos {
+                x: coord.x,
+                y: coord.y,
+                z: coord.z,
             }));
         }
         //packed array access
@@ -249,13 +264,14 @@ impl<T: Voxel + Copy, const SIZE: usize> VoxelStorage<T, u16> for VoxelArrayStat
 where
     [u8; SIZE * SIZE * SIZE]: Sized,
 {
-    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, VoxelError> {
+    type Error = VoxelArrayError;
+    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, Self::Error> {
         //Bounds-check.
         if (coord.x >= SIZE as u16) || (coord.y >= SIZE as u16) || (coord.z >= SIZE as u16) {
-            return Err(VoxelError::OutOfBounds(VoxelPos {
-                x: coord.x as i32,
-                y: coord.y as i32,
-                z: coord.z as i32,
+            return Err(Self::Error::OutOfBounds(VoxelPos {
+                x: coord.x,
+                y: coord.y,
+                z: coord.z,
             }));
         }
         //Packed array access
@@ -272,12 +288,12 @@ where
         &mut self,
         coord: VoxelPos<u16>,
         value: T,
-    ) -> Result<(), super::voxelstorage::VoxelError> {
+    ) -> Result<(), Self::Error> {
         if (coord.x >= SIZE as u16) || (coord.y >= SIZE as u16) || (coord.z >= SIZE as u16) {
-            return Err(VoxelError::OutOfBounds(VoxelPos {
-                x: coord.x as i32,
-                y: coord.y as i32,
-                z: coord.z as i32,
+            return Err(Self::Error::OutOfBounds(VoxelPos {
+                x: coord.x,
+                y: coord.y,
+                z: coord.z,
             }));
         }
         //packed array access

@@ -3,11 +3,13 @@ use hashbrown::HashMap;
 use crate::common::voxelmath::*;
 
 use super::{
-    voxelarray::VoxelArrayStatic, voxelstorage::Voxel, VoxelError, VoxelStorage,
+    voxelarray::{VoxelArrayStatic, VoxelArrayError}, voxelstorage::Voxel, VoxelStorage,
     VoxelStorageBounded,
 };
 
-pub const CHUNK_SIZE: usize = 16;
+
+pub const CHUNK_EXP : usize = 4;
+pub const CHUNK_SIZE: usize = 2_usize.pow(CHUNK_EXP as u32);
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
 pub const CHUNK_RANGE_USIZE: VoxelRange<usize> = VoxelRange {
@@ -25,6 +27,14 @@ pub use super::voxelarray::{
     chunk_z_to_i_component, get_neg_x_offset, get_neg_y_offset, get_neg_z_offset, get_pos_x_offset,
     get_pos_y_offset, get_pos_z_offset,
 };
+
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum ChunkError {
+    #[error("Error in underlying voxel array: {0:?}")]
+    UnderlyingArrayError(#[from] VoxelArrayError),
+}
+
 
 pub struct ChunkSmall<T: Voxel> {
     //Attempting to use the constant causes Rust to freak out for some reason
@@ -178,7 +188,7 @@ impl<T: Voxel> ChunkLarge<T> {
     }
 }
 
-pub enum ChunkData<T: Voxel> {
+pub enum ChunkInner<T: Voxel> {
     ///Chunk that is all one value (usually this is for chunks that are 100% air). Note that, after being converted, idx 0 maps to
     Uniform(T),
     ///Chunk that maps palette to 8-bit values.
@@ -189,96 +199,96 @@ pub enum ChunkData<T: Voxel> {
 
 pub struct Chunk<T: Voxel> {
     pub revision: u64,
-    pub data: ChunkData<T>,
+    pub inner: ChunkInner<T>,
 }
 
 impl<T: Voxel> Chunk<T> {
     pub fn new(default_voxel: T) -> Self {
         Chunk {
             revision: 0,
-            data: ChunkData::Uniform(default_voxel),
+            inner: ChunkInner::Uniform(default_voxel),
         }
     }
 
     #[inline(always)]
     pub fn get_raw_i(&self, i: usize) -> u16 {
-        match &self.data {
-            ChunkData::Uniform(_) => 0,
-            ChunkData::Small(inner) => *inner.get_raw_i(i) as u16,
-            ChunkData::Large(inner) => *inner.get_raw_i(i),
+        match &self.inner {
+            ChunkInner::Uniform(_) => 0,
+            ChunkInner::Small(inner) => *inner.get_raw_i(i) as u16,
+            ChunkInner::Large(inner) => *inner.get_raw_i(i),
         }
     }
 
     #[inline(always)]
     pub fn get_raw(&self, pos: VoxelPos<u16>) -> u16 {
-        match &self.data {
-            ChunkData::Uniform(_) => 0,
-            ChunkData::Small(inner) => *inner.get_raw(pos) as u16,
-            ChunkData::Large(inner) => *inner.get_raw(pos),
+        match &self.inner {
+            ChunkInner::Uniform(_) => 0,
+            ChunkInner::Small(inner) => *inner.get_raw(pos) as u16,
+            ChunkInner::Large(inner) => *inner.get_raw(pos),
         }
     }
     #[inline(always)]
     pub fn set_raw(&mut self, pos: VoxelPos<u16>, value: u16) {
-        match &mut self.data {
+        match &mut self.inner {
             //TODO: Smarter way of handling this case. Currently, just don't.
             //I don't want to return a result type HERE for performance reasons.
-            ChunkData::Uniform(_) => {
+            ChunkInner::Uniform(_) => {
                 if value != 0 {
                     panic!("Attempted to set_raw() on a Uniform chunk!")
                 }
             }
-            ChunkData::Small(ref mut inner) => inner.set_raw(pos, value as u8),
-            ChunkData::Large(ref mut inner) => inner.set_raw(pos, value),
+            ChunkInner::Small(ref mut inner) => inner.set_raw(pos, value as u8),
+            ChunkInner::Large(ref mut inner) => inner.set_raw(pos, value),
         };
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: T) -> Option<u16> {
-        match &self.data {
-            ChunkData::Uniform(val) => {
+        match &self.inner {
+            ChunkInner::Uniform(val) => {
                 if tile == *val {
                     Some(0)
                 } else {
                     None
                 }
             }
-            ChunkData::Small(inner) => inner.index_from_palette(tile).map(|v| v as u16),
-            ChunkData::Large(inner) => inner.index_from_palette(tile),
+            ChunkInner::Small(inner) => inner.index_from_palette(tile).map(|v| v as u16),
+            ChunkInner::Large(inner) => inner.index_from_palette(tile),
         }
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<&T> {
-        match &self.data {
-            ChunkData::Uniform(val) => {
+        match &self.inner {
+            ChunkInner::Uniform(val) => {
                 if idx == 0 {
                     Some(val)
                 } else {
                     None
                 }
             }
-            ChunkData::Small(inner) => inner.tile_from_index(idx),
-            ChunkData::Large(inner) => inner.tile_from_index(idx),
+            ChunkInner::Small(inner) => inner.tile_from_index(idx),
+            ChunkInner::Large(inner) => inner.tile_from_index(idx),
         }
     }
     #[inline(always)]
     pub fn is_palette_dirty(&self) -> bool {
-        match &self.data {
-            ChunkData::Uniform(_) => false,
-            ChunkData::Small(inner) => inner.palette_dirty,
-            ChunkData::Large(inner) => inner.palette_dirty,
+        match &self.inner {
+            ChunkInner::Uniform(_) => false,
+            ChunkInner::Small(inner) => inner.palette_dirty,
+            ChunkInner::Large(inner) => inner.palette_dirty,
         }
     }
     #[inline(always)]
     pub fn mark_palette_dirty_status(&mut self, set_to: bool) {
-        match &mut self.data {
-            ChunkData::Uniform(_) => {}
-            ChunkData::Small(ref mut inner) => inner.palette_dirty = set_to,
-            ChunkData::Large(ref mut inner) => inner.palette_dirty = set_to,
+        match &mut self.inner {
+            ChunkInner::Uniform(_) => {}
+            ChunkInner::Small(ref mut inner) => inner.palette_dirty = set_to,
+            ChunkInner::Large(ref mut inner) => inner.palette_dirty = set_to,
         }
     }
     #[inline]
     pub fn add_to_palette(&mut self, tile: T) -> u16 {
-        match &mut self.data {
-            ChunkData::Uniform(val) => {
+        match &mut self.inner {
+            ChunkInner::Uniform(val) => {
                 if tile == *val {
                     0
                 } else {
@@ -296,7 +306,7 @@ impl<T: Voxel> Chunk<T> {
                     let mut reverse_palette: HashMap<T, u8> = HashMap::default();
                     reverse_palette.insert(val.clone(), 0);
                     reverse_palette.insert(tile, 1);
-                    self.data = ChunkData::Small(Box::new(ChunkSmall {
+                    self.inner = ChunkInner::Small(Box::new(ChunkSmall {
                         inner: structure,
                         palette: palette,
                         reverse_palette: reverse_palette,
@@ -306,34 +316,35 @@ impl<T: Voxel> Chunk<T> {
                     1
                 }
             }
-            ChunkData::Small(inner) => {
+            ChunkInner::Small(inner) => {
                 match inner.add_to_palette(tile.clone()) {
                     Some(idx) => idx,
                     None => {
                         //We need to expand it.
                         let mut new_inner = Box::new(inner.expand());
                         let idx = new_inner.add_to_palette(tile); //We just went from u8s to u16s, the ID space has quite certainly
-                        self.data = ChunkData::Large(new_inner);
+                        self.inner = ChunkInner::Large(new_inner);
                         idx
                     }
                 }
             }
-            ChunkData::Large(inner) => inner.add_to_palette(tile),
+            ChunkInner::Large(inner) => inner.add_to_palette(tile),
         }
     }
 }
 
 impl<T: Voxel> VoxelStorage<T, u16> for Chunk<T> {
+    type Error = VoxelArrayError;
     #[inline(always)]
-    fn get(&self, pos: VoxelPos<u16>) -> Result<&T, VoxelError> {
-        match &self.data {
-            ChunkData::Uniform(val) => Ok(val),
-            ChunkData::Small(inner) => Ok(inner.get(pos)),
-            ChunkData::Large(inner) => Ok(inner.get(pos)),
+    fn get(&self, pos: VoxelPos<u16>) -> Result<&T, VoxelArrayError> {
+        match &self.inner {
+            ChunkInner::Uniform(val) => Ok(val),
+            ChunkInner::Small(inner) => Ok(inner.get(pos)),
+            ChunkInner::Large(inner) => Ok(inner.get(pos)),
         }
     }
     #[inline]
-    fn set(&mut self, pos: VoxelPos<u16>, tile: T) -> Result<(), VoxelError> {
+    fn set(&mut self, pos: VoxelPos<u16>, tile: T) -> Result<(), VoxelArrayError> {
         let idx = self.add_to_palette(tile.clone());
         //Did we just change something?
         if self.get(pos)? != &tile {
@@ -396,7 +407,7 @@ fn assignemnts_to_chunk() {
     let u2 = String::from("stone");
     let mut test_chunk = Chunk {
         revision: 0,
-        data: ChunkData::Uniform(u1.clone()),
+        inner: ChunkInner::Uniform(u1.clone()),
     };
 
     {
@@ -406,7 +417,7 @@ fn assignemnts_to_chunk() {
     }
 
     let mut valid_result = false;
-    if let ChunkData::Uniform(_) = test_chunk.data {
+    if let ChunkInner::Uniform(_) = test_chunk.inner {
         valid_result = true;
     }
     assert!(valid_result);
@@ -432,7 +443,7 @@ fn assignemnts_to_chunk() {
     }
 
     let mut valid_result = false;
-    if let ChunkData::Small(_) = test_chunk.data {
+    if let ChunkInner::Small(_) = test_chunk.inner {
         valid_result = true;
     }
     assert!(valid_result);
@@ -469,7 +480,7 @@ fn assignemnts_to_chunk() {
     }
 
     let mut valid_result = false;
-    if let ChunkData::Small(_) = test_chunk.data {
+    if let ChunkInner::Small(_) = test_chunk.inner {
         valid_result = true;
     }
     assert!(valid_result);
@@ -500,7 +511,7 @@ fn assignemnts_to_chunk() {
         }
     }
     let mut valid_result = false;
-    if let ChunkData::Large(_) = test_chunk.data {
+    if let ChunkInner::Large(_) = test_chunk.inner {
         valid_result = true;
     }
     assert!(valid_result);
