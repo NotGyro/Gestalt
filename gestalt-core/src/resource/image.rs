@@ -2,7 +2,7 @@ use std::error::Error;
 
 use image::{ImageError, RgbaImage};
 
-use super::{ResourceDescriptor, ResourceId, ResourceStatus};
+use super::{ResourceInfo, ResourceId, ResourceStatus};
 
 pub const ID_MISSING_TEXTURE: ResourceId = ResourceId {
     version: 0,
@@ -35,5 +35,5 @@ pub trait ImageProvider {
         &mut self,
         image: &ResourceId,
     ) -> ResourceStatus<&InternalImage, RetrieveImageError>;
-    fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceDescriptor>;
+    fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceInfo>;
 }

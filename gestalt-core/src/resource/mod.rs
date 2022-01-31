@@ -1,4 +1,4 @@
-use crate::common::identity::{NodeIdentity, Signature};
+use crate::common::identity::NodeIdentity;
 
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
@@ -8,7 +8,10 @@ use sha2::Digest;
 use std::fmt::Debug;
 use std::{cmp::PartialEq, hash::Hash, sync::Arc};
 
+use string_cache::DefaultAtom as Atom;
+
 pub mod image;
+//pub mod module; //Beware of redundant names. 
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
@@ -216,43 +219,64 @@ pub mod resourceid_base64_string {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+pub enum ResourceKind {
+    /// A "Manifest" is any kind of declarative config structure as a resource.
+    /// TileDef, ArtDef, ModelDef, animations, and other such things go here.
+    Manifest, 
+    /// Modules can run code and establish namespaces. As such, they act like
+    /// a manifest in that they can have dependencies, but they're special.
+    ModuleManifest,
+    /// Plain Old Data is exactly what it sounds like. We have a reference to a 
+    /// file, the file gets loaded by the system as a buffer of bytes. For example,
+    /// images, models, sound clips, common voxel models exported in some voxel library,
+    /// that kind of thing.
+    PlainOldData,
+}
+
 /// Used to keep track of a resource locally
 #[derive(Clone, Debug, Serialize, Deserialize, PartialOrd)]
-pub struct ResourceDescriptor {
+pub struct ResourceInfo {
     /// Which resource?
     #[serde(with = "crate::resource::resourceid_base64_string")]
     pub id: ResourceId,
-    /// What did the "origin" user call this resource?
+    /// What did the "creator" user call this resource?
     pub filename: String,
     /// Directory structure leading up to "filename", to disambiguate it.
     pub path: Option<Vec<String>>,
-    /// Which user did we get this resource from? Who signed it, who is the authority on it?
-    pub origin: NodeIdentity,
-    /// Expected type.
+    /// Which user claims to have "made" this resource? Who signed it, who is the authority on it?
+    pub creator: NodeIdentity,
+    /// What broad category of things does this resource fall into?
+    pub kind: ResourceKind,
+    /// Expected type. MIME Type for PlainOldData, @{ManifestType} for manifest types e.g. @Module
     pub resource_type: String,
-    /// Name of origin user and friends who made this resource.
+    /// Name of creator user and friends who made this resource.
     pub authors: String,
-    /// Signature verifying our binary blob as good, signed with the public key from NodeIdentity.
-    pub signature: Signature,
+    /// What does the author have to say about this one? 
+    pub description: Option<String>,
+    // /// Is there anything else we need to make use of this resource? I love recursion. 
+    // pub dependencies: Option<Vec<Box<ResourceInfo>>>,
+    // /// Signature verifying our binary blob (referred to by ResourceId) as good, signed with the public key from creator's NodeIdentity.
+    // pub resource_signature: Signature,
 }
 
-impl Hash for ResourceDescriptor {
+impl Hash for ResourceInfo {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
-        self.origin.hash(state);
+        self.creator.hash(state);
     }
 }
 
-impl PartialEq for ResourceDescriptor {
+impl PartialEq for ResourceInfo {
     fn eq(&self, other: &Self) -> bool {
         //Elide name.
-        self.origin == other.origin && self.id == other.id
+        self.creator == other.creator && self.id == other.id
         //The naive form of this would be self.id == other.id && self.origin == other.origin && self.name == other.name
         //but we want equality to be entirely based on origin and hash.
     }
 }
 
-impl Eq for ResourceDescriptor {}
+impl Eq for ResourceInfo {}
 
 pub enum ResourceStatus<T, E>
 where
@@ -316,15 +340,15 @@ where
 }*/
 
 lazy_static! {
-    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceDescriptor>>> =
+    pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceInfo>>> =
         Arc::new(Mutex::new(HashMap::default()));
 }
 
-pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceDescriptor) {
+pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceInfo) {
     RESOURCE_METADATA.lock().insert(id.clone(), info.clone());
 }
 
-pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> {
+pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceInfo> {
     let guard = RESOURCE_METADATA.lock();
     guard.get(id).map(|v| v.clone())
 }
@@ -332,14 +356,14 @@ pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceDescriptor> {
 #[derive(Clone)]
 pub enum ResourceIdOrMeta {
     Id(ResourceId),
-    Meta(ResourceDescriptor),
+    Meta(ResourceInfo),
 }
 impl ResourceIdOrMeta {
     pub fn short_name(&self) -> String {
         match self {
             ResourceIdOrMeta::Id(id) => format!("ResourceId {} (metadata not found)", id),
             ResourceIdOrMeta::Meta(meta) => {
-                format!("{} (from user {:?})", meta.filename, meta.origin)
+                format!("{} (from user {:?})", meta.filename, meta.creator)
             }
         }
     }

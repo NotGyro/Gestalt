@@ -18,7 +18,7 @@ use winit::{
     window::Fullscreen,
 };
 
-use crate::common::voxelmath::VoxelPos;
+use crate::{common::voxelmath::VoxelPos, resource::ResourceKind};
 use crate::{
     client::render::{
         tiletextureatlas::build_tile_atlas,
@@ -28,11 +28,11 @@ use crate::{
     common::identity::NodeIdentity,
     resource::{
         image::{ImageProvider, InternalImage, RetrieveImageError},
-        update_global_resource_metadata, ResourceDescriptor, ResourceId, ResourceStatus,
+        update_global_resource_metadata, ResourceInfo, ResourceId, ResourceStatus,
     },
     world::{
         chunk::{Chunk, CHUNK_SIZE},
-        TileId, VoxelStorage, VoxelStorageBounded,
+        TileStateId, VoxelStorage, VoxelStorageBounded,
     },
 };
 
@@ -152,7 +152,7 @@ pub enum StartClientError {
 // Loads images for the purposes of testing in development.
 pub struct DevImageLoader {
     pub(crate) images: HashMap<ResourceId, RgbaImage>,
-    pub(crate) metadata: HashMap<ResourceId, ResourceDescriptor>,
+    pub(crate) metadata: HashMap<ResourceId, ResourceInfo>,
 }
 
 impl ImageProvider for DevImageLoader {
@@ -168,7 +168,7 @@ impl ImageProvider for DevImageLoader {
         }
     }
 
-    fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceDescriptor> {
+    fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceInfo> {
         self.metadata.get(image)
     }
 }
@@ -182,7 +182,6 @@ impl DevImageLoader {
     }
 
     //A simple function for the purposes of testing in development
-    #[no_mangle]
     fn preload_image_file(&mut self, filename: &str) -> Result<ResourceId, Box<dyn Error>> {
         let mut open_options = std::fs::OpenOptions::new();
         open_options.read(true).create(false);
@@ -197,14 +196,15 @@ impl DevImageLoader {
 
         rid.verify(buf.as_slice())?;
 
-        let metadata = ResourceDescriptor {
+        let metadata = ResourceInfo {
             id: rid.clone(),
             filename: filename.to_string(),
             path: None,
-            origin: NodeIdentity {},
+            creator: NodeIdentity {},
             resource_type: "image/png".to_string(),
-            authors: "".to_string(),
-            signature: (),
+            authors: "Gyro".to_string(),
+            description: None,
+            kind: ResourceKind::PlainOldData,
         };
 
         update_global_resource_metadata(&rid, metadata.clone());
@@ -324,7 +324,7 @@ pub fn run_client() {
     let test_dirt_image_id = image_loader.preload_image_file("testdirt.png").unwrap();
     //let testlet_image_id = image_loader.preload_image_file("testlet.png").unwrap();
 
-    let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
+    let mut tiles_to_art: HashMap<TileStateId, CubeArt> = HashMap::new();
 
     tiles_to_art.insert(air_id, CubeArt::airlike());
     tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id));

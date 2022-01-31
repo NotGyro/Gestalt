@@ -3,6 +3,8 @@ use std::hash::Hash;
 
 use crate::common::voxelmath::*;
 
+use super::{TileCoord, TilePos};
+
 pub trait Voxel: Clone + Debug + PartialEq + Eq + Hash {}
 impl<T> Voxel for T where T: Clone + Debug + PartialEq + Eq + Hash {}
 
@@ -109,6 +111,23 @@ pub trait VoxelNeighborhood: Clone {
 
 pub trait VsNeighborhoodOps<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {
     type NeighborhoodType: VoxelNeighborhood<SourceVoxel = T>;
+}
+
+pub trait VoxelSpace<T: Voxel> : VoxelStorage<T, TileCoord> {
+    /// Coordinate of a chunk
+    type ChunkCoord : VoxelCoord;
+    /// Coordinate of a voxel inside a chunk
+    type WithinChunkCoord : VoxelCoord;
+    type Chunk : VoxelStorageBounded<T, Self::WithinChunkCoord>;
+
+    fn is_loaded(&self, voxel: TilePos) -> bool;
+
+    /// Try to borrow a chunk immutably. If it isn't loaded yet, returns None.
+    fn borrow_chunk(&self, chunk: &VoxelPos<Self::ChunkCoord>) -> Result<&Self::Chunk, Self::Error>;
+    /// Try to borrow a chunk mutably. If it isn't loaded yet, returns None.
+    fn borrow_chunk_mut(&mut self, chunk: &VoxelPos<Self::ChunkCoord>) -> Result<&mut Self::Chunk, Self::Error>;
+
+    fn get_loaded_chunks(&self) -> Vec<&VoxelPos<Self::ChunkCoord>>;
 }
 
 /*
