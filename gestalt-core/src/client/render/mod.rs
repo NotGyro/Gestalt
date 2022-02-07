@@ -103,10 +103,26 @@ pub struct TerrainRenderer {
 }
 
 impl TerrainRenderer {
+    pub fn new(texture_size: u32) -> Self { 
+        TerrainRenderer {
+            pending_remesh: HashSet::default(),
+            meshed_chunks: HashMap::default(),
+            built_chunks: HashMap::default(),
+            texture_for_chunk: HashMap::default(),
+            texture_layouts: HashMap::default(),
+            built_textures: HashMap::default(),
+            next_texture_id: 0,
+            texture_size,
+        }
+    }
     /// Inform this terrain renderer that a block at the given position has changed.
     pub fn notify_changed(&mut self, tile_position: &TilePos) { 
         let chunk_position = world_to_chunk_pos(tile_position);
         self.pending_remesh.insert(chunk_position);
+    }
+    /// Inform this terrain renderer that a specific chunk needs to be remeshed.
+    pub fn notify_chunk_remesh_needed(&mut self, chunk_position: &ChunkPos) {
+        self.pending_remesh.insert(*chunk_position);
     }
     /// Inform this terrain renderer that the chunk mesh at the given position should
     /// not be kept in memory.
@@ -128,7 +144,7 @@ impl TerrainRenderer {
         let new_texture_id = self.next_texture_id;
         self.next_texture_id += 1;
         let new_atlas = TileAtlasLayout::new(self.texture_size, 32, 8, Some(4096));
-        self.texture_layouts.insert(new_texture_id, new_atlas).unwrap();
+        self.texture_layouts.insert(new_texture_id, new_atlas);
         ChunkTextureBinding{ 
             texture_id: new_texture_id,
             tile_atlas_revision: 0,
@@ -199,6 +215,7 @@ impl TerrainRenderer {
             let image = build_tile_atlas(tile_atlas, texture_source)?;
             // Set up Rend3 texture handle. 
             
+            println!("Building a texture!");
             let atlas_texture = rend3::types::Texture {
                 label: Option::None,
                 data: image.to_vec(),

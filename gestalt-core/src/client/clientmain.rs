@@ -18,7 +18,7 @@ use winit::{
     window::Fullscreen,
 };
 
-use crate::{common::voxelmath::VoxelPos, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner}};
+use crate::{common::voxelmath::{VoxelPos, VoxelRange}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::TileSpace}, client::render::TerrainRenderer};
 use crate::{
     client::render::{
         tiletextureatlas::build_tile_atlas,
@@ -300,92 +300,7 @@ pub fn run_client() {
         drop(adapters);
         drop(instance);
     }
-
-    //Set up a test chunk.
-    let air_id = 0;
-    let stone_id = 1;
-    let dirt_id = 2;
-    let grass_id = 3;
-    let dome_thing_id = 4;
-    let mut test_chunk: Chunk<u32> = Chunk::new(air_id);
-    for i in test_chunk.get_bounds() {
-        if i.y >= (CHUNK_SIZE as u16) / 2 {
-            let vec = Vec3::new(
-                (i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
-                (i.y as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
-                (i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
-            );
-            if vec.length_squared() <= 6.5f32 * 6.5f32 {
-                test_chunk.set(i, dome_thing_id).unwrap();
-            }
-        } else {
-            if i.y > 5 {
-                test_chunk.set(i, dirt_id).unwrap();
-            } else {
-                test_chunk.set(i, stone_id).unwrap();
-            }
-        }
-    }
-
-    //let testpos = vpos!(7, 15, 7);
-    //test_chunk.set(testpos, grass_id).unwrap();
-    // Print this thing out
-    for y in 0..CHUNK_SIZE {
-        println!("---------------");
-        for z in 0..CHUNK_SIZE {
-            let mut row_string = String::default();
-            for x in 0..CHUNK_SIZE {
-                let pos = vpos!(x as u16, y as u16, z as u16);
-                let out = test_chunk.get(pos).unwrap();
-                if *out == 0 {
-                    row_string.push_str("#");
-                } else {
-                    let outstr = format!("{}", out);
-                    row_string.push_str(outstr.as_str());
-                }
-            }
-            println!("{}", row_string);
-        }
-    }
-    let mut image_loader = DevImageLoader::new();
-
-    let test_dome_thing_image_id = image_loader.preload_image_file("test.png").unwrap();
-    let test_grass_image_id = image_loader.preload_image_file("testgrass.png").unwrap();
-    let test_stone_image_id = image_loader.preload_image_file("teststone.png").unwrap();
-    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png").unwrap();
-    //let testlet_image_id = image_loader.preload_image_file("testlet.png").unwrap();
-
-    let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
-
-    tiles_to_art.insert(air_id, CubeArt::airlike());
-    tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id));
-    tiles_to_art.insert(dirt_id, CubeArt::simple_solid_block(&test_dirt_image_id));
-    tiles_to_art.insert(grass_id, CubeArt::simple_solid_block(&test_grass_image_id));
-    tiles_to_art.insert(
-        dome_thing_id,
-        CubeArt::simple_solid_block(&test_dome_thing_image_id),
-    );
-
-    let mesh_start = Instant::now();
-    let (chunk_mesh, atlas) = make_mesh_completely(64, &test_chunk, &tiles_to_art).unwrap();
-    let millis = (mesh_start.elapsed().as_micros() as f32) / 1000.0;
-    println!("Took {} milliseconds to mesh a chunk", millis);
-
-    let atlas_image = build_tile_atlas(&atlas, &mut image_loader).unwrap();
-
-    let millis = (mesh_start.elapsed().as_micros() as f32) / 1000.0;
-    println!("Took {} milliseconds for the combined effort of meshing a chunk and building a texture atlas", millis);
-
-    let atlas_texture = rend3::types::Texture {
-        label: Option::None,
-        data: atlas_image.to_vec(),
-        format: rend3::types::TextureFormat::Rgba8UnormSrgb,
-        size: glam::UVec2::new(atlas_image.dimensions().0, atlas_image.dimensions().1),
-        //No mipmaps allowed
-        mip_count: rend3::types::MipmapCount::ONE,
-        mip_source: rend3::types::MipmapSource::Uploaded,
-    };
-
+    
     // Create the Instance, Adapter, and Device. We can specify preferred backend,
     // device name, or rendering mode. In this case we let rend3 choose for us.
     let iad = pollster::block_on(rend3::create_iad(
@@ -442,41 +357,57 @@ pub fn run_client() {
         format,
     );
 
-    // Create mesh
-    let ChunkMesh { verticies, uv } = chunk_mesh;
-    let mesh = MeshBuilder::new(verticies, Handedness::Left)
-        .with_vertex_uv0(uv)
-        .build()
-        .unwrap();
+    //Set up some test art assets.
+    let air_id = 0;
+    let stone_id = 1;
+    let dirt_id = 2;
+    let grass_id = 3;
+    let dome_thing_id = 4;
 
-    // Add mesh to renderer's world.
-    // All handles are refcounted, so we only need to hang onto the handle until we make an object.
-    let mesh_handle = renderer.add_mesh(mesh);
+    let mut image_loader = DevImageLoader::new();
 
-    let chunk_texture_handle = renderer.add_texture_2d(atlas_texture);
+    let test_dome_thing_image_id = image_loader.preload_image_file("test.png").unwrap();
+    let test_grass_image_id = image_loader.preload_image_file("testgrass.png").unwrap();
+    let test_stone_image_id = image_loader.preload_image_file("teststone.png").unwrap();
+    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png").unwrap();
 
-    // Add PBR material with all defaults except a single color.
-    let material = rend3_routine::pbr::PbrMaterial {
-        albedo: rend3_routine::pbr::AlbedoComponent::Texture(chunk_texture_handle),
-        unlit: true,
-        sample_type: rend3_routine::pbr::SampleType::Nearest,
-        ..rend3_routine::pbr::PbrMaterial::default()
-    };
-    let material_handle = renderer.add_material(material);
+    let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
-    // Combine the mesh and the material with a location to give an object.
-    let object = rend3::types::Object {
-        mesh: mesh_handle,
-        material: material_handle,
-        transform: glam::Mat4::IDENTITY,
-    };
+    tiles_to_art.insert(air_id, CubeArt::airlike());
+    tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id));
+    tiles_to_art.insert(dirt_id, CubeArt::simple_solid_block(&test_dirt_image_id));
+    tiles_to_art.insert(grass_id, CubeArt::simple_solid_block(&test_grass_image_id));
+    tiles_to_art.insert(
+        dome_thing_id,
+        CubeArt::simple_solid_block(&test_dome_thing_image_id),
+    );
 
-    // Creating an object will hold onto both the mesh and the material
-    // even if they are deleted.
-    //
-    // We need to keep the object handle alive.
-    let _object_handle = renderer.add_object(object);
+    // Set up our test world a bit 
+    let mut world_space = TileSpace::new();
+    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(4,4,4), lower: vpos!(-4,-4,-4) };
+    // Set up our voxel mesher.
+    let mut terrain_renderer = TerrainRenderer::new(64);
 
+    let worldgen_start = Instant::now();
+    // Build chunks and then immediately let the mesher know they're new. 
+    for chunk_position in test_world_range {
+        let chunk = gen_test_chunk(chunk_position);
+        world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
+        terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
+    }
+    let worldgen_elapsed_millis = (worldgen_start.elapsed().as_micros() as f32 / 1000.0); 
+    println!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+
+    //Remesh
+    let meshing_start = Instant::now();
+    terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
+    let meshing_elapsed_millis = (meshing_start.elapsed().as_micros() as f32 / 1000.0); 
+    println!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
+    terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
+    let meshing_elapsed_millis = (meshing_start.elapsed().as_micros() as f32 / 1000.0); 
+    println!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
+
+    // Set up camera and view 
     let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
     let mut camera = camera::Camera::new(view_location);
 

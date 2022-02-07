@@ -53,7 +53,7 @@ impl TileSpace {
             Err(TileSpaceError::LoadExistingChunk(pos))
         }
         else {
-            self.chunks.insert(pos, chunk).unwrap();
+            self.chunks.insert(pos, chunk);
             Ok(())
         }
     }
