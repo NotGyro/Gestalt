@@ -14,7 +14,7 @@ use crate::{
     world::{
         chunk::{Chunk, ChunkInner, CHUNK_SIZE},
         voxelstorage::Voxel,
-        TileStateId,
+        TileId,
     },
 };
 
@@ -396,13 +396,13 @@ pub enum ArtCacheHolder {
 
 pub struct MesherState<'a> {
     pub art_cache: ArtCacheHolder,
-    pub chunk: &'a Chunk<TileStateId>,
+    pub chunk: &'a Chunk<TileId>,
     pub textures_needed: HashSet<ResourceId>,
 }
 
 impl<'a> MesherState<'a> {
-    pub fn prepare_to_mesh<A: CubeArtMapper<TileStateId>>(
-        chunk: &'a Chunk<TileStateId>,
+    pub fn prepare_to_mesh<A: CubeArtMapper<TileId>>(
+        chunk: &'a Chunk<TileId>,
         tiles_to_art: &A,
         atlas: &mut TileAtlasLayout,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -509,9 +509,9 @@ impl<'a> MesherState<'a> {
 }
 
 // Make a mesh in one single blocking action (does not permit you to share one tile atlas between chunks)
-pub fn make_mesh_completely<A: CubeArtMapper<TileStateId>>(
+pub fn make_mesh_completely<A: CubeArtMapper<TileId>>(
     texture_size: u32,
-    chunk: &Chunk<TileStateId>,
+    chunk: &Chunk<TileId>,
     tiles_to_art: &A,
 ) -> Result<(ChunkMesh, TileAtlasLayout), Box<dyn std::error::Error>> {
     let mut atlas = TileAtlasLayout::new(texture_size, 32, 8, None);

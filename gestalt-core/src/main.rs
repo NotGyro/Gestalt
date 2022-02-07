@@ -5,6 +5,7 @@
 #![feature(generic_const_exprs)]
 #![feature(const_fn_trait_bound)]
 #![feature(int_roundings)]
+#![feature(associated_type_bounds)]
 
 #[macro_use]
 pub mod common;

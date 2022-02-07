@@ -7,12 +7,14 @@ use crate::common::voxelmath::*;
 #[allow(unused_variables)]
 #[inline(always)]
 pub const fn chunk_x_to_i_component(x: usize, chunk_size: usize) -> usize {
-    x
+    x * chunk_size
 }
+#[allow(unused_variables)]
 #[inline(always)]
 pub const fn chunk_y_to_i_component(y: usize, chunk_size: usize) -> usize {
-    y * chunk_size
+    y
 }
+#[allow(unused_variables)]
 #[inline(always)]
 pub const fn chunk_z_to_i_component(z: usize, chunk_size: usize) -> usize {
     z * (chunk_size * chunk_size)
@@ -29,8 +31,8 @@ pub const fn chunk_xyz_to_i(x: usize, y: usize, z: usize, chunk_size: usize) -> 
 pub const fn chunk_i_to_xyz(i: usize, chunk_size: usize) -> (usize, usize, usize) {
     let chunk_squared = chunk_size * chunk_size;
     let z = i / (chunk_squared);
-    let y = (i - z * chunk_squared) / chunk_size;
-    let x = i - ((z * chunk_squared) + (y * chunk_size));
+    let x = (i - z * chunk_squared) / chunk_size;
+    let y = i - ((z * chunk_squared) + (x * chunk_size));
     (x, y, z)
 }
 
@@ -117,7 +119,7 @@ pub struct VoxelArray<T: Voxel> {
 impl<T: Voxel> VoxelArray<T> {
     pub fn load_new(size: u16, dat: Vec<T>) -> VoxelArray<T> {
         let num_elements = size as usize; 
-        assert!(dat.len() < (num_elements * num_elements * num_elements) );
+        assert!(dat.len() <= (num_elements * num_elements * num_elements) );
         let bnd = VoxelRange::<u16> {
             lower: VoxelPos::<u16> { x: 0, y: 0, z: 0 },
             upper: VoxelPos {

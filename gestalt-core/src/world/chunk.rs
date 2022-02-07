@@ -8,7 +8,7 @@ use crate::common::{voxelmath::*, Version};
 
 use super::{
     voxelarray::{VoxelArrayStatic, VoxelArrayError}, voxelstorage::Voxel, VoxelStorage,
-    VoxelStorageBounded, TileStateId,
+    VoxelStorageBounded, TileId,
 };
 
 pub const CHUNK_FILE_VERSION: Version = version!(0,0,1);
@@ -336,7 +336,7 @@ impl<T: Voxel> Chunk<T> {
     }
 }
 
-impl Chunk<TileStateId> {
+impl Chunk<TileId> {
     //How many bytes will be needed to encode our palette? 
     pub fn calculate_bytes_for_palette(&self) -> usize { 
         match &self.inner {
@@ -502,13 +502,13 @@ impl<T: Voxel> VoxelStorageBounded<T, u16> for Chunk<T> {
 #[repr(C)]
 /// In a small-variant chunk, index is implicit.
 pub struct SmallPaletteEntry { 
-    to_tile: TileStateId,
+    to_tile: TileId,
 }
 
 impl SmallPaletteEntry { 
     //How many bytes will this take up on disk?
     pub const fn serialized_length() -> usize {
-        std::mem::size_of::<TileStateId>()
+        std::mem::size_of::<TileId>()
     }
     fn to_le_bytes(&self) -> [u8; 4] {
         #[cfg(debug_assertions)]
@@ -524,7 +524,7 @@ impl SmallPaletteEntry {
             assert_eq!(Self::serialized_length(), 4)
         }
 
-        let id = TileStateId::from_le_bytes(bytes);
+        let id = TileId::from_le_bytes(bytes);
         Self { 
             to_tile: id
         }
@@ -535,14 +535,14 @@ impl SmallPaletteEntry {
 #[repr(C)]
 pub struct LargePaletteEntry { 
     from_index: u16,
-    to_tile: TileStateId,
+    to_tile: TileId,
 }
 
 impl LargePaletteEntry { 
     //How many bytes will this take up on disk?
     pub const fn serialized_length() -> usize {
         std::mem::size_of::<u16>()
-        + std::mem::size_of::<TileStateId>()
+        + std::mem::size_of::<TileId>()
     }
     fn to_le_bytes(&self) -> [u8; 6] { 
         #[cfg(debug_assertions)]
@@ -570,7 +570,7 @@ impl LargePaletteEntry {
             bytes[0],
             bytes[1],
         ]);
-        let id = TileStateId::from_le_bytes([ 
+        let id = TileId::from_le_bytes([ 
             bytes[2],
             bytes[3],
             bytes[4],
@@ -583,8 +583,8 @@ impl LargePaletteEntry {
     }
 }
 
-pub fn deserialize_small_chunk_palette(buf: &[u8], highest_idx: u8) -> Result<[TileStateId; 256], ChunkIoError> {
-    let mut output_buffer: [TileStateId; 256] = [TileStateId::default(); 256];
+pub fn deserialize_small_chunk_palette(buf: &[u8], highest_idx: u8) -> Result<[TileId; 256], ChunkIoError> {
+    let mut output_buffer: [TileId; 256] = [TileId::default(); 256];
 
     // Make sure it divides evenly into palette entries. 
     let entry_size = SmallPaletteEntry::serialized_length();
@@ -610,7 +610,7 @@ pub fn deserialize_small_chunk_palette(buf: &[u8], highest_idx: u8) -> Result<[T
     Ok(output_buffer)
 }
 
-pub fn deserialize_large_chunk_palette(buf: &[u8]) -> Result<HashMap<u16, TileStateId>, ChunkIoError> {
+pub fn deserialize_large_chunk_palette(buf: &[u8]) -> Result<HashMap<u16, TileId>, ChunkIoError> {
     // Make sure it divides evenly into palette entries. 
     let entry_size = LargePaletteEntry::serialized_length();
     if buf.len() % entry_size != 0 { 
@@ -622,7 +622,7 @@ pub fn deserialize_large_chunk_palette(buf: &[u8]) -> Result<HashMap<u16, TileSt
 
     // Wait until this point to initialize our output buffer,
     // so that we can make an educated guess at how big of a HashMap we'll need.
-    let mut output: HashMap<u16, TileStateId> = HashMap::with_capacity(num_entries);
+    let mut output: HashMap<u16, TileId> = HashMap::with_capacity(num_entries);
 
     for i in 0..num_entries { 
         let mut entry_bytes: [u8; LargePaletteEntry::serialized_length()] = [0;LargePaletteEntry::serialized_length()];
@@ -807,7 +807,7 @@ impl ChunkFileHeader {
     }
 }
 
-pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<Chunk<TileStateId>, ChunkIoError> {
+pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<Chunk<TileId>, ChunkIoError> {
     let mut pre_header_bytes = [0u8; ChunkFilePreHeader::serialized_length()];
     reader.read_exact(&mut pre_header_bytes)?;
 
@@ -1064,7 +1064,7 @@ fn chunk_serialize_deserialize() {
     let air_block = 0; 
     let stone_block = 37; 
 
-    let starting_chunk: Chunk<TileStateId> = Chunk {
+    let starting_chunk: Chunk<TileId> = Chunk {
         revision: 1337,
         inner: ChunkInner::Uniform(stone_block),
     };
@@ -1122,7 +1122,7 @@ fn chunk_serialize_deserialize() {
     
     // Let's modify the chunk a bit, getting a Large variant chunk
     for pos in chunk.get_bounds() {
-        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileStateId;
+        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileId;
         chunk.set(pos, value).unwrap();
     }
 
@@ -1142,7 +1142,7 @@ fn chunk_serialize_deserialize() {
     drop(buffer);
 
     for pos in chunk.get_bounds() { 
-        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileStateId;
+        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileId;
         assert_eq!(*chunk.get(pos).unwrap(), value);
     }
 }

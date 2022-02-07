@@ -18,7 +18,7 @@ use winit::{
     window::Fullscreen,
 };
 
-use crate::{common::voxelmath::VoxelPos, resource::ResourceKind};
+use crate::{common::voxelmath::VoxelPos, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner}};
 use crate::{
     client::render::{
         tiletextureatlas::build_tile_atlas,
@@ -32,7 +32,7 @@ use crate::{
     },
     world::{
         chunk::{Chunk, CHUNK_SIZE},
-        TileStateId, VoxelStorage, VoxelStorageBounded,
+        TileId, VoxelStorage, VoxelStorageBounded,
     },
 };
 
@@ -216,6 +216,37 @@ impl DevImageLoader {
     }
 }
 
+/// Dirt simple worldgen for the sake of early testing / development
+pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
+    const AIR_ID: TileId = 0; 
+    const STONE_ID: TileId = 1; 
+    const DIRT_ID: TileId = 2; 
+    const GRASS_ID: TileId = 3; 
+
+    if chunk_position.y > 0 { 
+        Chunk {
+            revision: 0,
+            inner: ChunkInner::Uniform(AIR_ID),
+        }
+    } else if chunk_position.y == 0 {
+        let mut chunk = Chunk::new(STONE_ID);
+        for pos in chunk.get_bounds() { 
+            if pos.y == (CHUNK_SIZE as u16 - 1) {
+                chunk.set(pos, GRASS_ID).unwrap();
+            } else if pos.y > (CHUNK_SIZE as u16 - 4) { 
+                chunk.set(pos, DIRT_ID).unwrap();
+            }
+            //Otherwise it stays stone. 
+        }
+        chunk
+    } else /* chunk_position.y is less than zero */ { 
+        Chunk {
+            revision: 0,
+            inner: ChunkInner::Uniform(STONE_ID),
+        }
+    }
+}
+
 pub fn run_client() {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
@@ -324,7 +355,7 @@ pub fn run_client() {
     let test_dirt_image_id = image_loader.preload_image_file("testdirt.png").unwrap();
     //let testlet_image_id = image_loader.preload_image_file("testlet.png").unwrap();
 
-    let mut tiles_to_art: HashMap<TileStateId, CubeArt> = HashMap::new();
+    let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
     tiles_to_art.insert(air_id, CubeArt::airlike());
     tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id));

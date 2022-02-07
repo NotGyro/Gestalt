@@ -18,6 +18,8 @@ pub enum VoxelErrorCategory {
     NotYetLoaded,
     InvalidTileInput,
     PaletteIssue,
+    /// Any error encountered while trying to load a chunk
+    LoadingIssue,
     Other,
 }
 
@@ -39,7 +41,7 @@ pub trait VoxelError: std::error::Error + std::fmt::Debug {
 /// calling these methods / treating them as "flat" voxel
 /// structures implies acting on a level of detail of 0.
 pub trait VoxelStorage<T: Voxel, P: VoxelCoord> {
-    type Error: VoxelError;
+    type Error: VoxelError + Sized;
     fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error>;
     fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), Self::Error>;
 }
@@ -57,62 +59,6 @@ pub trait VoxelStorageBounded<T: Voxel, P: VoxelCoord>: VoxelStorage<T, P> {
             * (self.get_bounds().upper.z - self.get_bounds().lower.z)
     }
 }
-
-pub trait VsBulkOps<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {
-    /// Iterate over each voxel in this area.
-    fn each_voxel<F: FnMut(T)>(&self, func: F);
-    /// Iterate over each voxel and its (local to this chunk!) coordinate in this area.
-    fn each_cell<F: FnMut(T, P)>(&self, func: F);
-    /// Iterate over each voxel, yielding a new voxel to replace it in this chunk.
-    fn map_voxels<F: FnOnce(T) -> T>(&mut self, func: F);
-    /// Iterate over each voxel and its (local to this chunk!) coordinate, yielding a new voxel to replace it in this chunk.
-    fn map_cells<F: FnOnce(T, P) -> T>(&mut self, func: F);
-}
-
-/// Like Into but it may panic.
-pub trait UnwrapInto<T> {
-    fn unwrap_into(self) -> T;
-}
-impl<T> UnwrapInto<T> for Option<T> {
-    fn unwrap_into(self) -> T {
-        self.unwrap()
-    }
-}
-impl<T> UnwrapInto<T> for T {
-    fn unwrap_into(self) -> T {
-        self
-    }
-}
-impl<T, E> UnwrapInto<T> for Result<T, E>
-where
-    E: std::fmt::Debug,
-{
-    fn unwrap_into(self) -> T {
-        self.unwrap()
-    }
-}
-
-/// A voxel and adjacent voxels in 6 cardinal directions. Type arguments: T (The type we store) and V (the voxel type we map to / from).
-pub trait VoxelNeighborhood: Clone {
-    type SourceVoxel: Voxel;
-    type OurVoxel: UnwrapInto<Self::SourceVoxel>;
-    fn new(
-        center: Self::SourceVoxel,
-        posi_x: Self::SourceVoxel,
-        posi_y: Self::SourceVoxel,
-        posi_z: Self::SourceVoxel,
-        nega_x: Self::SourceVoxel,
-        nega_y: Self::SourceVoxel,
-        nega_z: Self::SourceVoxel,
-    ) -> Self;
-    fn get_center(&self) -> &Self::OurVoxel;
-    fn get(&self, neighbor: VoxelSide) -> &Self::OurVoxel;
-}
-
-pub trait VsNeighborhoodOps<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {
-    type NeighborhoodType: VoxelNeighborhood<SourceVoxel = T>;
-}
-
 pub trait VoxelSpace<T: Voxel> : VoxelStorage<T, TileCoord> {
     /// Coordinate of a chunk
     type ChunkCoord : VoxelCoord;
@@ -130,19 +76,120 @@ pub trait VoxelSpace<T: Voxel> : VoxelStorage<T, TileCoord> {
     fn get_loaded_chunks(&self) -> Vec<&VoxelPos<Self::ChunkCoord>>;
 }
 
-/*
-/// Copy voxels from one storage to another.
-#[allow(dead_code)]
-pub fn voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStorage<T, P>>(
-    source_range: VoxelRange<P>,
-    source: &VA,
-    dest_origin: VoxelPos<P>,
-    dest: &mut VB,
-) -> Result<(), VoxelError> {
-    for pos in source_range {
-        let voxel = source.get(pos)?;
-        let offset_pos = (pos - source_range.lower) + dest_origin;
-        dest.set(offset_pos, voxel.clone())?;
+pub mod voxel_bulk_ops { 
+    use super::*;
+
+    /// Like Into but it may panic, or TryInto with a .unwrap on it.
+    pub trait UnwrapInto<T> {
+        fn unwrap_into(self) -> T;
     }
-    Ok(())
-}*/
+    impl<T> UnwrapInto<T> for Option<T> {
+        fn unwrap_into(self) -> T {
+            self.unwrap()
+        }
+    }
+    impl<T> UnwrapInto<T> for T {
+        fn unwrap_into(self) -> T {
+            self
+        }
+    }
+    impl<T, E> UnwrapInto<T> for Result<T, E>
+    where
+        E: std::fmt::Debug,
+    {
+        fn unwrap_into(self) -> T {
+            self.unwrap()
+        }
+    }
+
+    #[derive(Debug)]
+    /// Two error types in a generic fused. 
+    pub enum FusedError<AE, BE> 
+        where AE: std::error::Error + Sized, BE: std::error::Error + Sized {
+            ErrorA(AE), 
+            ErrorB(BE),
+    }
+    impl<AE, BE> std::fmt::Display for FusedError<AE, BE> 
+            where AE: std::error::Error + Sized, BE: std::error::Error + Sized {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                FusedError::ErrorA(a) => std::fmt::Display::fmt(a, f),
+                FusedError::ErrorB(b) => std::fmt::Display::fmt(b, f),
+            }
+        }
+    }
+    impl<AE, BE> std::error::Error for FusedError<AE, BE> 
+        where AE: std::error::Error + Sized, BE: std::error::Error + Sized {}
+    
+    pub trait VoxelMappable<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {
+        /// Iterate over each voxel in this area.
+        fn each_voxel<F: FnMut(T)>(&self, func: F);
+        /// Iterate over each voxel and its (local to this chunk!) coordinate in this area.
+        fn each_cell<F: FnMut(T, VoxelPos<P>)>(&self, func: F);
+        /// Iterate over each voxel, yielding a new voxel to replace it in this chunk.
+        fn map_voxels<F: FnOnce(T) -> T>(&mut self, func: F);
+        /// Iterate over each voxel and its (local to this chunk!) coordinate, yielding a new voxel to replace it in this chunk.
+        fn map_cells<F: FnOnce(T, VoxelPos<P>) -> T>(&mut self, func: F);
+    }
+    
+    /// A voxel and adjacent voxels in 6 cardinal directions. Type arguments: T (The type we store) and V (the voxel type we map to / from).
+    pub trait VoxelNeighborhood: Clone + Sized {
+        type SourceVoxel: Voxel;
+        type OurVoxel: UnwrapInto<Self::SourceVoxel>;
+        fn new(
+            center: Self::SourceVoxel,
+            sides: SidesArray<Self::SourceVoxel>
+        ) -> Self;
+        fn get_center(&self) -> &Self::OurVoxel;
+        fn get(&self, neighbor: VoxelSide) -> &Self::OurVoxel;
+    }
+    
+    pub trait VoxelNeighborhoodOps<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {
+        type Neighborhood: VoxelNeighborhood<SourceVoxel = T>;
+        /// Iterate over each voxel-neighborhood in this area.
+        fn each_neighborhood<F: FnMut(Self::Neighborhood)>(&self, func: F);
+        /// Iterate over each voxel-neighborhood and the position of its center, in this area.
+        fn each_neighborhood_enumerate<F: FnMut(Self::Neighborhood, VoxelPos<P>)>(&self, func: F);
+        /// Iterate over each neighborhood. The value returned from `func` will replace the center cell.
+        fn map_neighborhood<F: FnOnce(Self::Neighborhood) -> T>(&mut self, func: F);
+        /// Iterate over each neighborhood. The value returned from `func` will replace the center cell which is at the given position.
+        fn map_neighborhood_enumerate<F: FnOnce(Self::Neighborhood, VoxelPos<P>) -> T>(&mut self, func: F);
+    }
+
+    /// Operations to set entire Y-axis-aligned columns in a VoxelStorage. Intended for worldgen.
+    pub trait VoxelColumns<T: Voxel, P: VoxelCoord>: VoxelStorage<T,P> {
+        /// Sets `column_height` voxels along the Y axis at our given (X,Z) position to `value`
+        fn set_vertical_column_down(&mut self, top: &VoxelPos<P>, column_height: P, value: &T) -> Result<(), Self::Error>;
+        /// Sets `column_height` voxels along the Y axis at our given (X,Z) position to `value`
+        fn set_vertical_column_up(&mut self, bottom: &VoxelPos<P>, column_height: P, value: &T) -> Result<(), Self::Error>;
+    }
+
+    /// Operations to set entire Y-axis-aligned columns in a VoxelStorage. Intended for worldgen.
+    pub trait BoundedVoxelColumns<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T,P> {
+        /// Sets all voxels, until we hit the boundary, along the Y axis at our given (X,Z) position from the top down to `value`
+        fn set_whole_vertical_column_down(&mut self, top: &VoxelPos<P>, value: &T) -> Result<(), Self::Error>;
+        /// Sets all voxels, until we hit the boundary, along the Y axis at our given (X,Z) position from the bottom up to `value`
+        fn set_whole_vertical_column_up(&mut self, bottom: &VoxelPos<P>, value: &T) -> Result<(), Self::Error>;
+    }
+
+    /// Operations to set entire rectangular cuboid regions to a value in a voxel storage.
+    pub trait VoxelRangeSet<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> { 
+        fn set_range(&mut self, range: VoxelRange<P>, value: &T) -> Result<(), Self::Error>;
+    }
+    
+    /// Copy voxels from one storage to another. Naive implementation, just uses Set and Get. Not optimized.
+    #[allow(dead_code)]
+    pub fn naive_voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStorage<T, P>>(
+        source_range: VoxelRange<P>,
+        source: &VA,
+        dest_origin: VoxelPos<P>,
+        dest: &mut VB,
+    ) -> Result<(), FusedError<VA::Error, VB::Error>> {
+        for pos in source_range {
+            let voxel = source.get(pos).map_err(|a| FusedError::ErrorA(a))?;
+            let offset_pos = (pos - source_range.lower) + dest_origin;
+            dest.set(offset_pos, voxel.clone()).map_err(|b| FusedError::ErrorB(b))?;
+        }
+        Ok(())
+    }
+}

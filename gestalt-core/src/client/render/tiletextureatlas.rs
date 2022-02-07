@@ -50,6 +50,8 @@ pub struct TileAtlasLayout {
     // current_height: u32,
     /// Max total number of tiles of this texture atlas.
     max_tiles: usize,
+    /// How many times has this tile atlas changed? 
+    revision: u64,
 }
 
 impl TileAtlasLayout {
@@ -109,6 +111,7 @@ impl TileAtlasLayout {
             atlas_width: width,
             //current_height: height,
             max_tiles,
+            revision: 0, 
         }
     }
     /// Get resolution in pixels.
@@ -130,6 +133,8 @@ impl TileAtlasLayout {
         match self.get_index_for_texture(resource) {
             Some(idx) => Ok(idx),
             None => {
+                self.revision += 1; 
+
                 let idx = self.tiles.len();
                 if idx >= self.max_tiles {
                     return Err(TileAtlasError::OverMax(
@@ -196,6 +201,15 @@ impl TileAtlasLayout {
     }
     pub fn get_pending_texture_uvs(&self, higher_x: bool, higher_y: bool) -> Vec2 {
         self.get_uv_for_index(INDEX_PENDING_TEXTURE, higher_x, higher_y)
+    }
+    pub fn get_revision(&self) -> u64 { 
+        self.revision
+    }
+    pub fn get_max_tiles(&self) -> usize { 
+        self.max_tiles
+    }
+    pub fn get_tile_count(&self) -> usize { 
+        self.tiles.len()
     }
 }
 
