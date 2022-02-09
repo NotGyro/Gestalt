@@ -169,34 +169,40 @@ impl TerrainRenderer {
     }
     /// Rebuild any meshes which have been flagged as changed. 
     /// Does not automatically push any mesh data to the GPU. Please use push_to_gpu() to update the meshes for rendering after calling this.
-    pub fn process_remesh<A: CubeArtMapper<TileId>>(&mut self, voxel_space: &TileSpace, tiles_to_art: &A) -> Result<(), TerrainRendererError> {
-        let remesh_list: HashSet<ChunkPos> = self.pending_remesh.drain().collect();
-        for chunk_position in remesh_list.iter() { 
-            //let is_new_chunk = !self.gpu_chunks.contains_key(&chunk_position);
-            // Do we need to make a new texture atlas for this chunk? 
-            let texture_binding = if let Some(previous_texture_id) = self.texture_for_chunk.get(chunk_position) { 
-                *previous_texture_id
-            } else {
-                self.find_available_texture_atlas()
-            };
-
-            let chunk = voxel_space.borrow_chunk(chunk_position)?;
-
-            //TODO: Handle case where texture atlas goes over max
-            let mesher_state = MesherState::prepare_to_mesh(chunk, tiles_to_art, self.texture_layouts.get_mut(&texture_binding.texture_id).unwrap())
-                .map_err(|e| { 
-                    TerrainRendererError::PrepareMeshingError(chunk_position.clone(), format!("{:?}",e))
-                })?;
-            let mesh = mesher_state.build_mesh()
-                .map_err(|e| {
-                    TerrainRendererError::MeshingError(chunk_position.clone(), format!("{:?}",e))
-                })?;
-
-            self.texture_for_chunk.insert(chunk_position.clone(), texture_binding);
-            self.meshed_chunks.insert(chunk_position.clone(), mesh);
+    /// Returns whether or not any remesh is actually required. 
+    pub fn process_remesh<A: CubeArtMapper<TileId>>(&mut self, voxel_space: &TileSpace, tiles_to_art: &A) -> Result<bool, TerrainRendererError> {
+        if self.pending_remesh.is_empty() { 
+            Ok(false)
         }
+        else { 
+            let remesh_list: HashSet<ChunkPos> = self.pending_remesh.drain().collect();
+            for chunk_position in remesh_list.iter() { 
+                //let is_new_chunk = !self.gpu_chunks.contains_key(&chunk_position);
+                // Do we need to make a new texture atlas for this chunk? 
+                let texture_binding = if let Some(previous_texture_id) = self.texture_for_chunk.get(chunk_position) { 
+                    *previous_texture_id
+                } else {
+                    self.find_available_texture_atlas()
+                };
+    
+                let chunk = voxel_space.borrow_chunk(chunk_position)?;
+    
+                //TODO: Handle case where texture atlas goes over max
+                let mesher_state = MesherState::prepare_to_mesh(chunk, tiles_to_art, self.texture_layouts.get_mut(&texture_binding.texture_id).unwrap())
+                    .map_err(|e| { 
+                        TerrainRendererError::PrepareMeshingError(chunk_position.clone(), format!("{:?}",e))
+                    })?;
+                let mesh = mesher_state.build_mesh()
+                    .map_err(|e| {
+                        TerrainRendererError::MeshingError(chunk_position.clone(), format!("{:?}",e))
+                    })?;
+    
+                self.texture_for_chunk.insert(chunk_position.clone(), texture_binding);
+                self.meshed_chunks.insert(chunk_position.clone(), mesh);
+            }
 
-        Ok(())
+            Ok(true)
+        }
     }
     /// Takes any of the changed or new chunk meshes made in process_remesh() and makes them available for rendering. 
     pub fn push_to_gpu<TextureSource: ImageProvider>(&mut self, texture_source: &mut TextureSource, renderer: Arc<rend3::Renderer>) -> Result<(), TerrainRendererError> {
@@ -213,9 +219,8 @@ impl TerrainRenderer {
             // Build our tile atlas
             let tile_atlas = self.texture_layouts.get(texture_id).unwrap();
             let image = build_tile_atlas(tile_atlas, texture_source)?;
-            // Set up Rend3 texture handle. 
-            
-            println!("Building a texture!");
+
+            // Set up Rend3 texture handle.
             let atlas_texture = rend3::types::Texture {
                 label: Option::None,
                 data: image.to_vec(),

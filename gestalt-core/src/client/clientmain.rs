@@ -13,12 +13,12 @@ use rend3::types::{Handedness, MeshBuilder};
 use serde::{Deserialize, Serialize};
 use wgpu::Backend;
 use winit::{
-    event::{DeviceEvent, ElementState},
+    event::{DeviceEvent, ElementState, VirtualKeyCode},
     event_loop::ControlFlow,
     window::Fullscreen,
 };
 
-use crate::{common::voxelmath::{VoxelPos, VoxelRange}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::TileSpace}, client::render::TerrainRenderer};
+use crate::{common::voxelmath::{VoxelPos, VoxelRange}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}}, client::render::TerrainRenderer};
 use crate::{
     client::render::{
         tiletextureatlas::build_tile_atlas,
@@ -384,13 +384,14 @@ pub fn run_client() {
 
     // Set up our test world a bit 
     let mut world_space = TileSpace::new();
-    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(4,4,4), lower: vpos!(-4,-4,-4) };
+    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
     // Set up our voxel mesher.
     let mut terrain_renderer = TerrainRenderer::new(64);
 
     let worldgen_start = Instant::now();
     // Build chunks and then immediately let the mesher know they're new. 
     for chunk_position in test_world_range {
+        println!("{:?}", &chunk_position);
         let chunk = gen_test_chunk(chunk_position);
         world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
         terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
@@ -401,18 +402,22 @@ pub fn run_client() {
     //Remesh
     let meshing_start = Instant::now();
     terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
-    let meshing_elapsed_millis = (meshing_start.elapsed().as_micros() as f32 / 1000.0); 
+    let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
     println!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
     terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
-    let meshing_elapsed_millis = (meshing_start.elapsed().as_micros() as f32 / 1000.0); 
+    let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
     println!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
 
+    let mut last_remesh_time = Instant::now();
+
     // Set up camera and view 
+    const FAST_CAMERA_SPEED: f32 = 8.0;
+    const SLOW_CAMERA_SPEED: f32 = 2.0;
     let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
     let mut camera = camera::Camera::new(view_location);
 
     camera.sensitivity = 1.0;
-    camera.speed = 0.5;
+    camera.speed = SLOW_CAMERA_SPEED;
 
     // Set camera's location
     renderer.set_camera_data(rend3::types::Camera {
@@ -485,6 +490,40 @@ pub fn run_client() {
                 camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);*/
 
             },
+            winit::event::Event::DeviceEvent {
+                event: DeviceEvent::Button { 
+                    button: 1, // Left-click
+                    state: ElementState::Released,
+                    ..
+                },
+                ..
+            } => {
+                let player_voxel_position: VoxelPos<i32> = vpos!(camera.get_position().x.floor() as i32, camera.get_position().y.floor() as i32, camera.get_position().z.floor() as i32);
+                match world_space.set(player_voxel_position, air_id) {
+                    Ok(()) => {
+                        terrain_renderer.notify_changed(&player_voxel_position);
+                    },
+                    Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
+                    Err(e) => panic!("Tile access error: {:?}", e),
+                }
+            },
+            winit::event::Event::DeviceEvent {
+                event: DeviceEvent::Button { 
+                    button: 3, // Right-click
+                    state: ElementState::Released,
+                    ..
+                },
+                ..
+            } => {
+                let player_voxel_position: VoxelPos<i32> = vpos!(camera.get_position().x.floor() as i32, camera.get_position().y.floor() as i32, camera.get_position().z.floor() as i32);
+                match world_space.set(player_voxel_position, stone_id) {
+                    Ok(()) => {
+                        terrain_renderer.notify_changed(&player_voxel_position);
+                    },
+                    Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
+                    Err(e) => panic!("Tile access error: {:?}", e),
+                }
+            },
             winit::event::Event::WindowEvent{
                 event: winit::event::WindowEvent::KeyboardInput{
                     input,
@@ -494,12 +533,18 @@ pub fn run_client() {
                 ..
             } => { 
                 if input.state == ElementState::Pressed {
+                    if input.virtual_keycode == Some(VirtualKeyCode::LShift) { 
+                        camera.speed = FAST_CAMERA_SPEED;
+                    }
                     let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
                     if let Some(dir) = dir_maybe { 
                         current_down.insert(dir);
                     }
                 }
                 else if input.state == ElementState::Released {
+                    if input.virtual_keycode == Some(VirtualKeyCode::LShift) { 
+                        camera.speed = SLOW_CAMERA_SPEED;
+                    }
                     let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
                     if let Some(dir) = dir_maybe { 
                         current_down.remove(&dir);
@@ -537,17 +582,31 @@ pub fn run_client() {
                 let elapsed_time = prev_frame_time.elapsed();
                 prev_frame_time = Instant::now();
         
-                let camera_update_start = Instant::now();
                 //Move camera
                 for dir in current_down.iter() {
-                    camera.key_interact(*dir);
+                    camera.key_interact(*dir, elapsed_time.clone());
                 }
                 //Update camera
                 renderer.set_camera_data(rend3::types::Camera {
                     projection: rend3::types::CameraProjection::Perspective { vfov: 90.0, near: 0.1 },
                     view: camera.get_view_matrix(),
                 });
-                let camera_update_time = camera_update_start.elapsed();
+
+
+                // Remesh if it's not too spammy. 
+                if last_remesh_time.elapsed().as_millis() > 64 { 
+                    let meshing_start = Instant::now();
+                    let was_remesh_needed = terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
+                    if was_remesh_needed { 
+                        let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
+                        println!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
+                        terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
+                        let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
+                        println!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
+    
+                        last_remesh_time = Instant::now();
+                    }
+                }
 
                 // Present the frame on screen
                 let draw_start = Instant::now();
@@ -585,7 +644,6 @@ pub fn run_client() {
                     println!("Render device is: {:?}", &renderer.adapter_info);
                     println!("Average frames per second, total runtime of the program, is {}", current_fps);
                     println!("Last frame took {} millis", elapsed_time.as_millis());
-                    println!("{} millis of that was spent updating the camera", camera_update_time.as_millis());
                     println!("{} millis were spent drawing the frame.", draw_time.as_millis());
                     fps_counter_print_times += 1; 
                 }

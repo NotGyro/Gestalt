@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use glam::{Mat4, Vec3};
 use winit::event::VirtualKeyCode;
 
@@ -82,27 +84,25 @@ impl Camera {
         )
     }
 
-    pub fn key_interact(&mut self, direction: Directions) {
-        let velocity = self.speed * 0.16;
-
+    pub fn key_interact(&mut self, direction: Directions, time_elapsed: Duration) {
         match direction {
             Directions::Forward => {
-                self.position += self.front * velocity;
+                self.position += self.front * self.speed * (time_elapsed.as_secs_f64() as f32);
             }
             Directions::Left => {
-                self.position += self.right * velocity;
+                self.position += self.right * self.speed * (time_elapsed.as_secs_f64() as f32);
             }
             Directions::Right => {
-                self.position -= self.right * velocity;
+                self.position -= self.right * self.speed * (time_elapsed.as_secs_f64() as f32);
             }
             Directions::Up => {
-                self.position += self.up * velocity;
+                self.position += self.up    * self.speed * (time_elapsed.as_secs_f64() as f32);
             }
             Directions::Down => {
-                self.position -= self.up * velocity;
+                self.position -= self.up    * self.speed * (time_elapsed.as_secs_f64() as f32);
             }
             Directions::Backward => {
-                self.position -= self.front * velocity;
+                self.position -= self.front * self.speed * (time_elapsed.as_secs_f64() as f32);
             }
         }
     }
