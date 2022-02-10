@@ -5,26 +5,22 @@ use std::{
     time::Instant,
 };
 
-use glam::{Vec3, Vec4};
+use glam::Vec4;
 use hashbrown::{HashMap, HashSet};
 use image::RgbaImage;
 use log::{error, warn};
-use rend3::types::{Handedness, MeshBuilder};
+use rend3::types::Handedness;
 use serde::{Deserialize, Serialize};
 use wgpu::Backend;
 use winit::{
     event::{DeviceEvent, ElementState, VirtualKeyCode},
     event_loop::ControlFlow,
-    window::Fullscreen,
+    window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::voxelmath::{VoxelPos, VoxelRange}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}}, client::render::TerrainRenderer};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}}, client::render::TerrainRenderer};
 use crate::{
-    client::render::{
-        tiletextureatlas::build_tile_atlas,
-        voxelmesher::{make_mesh_completely, ChunkMesh},
-        CubeArt,
-    },
+    client::render::CubeArt,
     common::identity::NodeIdentity,
     resource::{
         image::{ImageProvider, InternalImage, RetrieveImageError},
@@ -133,8 +129,8 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             display_properties: Default::default(),
-            mouse_sensitivity_x: 1.0,
-            mouse_sensitivity_y: 1.0,
+            mouse_sensitivity_x: 64.0,
+            mouse_sensitivity_y: 64.0,
         }
     }
 }
@@ -182,7 +178,7 @@ impl DevImageLoader {
     }
 
     //A simple function for the purposes of testing in development
-    fn preload_image_file(&mut self, filename: &str) -> Result<ResourceId, Box<dyn Error>> {
+    fn preload_image_file(&mut self, filename: &str, creator_identity: IdentityKeyPair) -> Result<ResourceId, Box<dyn Error>> {
         let mut open_options = std::fs::OpenOptions::new();
         open_options.read(true).create(false);
 
@@ -200,11 +196,12 @@ impl DevImageLoader {
             id: rid.clone(),
             filename: filename.to_string(),
             path: None,
-            creator: NodeIdentity {},
+            creator: creator_identity.public.clone(),
             resource_type: "image/png".to_string(),
             authors: "Gyro".to_string(),
             description: None,
             kind: ResourceKind::PlainOldData,
+            signature: creator_identity.sign(&buf)?,
         };
 
         update_global_resource_metadata(&rid, metadata.clone());
@@ -247,7 +244,7 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
     }
 }
 
-pub fn run_client() {
+pub fn run_client(identity_keys: IdentityKeyPair) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
     let mut open_options = std::fs::OpenOptions::new();
@@ -280,12 +277,6 @@ pub fn run_client() {
     // Set up window and event loop.
     let window_builder = config.display_properties.to_window_builder();
     let window = window_builder.build(&event_loop).unwrap();
-
-    let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
-    let mut camera = camera::Camera::new(view_location);
-
-    camera.sensitivity = 1.0;
-    camera.speed = 0.5;
 
     let window_size = window.inner_size();
     let mut resolution = glam::UVec2::new(window_size.width, window_size.height);
@@ -366,10 +357,10 @@ pub fn run_client() {
 
     let mut image_loader = DevImageLoader::new();
 
-    let test_dome_thing_image_id = image_loader.preload_image_file("test.png").unwrap();
-    let test_grass_image_id = image_loader.preload_image_file("testgrass.png").unwrap();
-    let test_stone_image_id = image_loader.preload_image_file("teststone.png").unwrap();
-    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png").unwrap();
+    let test_dome_thing_image_id = image_loader.preload_image_file("test.png", identity_keys.clone()).unwrap();
+    let test_grass_image_id = image_loader.preload_image_file("testgrass.png", identity_keys.clone()).unwrap();
+    let test_stone_image_id = image_loader.preload_image_file("teststone.png", identity_keys.clone()).unwrap();
+    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png", identity_keys.clone()).unwrap();
 
     let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
@@ -384,19 +375,18 @@ pub fn run_client() {
 
     // Set up our test world a bit 
     let mut world_space = TileSpace::new();
-    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
+    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(4,4,4), lower: vpos!(-3,-3,-3) };
     // Set up our voxel mesher.
     let mut terrain_renderer = TerrainRenderer::new(64);
 
     let worldgen_start = Instant::now();
     // Build chunks and then immediately let the mesher know they're new. 
     for chunk_position in test_world_range {
-        println!("{:?}", &chunk_position);
         let chunk = gen_test_chunk(chunk_position);
         world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
         terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
     }
-    let worldgen_elapsed_millis = (worldgen_start.elapsed().as_micros() as f32 / 1000.0); 
+    let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
     println!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
 
     //Remesh
@@ -411,12 +401,11 @@ pub fn run_client() {
     let mut last_remesh_time = Instant::now();
 
     // Set up camera and view 
-    const FAST_CAMERA_SPEED: f32 = 8.0;
-    const SLOW_CAMERA_SPEED: f32 = 2.0;
+    const FAST_CAMERA_SPEED: f32 = 16.0;
+    const SLOW_CAMERA_SPEED: f32 = 4.0;
     let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
     let mut camera = camera::Camera::new(view_location);
 
-    camera.sensitivity = 1.0;
     camera.speed = SLOW_CAMERA_SPEED;
 
     // Set camera's location
@@ -436,7 +425,6 @@ pub fn run_client() {
         distance: 400.0,
     });
 
-    let mut previous_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
     let mut current_down = HashSet::new();
 
     //let mut prev_frame_time = Instant::now();
@@ -453,42 +441,59 @@ pub fn run_client() {
     let mut total_frames: u64 = 0;
     let mut fps_counter_print_times: u64 = 0;
 
+    let mut is_alt_down = false;
+    let mut is_tab_down = false;
+
+    let mut has_focus = true; 
+
+    window.focus_window();
+
+    let mut window_center = { 
+        let window_top_left = window.inner_position().unwrap(); 
+        let window_size = window.inner_size();
+        PhysicalPosition::new(window_top_left.x + (window_size.width as i32 / 2), window_top_left.y + (window_size.height as i32 / 2) ) 
+    };
+
     event_loop.run(move |event, _, control| {
+        let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
         match event {
             //WindowEvent::MouseInput is more useful for GUI input 
             winit::event::Event::WindowEvent {
                 event: winit::event::WindowEvent::CursorMoved{ 
-                    position, 
+                    position: _position, 
                     ..
                 },
                 ..
             } => {
                 //Handle GUI mouse movement here. 
-                
+                /*
                 if let Some(pos) = previous_position {
-                    let diff_x = pos.x - position.x;
-                    let diff_y = pos.y - position.y;
-                    camera.mouse_interact(diff_x as f32, -diff_y as f32);
+                    
+                    if has_focus { 
+                        let diff_x = pos.x - position.x;
+                        let diff_y = pos.y - position.y;
+                        camera.mouse_interact(diff_x as f32, -diff_y as f32);
+                    }
                 }
-                previous_position = Some(position);
+                previous_position = Some(position);*/
             },
             //DeviceEvent is better for gameplay-related movement / camera controls 
             winit::event::Event::DeviceEvent {
                 event: DeviceEvent::MouseMotion { 
-                    delta: _,
+                    delta,
                     ..
                 },
                 ..
             } => {
                 //Handle gameplay-related / character controller mouse input 
-                /*let (dx, dy) = delta;
+                let (dx, dy) = delta;
                 let dx = dx as f32;
                 let dy = dy as f32;
                 let adjusted_dx = dx * elapsed_secs * config.mouse_sensitivity_x;
                 let adjusted_dy = dy * elapsed_secs * config.mouse_sensitivity_y;
-                
-                camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);*/
-
+                if has_focus { 
+                    camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);
+                }
             },
             winit::event::Event::DeviceEvent {
                 event: DeviceEvent::Button { 
@@ -525,6 +530,14 @@ pub fn run_client() {
                 }
             },
             winit::event::Event::WindowEvent{
+                event: winit::event::WindowEvent::Focused(focus_status),
+                ..
+            } => {
+                has_focus = focus_status; 
+                window.set_cursor_grab(focus_status).unwrap();
+                window.set_cursor_visible(!focus_status);
+            },
+            winit::event::Event::WindowEvent{
                 event: winit::event::WindowEvent::KeyboardInput{
                     input,
                     is_synthetic: false,
@@ -536,14 +549,31 @@ pub fn run_client() {
                     if input.virtual_keycode == Some(VirtualKeyCode::LShift) { 
                         camera.speed = FAST_CAMERA_SPEED;
                     }
+                    else if (input.virtual_keycode == Some(VirtualKeyCode::LAlt) ) || (input.virtual_keycode == Some(VirtualKeyCode::RAlt) ){ 
+                        is_alt_down = true; 
+                    }
+                    else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
+                        is_tab_down = true; 
+                    }
                     let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
                     if let Some(dir) = dir_maybe { 
                         current_down.insert(dir);
+                    }
+
+                    if is_alt_down && is_tab_down && has_focus { 
+                        window.set_cursor_visible(true);
+                        window.set_cursor_grab(false).unwrap();
                     }
                 }
                 else if input.state == ElementState::Released {
                     if input.virtual_keycode == Some(VirtualKeyCode::LShift) { 
                         camera.speed = SLOW_CAMERA_SPEED;
+                    }
+                    else if (input.virtual_keycode == Some(VirtualKeyCode::LAlt) ) || (input.virtual_keycode == Some(VirtualKeyCode::RAlt) ){ 
+                        is_alt_down = false; 
+                    }
+                    else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
+                        is_tab_down = false; 
                     }
                     let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
                     if let Some(dir) = dir_maybe { 
@@ -574,6 +604,12 @@ pub fn run_client() {
                 );
                 // Tell the renderer about the new aspect ratio.
                 renderer.set_aspect_ratio(resolution.x as f32 / resolution.y as f32);
+
+                window_center = { 
+                    let window_top_left = window.inner_position().unwrap(); 
+                    let window_size = window.inner_size();
+                    PhysicalPosition::new(window_top_left.x + (window_size.width as i32 / 2), window_top_left.y + (window_size.height as i32 / 2) ) 
+                };
             },
             // Render!
             winit::event::Event::MainEventsCleared => {
@@ -582,16 +618,17 @@ pub fn run_client() {
                 let elapsed_time = prev_frame_time.elapsed();
                 prev_frame_time = Instant::now();
         
-                //Move camera
-                for dir in current_down.iter() {
-                    camera.key_interact(*dir, elapsed_time.clone());
+                if has_focus { 
+                    //Move camera
+                    for dir in current_down.iter() {
+                        camera.key_interact(*dir, elapsed_time.clone());
+                    }
+                    //Update camera
+                    renderer.set_camera_data(rend3::types::Camera {
+                        projection: rend3::types::CameraProjection::Perspective { vfov: 90.0, near: 0.1 },
+                        view: camera.get_view_matrix(),
+                    });
                 }
-                //Update camera
-                renderer.set_camera_data(rend3::types::Camera {
-                    projection: rend3::types::CameraProjection::Perspective { vfov: 90.0, near: 0.1 },
-                    view: camera.get_view_matrix(),
-                });
-
 
                 // Remesh if it's not too spammy. 
                 if last_remesh_time.elapsed().as_millis() > 64 { 
@@ -646,6 +683,10 @@ pub fn run_client() {
                     println!("Last frame took {} millis", elapsed_time.as_millis());
                     println!("{} millis were spent drawing the frame.", draw_time.as_millis());
                     fps_counter_print_times += 1; 
+                }
+
+                if has_focus { 
+                    window.set_cursor_position(window_center).unwrap();
                 }
             },
             winit::event::Event::LoopDestroyed => {

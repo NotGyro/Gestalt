@@ -912,9 +912,9 @@ fn chunk_index_reverse() {
 
     let mut rng = rand::thread_rng();
     for _ in 0..4096 {
-        let x = rng.gen_range(0..CHUNK_SIZE);
-        let y = rng.gen_range(0..CHUNK_SIZE);
-        let z = rng.gen_range(0..CHUNK_SIZE);
+        let x = rng.gen_range(0, CHUNK_SIZE);
+        let y = rng.gen_range(0, CHUNK_SIZE);
+        let z = rng.gen_range(0, CHUNK_SIZE);
 
         let i_value = crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE);
         let (x1, y1, z1) = crate::world::voxelarray::chunk_i_to_xyz(i_value, CHUNK_SIZE);
@@ -1006,9 +1006,9 @@ fn assignemnts_to_chunk() {
 
     {
         for i in 0..253 {
-            let x = rng.gen_range(0..CHUNK_SIZE);
-            let y = rng.gen_range(0..CHUNK_SIZE);
-            let z = rng.gen_range(0..CHUNK_SIZE);
+            let x = rng.gen_range(0, CHUNK_SIZE);
+            let y = rng.gen_range(0, CHUNK_SIZE);
+            let z = rng.gen_range(0, CHUNK_SIZE);
             let pos = vpos!(x as u16, y as u16, z as u16);
 
             let tile = format!("{}.test", i);
@@ -1038,9 +1038,9 @@ fn assignemnts_to_chunk() {
 
     {
         for i in 253..1024 {
-            let x = rng.gen_range(0..CHUNK_SIZE);
-            let y = rng.gen_range(0..CHUNK_SIZE);
-            let z = rng.gen_range(0..CHUNK_SIZE);
+            let x = rng.gen_range(0, CHUNK_SIZE);
+            let y = rng.gen_range(0, CHUNK_SIZE);
+            let z = rng.gen_range(0, CHUNK_SIZE);
             let pos = vpos!(x as u16, y as u16, z as u16);
 
             let tile = format!("{}.test", i);

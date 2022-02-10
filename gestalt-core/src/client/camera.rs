@@ -39,7 +39,6 @@ pub struct Camera {
     yaw: f32,
     pitch: f32,
     pub speed: f32,
-    pub sensitivity: f32,
     pub zoom: f32,
 }
 
@@ -61,7 +60,6 @@ impl Camera {
             yaw,
             pitch,
             speed: 2.5,
-            sensitivity: 0.1,
             zoom: 45.0,
         }
     }
@@ -108,8 +106,8 @@ impl Camera {
     }
 
     pub fn mouse_interact(&mut self, dx: f32, dy: f32) {
-        self.yaw = self.yaw + dx * self.sensitivity;
-        self.pitch = (self.pitch - dy * self.sensitivity).max(-89.0).min(89.0);
+        self.yaw = self.yaw - dx;
+        self.pitch = (self.pitch - dy).max(-89.0).min(89.0);
 
         self.front = Camera::calc_front(self.yaw, self.pitch);
         self.right = Camera::calc_right(&self.front, &self.world_up);

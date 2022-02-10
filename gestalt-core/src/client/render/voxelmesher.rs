@@ -388,6 +388,15 @@ pub struct ChunkMesh {
     pub uv: Vec<OutputUv>,
 }
 
+impl ChunkMesh { 
+    pub fn zero() -> Self { 
+        ChunkMesh {
+            verticies: Vec::default(),
+            uv: Vec::default(),
+        }
+    }
+}
+
 pub enum ArtCacheHolder {
     Uniform(ArtCacheUniform),
     Small(ArtCacheSmall),
@@ -499,9 +508,18 @@ impl<'a> MesherState<'a> {
         })
     }
 
+    /// Do we need to render this at all? Used in order to avoid wasting bookkeeping on all-air chunks.
+    pub fn needs_draw(&self) -> bool { 
+        match &self.art_cache {
+            ArtCacheHolder::Uniform(art_cache) => art_cache.is_any_visible(),
+            ArtCacheHolder::Small(art_cache) => art_cache.is_any_visible(),
+            ArtCacheHolder::Large(art_cache) => art_cache.is_any_visible(),
+        }
+    }
+
     pub fn build_mesh(&self) -> Result<ChunkMesh, Box<dyn Error>> {
         match &self.art_cache {
-            ArtCacheHolder::Uniform(art_cache) => build_mesh(self.chunk, art_cache),
+            ArtCacheHolder::Uniform(art_cache) => if art_cache.is_any_visible() { build_mesh(self.chunk, art_cache) } else { Ok(ChunkMesh::zero()) },
             ArtCacheHolder::Small(art_cache) => build_mesh(self.chunk, art_cache),
             ArtCacheHolder::Large(art_cache) => build_mesh(self.chunk, art_cache),
         }

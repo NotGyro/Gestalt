@@ -192,13 +192,19 @@ impl TerrainRenderer {
                     .map_err(|e| { 
                         TerrainRendererError::PrepareMeshingError(chunk_position.clone(), format!("{:?}",e))
                     })?;
-                let mesh = mesher_state.build_mesh()
-                    .map_err(|e| {
-                        TerrainRendererError::MeshingError(chunk_position.clone(), format!("{:?}",e))
-                    })?;
-    
-                self.texture_for_chunk.insert(chunk_position.clone(), texture_binding);
-                self.meshed_chunks.insert(chunk_position.clone(), mesh);
+
+                //Make sure not to waste bookkeeping pushing all-air chunks through the pipeline. 
+                if mesher_state.needs_draw() { 
+                    let mesh = mesher_state.build_mesh()
+                        .map_err(|e| {
+                            TerrainRendererError::MeshingError(chunk_position.clone(), format!("{:?}",e))
+                        })?;
+                        
+                    if mesh.verticies.len() > 0 {
+                        self.texture_for_chunk.insert(chunk_position.clone(), texture_binding);
+                        self.meshed_chunks.insert(chunk_position.clone(), mesh);
+                    }
+                }
             }
 
             Ok(true)

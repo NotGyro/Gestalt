@@ -1,5 +1,6 @@
 use crate::common::identity::NodeIdentity;
 
+use ed25519::Signature;
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
@@ -235,7 +236,7 @@ pub enum ResourceKind {
 }
 
 /// Used to keep track of a resource locally
-#[derive(Clone, Debug, Serialize, Deserialize, PartialOrd)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResourceInfo {
     /// Which resource?
     #[serde(with = "crate::resource::resourceid_base64_string")]
@@ -256,8 +257,8 @@ pub struct ResourceInfo {
     pub description: Option<String>,
     // /// Is there anything else we need to make use of this resource? I love recursion. 
     // pub dependencies: Option<Vec<Box<ResourceInfo>>>,
-    // /// Signature verifying our binary blob (referred to by ResourceId) as good, signed with the public key from creator's NodeIdentity.
-    // pub resource_signature: Signature,
+    /// Signature verifying our binary blob (referred to by ResourceId) as good, signed with the public key from creator's NodeIdentity.
+    pub signature: Signature,
 }
 
 impl Hash for ResourceInfo {

@@ -382,9 +382,9 @@ fn chunk_index_reverse() {
     let chunk_sz = 16 as usize;
     let mut rng = rand::thread_rng();
     for _ in 0..4096 {
-        let x = rng.gen_range(0..16);
-        let y = rng.gen_range(0..16);
-        let z = rng.gen_range(0..16);
+        let x = rng.gen_range(0, 16);
+        let y = rng.gen_range(0, 16);
+        let z = rng.gen_range(0, 16);
 
         let i_value = chunk_xyz_to_i(x, y, z, chunk_sz);
         let (x1, y1, z1) = chunk_i_to_xyz(i_value, chunk_sz);

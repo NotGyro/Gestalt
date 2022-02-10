@@ -17,7 +17,13 @@ pub mod entity;
 pub mod script;
 pub mod world;
 
+use std::io::Write;
+
+use common::identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys};
 use mlua::LuaOptions;
+use rand_core::OsRng;
+
+use crate::common::identity::generate_local_keys;
 
 #[allow(unused_must_use)]
 fn main() {
@@ -40,6 +46,42 @@ fn main() {
         ),
     ]).unwrap();*/
 
+    let keys = if do_keys_need_generating() {
+        println!("No identity keys found, generating identity keys.");
+        println!("Optionally enter a passphrase.");
+        println!("Minimum length is 4 characters.");
+        println!("WARNING: If you forget your passphrase, this will be impossible to recover!");
+        println!("Leave this blank if you do not want to use a passphrase.");
+        print!("Enter your passphrase: ");
+        let _ = std::io::stdout().flush();
+        
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).expect("Error reading from STDIN");
+
+        let passphrase = if input.chars().count() > 4 {
+            Some(input)
+        } else {
+            None
+        };
+
+        generate_local_keys(passphrase).unwrap()
+    } else { 
+        let passphrase = if does_private_key_need_passphrase().unwrap() { 
+            println!("Your identity key is encrypted. Please enter your passphrase.");
+            print!("Passphrase: ");
+            let _ = std::io::stdout().flush();
+            
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).expect("Error reading from STDIN");
+            Some(input)
+        } else {
+            None
+        };
+        load_local_identity_keys(passphrase).unwrap()
+    };
+
+    println!("Identity keys loaded! Initializing engine...");
+
     let lua_stdlibs = mlua::StdLib::BIT
         | mlua::StdLib::STRING
         | mlua::StdLib::TABLE
@@ -49,7 +91,7 @@ fn main() {
         | mlua::StdLib::PACKAGE;
     let _vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
 
-    client::clientmain::run_client();
+    client::clientmain::run_client(keys);
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 }
