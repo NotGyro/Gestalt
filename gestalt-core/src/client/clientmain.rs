@@ -199,7 +199,7 @@ impl DevImageLoader {
             creator: creator_identity.public.clone(),
             resource_type: "image/png".to_string(),
             authors: "Gyro".to_string(),
-            description: None,
+            description: Some("Image for early testing purposes.".to_string()),
             kind: ResourceKind::PlainOldData,
             signature: creator_identity.sign(&buf)?,
         };
@@ -427,14 +427,8 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     let mut current_down = HashSet::new();
 
-    //let mut prev_frame_time = Instant::now();
-
-    //let first_frame_time = Instant::now();
-
     let game_start_time = Instant::now();
     let mut prev_frame_time = Instant::now();
-
-    //let mut previous_mouse_position: Option<PhysicalPosition<f64>> = None;
 
     let ambient_light = Vec4::new(0.0, 0.4, 0.1, 0.0);
 
@@ -698,7 +692,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     .truncate(true)
                     .create(true);
                 
-                match open_options.open(CLIENT_CONFIG_FILENAME) { 
+                match open_options.open(CLIENT_CONFIG_FILENAME) {
                     Ok(mut file) => { 
                         file.write_all(cfg_string.as_bytes()).unwrap();
                         file.flush().unwrap();

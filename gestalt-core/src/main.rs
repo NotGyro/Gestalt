@@ -21,7 +21,6 @@ use std::io::Write;
 
 use common::identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys};
 use mlua::LuaOptions;
-use rand_core::OsRng;
 
 use crate::common::identity::generate_local_keys;
 
