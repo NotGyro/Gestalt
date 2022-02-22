@@ -1,4 +1,5 @@
 pub mod chunk;
+pub mod fsworldstorage;
 pub mod voxelarray;
 pub mod tilespace;
 pub mod voxelstorage;
@@ -24,10 +25,15 @@ pub type TilePos = VoxelPos<TileCoord>;
 pub type ChunkCoord = i32;
 pub type ChunkPos = VoxelPos<ChunkCoord>;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorldId {
     pub uuid: Uuid,
     /// Either us or the server we're mirroring this from. 
     pub host: NodeIdentity,
+}
+#[derive(Default, Debug, Clone)]
+pub struct WorldInfo {
+    pub name: String,
 }
 
 use self::tilespace::TileSpace;
@@ -35,6 +41,7 @@ use self::tilespace::TileSpaceError;
 
 pub struct World {
     pub world_id: WorldId,
+    pub world_info: WorldInfo,
     pub space: TileSpace,
 }
 

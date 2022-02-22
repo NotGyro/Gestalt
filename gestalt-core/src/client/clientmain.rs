@@ -2,15 +2,16 @@ use std::{
     error::Error,
     io::{BufReader, Read, Write},
     sync::Arc,
-    time::Instant,
+    time::Instant, fs::OpenOptions,
 };
 
 use glam::Vec4;
 use hashbrown::{HashMap, HashSet};
 use image::RgbaImage;
 use log::{error, warn};
-use rend3::types::Handedness;
+use rend3::types::{Handedness};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use wgpu::Backend;
 use winit::{
     event::{DeviceEvent, ElementState, VirtualKeyCode},
@@ -18,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}}, client::render::TerrainRenderer};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TileCoord, TilePos}, client::render::TerrainRenderer};
 use crate::{
     client::render::CubeArt,
     common::identity::NodeIdentity,
@@ -32,7 +33,7 @@ use crate::{
     },
 };
 
-use super::camera;
+use super::camera::{self, Camera};
 
 pub const WINDOW_TITLE: &'static str = "Gestalt";
 pub const CLIENT_CONFIG_FILENAME: &'static str = "client_config.ron";
@@ -244,6 +245,18 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
     }
 }
 
+pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &Vec<TileId>, max_steps: u32) -> Result<(TilePos, TileId, VoxelSide), TileSpaceError> {
+    let mut raycast = VoxelRaycast::new(*camera.get_position(), *camera.get_front());
+    for _i in 0..max_steps {
+        let resl = world_space.get(raycast.pos)?;
+        if !ignore.contains(resl) { 
+            return Ok((raycast.pos, *resl, raycast.hit_side()));
+        }
+        raycast.step();
+    }
+    todo!()
+}
+
 pub fn run_client(identity_keys: IdentityKeyPair) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
@@ -272,6 +285,64 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             );
             ClientConfig::default()
         }
+    };
+
+    // Figure out lobby world ID
+    let world_defaults_path = path_local_worlds().join("world_defaults.ron");
+    
+    let lobby_world_id: Uuid = match world_defaults_path.exists() {
+        true => {
+            let mut defaults_file = OpenOptions::new()
+                .read(true)
+                .create(false)
+                .open(&world_defaults_path).unwrap();
+
+            let mut buf_reader = BufReader::new(&mut defaults_file);
+            let mut contents = String::new();
+            buf_reader.read_to_string(&mut contents).unwrap();
+            let mut world_defaults: WorldDefaults = ron::from_str(contents.as_str()).unwrap();
+            drop(buf_reader);
+            drop(defaults_file);
+            drop(contents);
+            match world_defaults.lobby_world_id.clone() {
+                Some(uuid) => uuid,
+                None => {
+                    let uuid = Uuid::new_v4();
+                    world_defaults.lobby_world_id = Some(uuid);
+                    let cfg_string = ron::ser::to_string_pretty(&world_defaults, ron::ser::PrettyConfig::default() ).unwrap();
+
+                    let mut defaults_file = OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .open(&world_defaults_path).unwrap();
+                    defaults_file.write_all(cfg_string.as_bytes()).unwrap();
+                    defaults_file.flush().unwrap();
+                    drop(defaults_file);
+                    uuid
+                },
+            }
+        },
+        false => {
+            let world_uuid = Uuid::new_v4();
+            let world_defaults = WorldDefaults { 
+                lobby_world_id: Some(world_uuid),
+            };
+            let cfg_string = ron::ser::to_string_pretty(&world_defaults, ron::ser::PrettyConfig::default() ).unwrap();
+            let mut output_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(world_defaults_path).unwrap();
+
+            output_file.write_all(cfg_string.as_bytes()).unwrap();
+            output_file.flush().unwrap();
+            
+            world_uuid
+        },
+    };
+    let world_id = WorldId { 
+        uuid: lobby_world_id,
+        host: identity_keys.public.clone(),
     };
 
     // Set up window and event loop.
@@ -355,6 +426,8 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
     let grass_id = 3;
     let dome_thing_id = 4;
 
+    let air_list = vec![air_id];
+
     let mut image_loader = DevImageLoader::new();
 
     let test_dome_thing_image_id = image_loader.preload_image_file("test.png", identity_keys.clone()).unwrap();
@@ -382,7 +455,13 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
     let worldgen_start = Instant::now();
     // Build chunks and then immediately let the mesher know they're new. 
     for chunk_position in test_world_range {
-        let chunk = gen_test_chunk(chunk_position);
+        let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
+        let chunk = if chunk_file_path.exists() {
+            fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
+        }
+        else {
+            gen_test_chunk(chunk_position)
+        };
         world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
         terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
     }
@@ -444,7 +523,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
     let mut is_alt_down = false;
     let mut is_tab_down = false;
 
-    let mut has_focus = true; 
+    let mut has_focus = true;
 
     window.focus_window();
 
@@ -503,13 +582,27 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 },
                 ..
             } => {
-                let player_voxel_position: VoxelPos<i32> = vpos!(camera.get_position().x.floor() as i32, camera.get_position().y.floor() as i32, camera.get_position().z.floor() as i32);
-                match world_space.set(player_voxel_position, air_id) {
-                    Ok(()) => {
-                        terrain_renderer.notify_changed(&player_voxel_position);
+                let hit = match click_voxel(&world_space, &camera, &air_list, 1024) {
+                    Ok((result_position, result_id, _)) => {
+                        Some((result_position, result_id))
                     },
-                    Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
-                    Err(e) => panic!("Tile access error: {:?}", e),
+                    Err(TileSpaceError::NotYetLoaded(pos) ) => {
+                        println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos);
+                        None
+                    },
+                    Err(e) => {
+                        panic!("Tile access error: {:?}", e);
+                        None
+                    },
+                };
+                if let Some((result_position, result_id)) = hit {    
+                    match world_space.set(result_position, air_id) {
+                        Ok(()) => {
+                            terrain_renderer.notify_changed(&result_position);
+                        },
+                        Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
+                        Err(e) => panic!("Tile access error: {:?}", e),
+                    }
                 }
             },
             winit::event::Event::DeviceEvent {
@@ -520,13 +613,35 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 },
                 ..
             } => {
-                let player_voxel_position: VoxelPos<i32> = vpos!(camera.get_position().x.floor() as i32, camera.get_position().y.floor() as i32, camera.get_position().z.floor() as i32);
-                match world_space.set(player_voxel_position, stone_id) {
-                    Ok(()) => {
-                        terrain_renderer.notify_changed(&player_voxel_position);
+                let hit = match click_voxel(&world_space, &camera, &air_list, 1024) {
+                    Ok((result_position, result_id, side)) => {
+                        Some((result_position, result_id, side))
                     },
-                    Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
-                    Err(e) => panic!("Tile access error: {:?}", e),
+                    Err(TileSpaceError::NotYetLoaded(pos) ) => {
+                        println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos);
+                        None
+                    },
+                    Err(e) => {
+                        panic!("Tile access error: {:?}", e);
+                        None
+                    },
+                };
+                if let Some((result_position, _result_id, hit_side)) = hit {
+                    let placement_position = result_position.get_neighbor(hit_side);
+
+                    println!("Placement position is {}", placement_position);
+                    if let Ok(placement_id) = world_space.get(placement_position) {
+                        //Don't waste time setting stone to stone.
+                        if *placement_id != stone_id {
+                            match world_space.set(placement_position, stone_id) {
+                                Ok(()) => {
+                                    terrain_renderer.notify_changed(&placement_position);
+                                },
+                                Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
+                                Err(e) => panic!("Tile access error: {:?}", e),
+                            }
+                        }
+                    }
                 }
             },
             winit::event::Event::WindowEvent{
@@ -698,8 +813,8 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     .truncate(true)
                     .create(true);
                 
-                match open_options.open(CLIENT_CONFIG_FILENAME) { 
-                    Ok(mut file) => { 
+                match open_options.open(CLIENT_CONFIG_FILENAME) {
+                    Ok(mut file) => {
                         file.write_all(cfg_string.as_bytes()).unwrap();
                         file.flush().unwrap();
                     },
@@ -707,6 +822,16 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         error!("Could not write config file at exit! Reason is {:?}. Your configs were {}", err, cfg_string)
                     }
                 }
+                // Save world files
+
+                let chunks = world_space.get_loaded_chunks();
+                for chunk_pos in chunks { 
+                    let chunk = world_space.borrow_chunk(chunk_pos).unwrap();
+                    fsworldstorage::save_chunk(&world_id,
+                        StoredWorldRole::Local, 
+                        chunk_pos, 
+                        chunk).unwrap();
+                };
             },
             // Other events we don't care about
             _ => {}

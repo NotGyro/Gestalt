@@ -12,6 +12,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::entity::EntityId;
+use crate::script::ModuleId;
+use crate::world::{ChunkPos, WorldId};
+
 /// Runtime type identifier for a type of message.
 pub type MsgTypeId = Uuid;
 pub type MsgData = Vec<u8>;
@@ -297,6 +301,14 @@ pub enum MessageError {
     MessageCastFailure(MsgTypeId, MsgTypeId),
     #[error("A message of type {0:?} contained invalid data.")]
     InvalidMessage(MsgTypeId),
+}
+
+pub enum ChannelDomain {
+    Global,
+    World(WorldId),
+    Entity(WorldId, EntityId),
+    Module(ModuleId),
+    WorldModule(WorldId, ModuleId),
 }
 
 /*

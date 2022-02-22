@@ -31,6 +31,7 @@ client.ron
 /target/keys/
 /temp/
 /logs/
+/worlds/
 
 # Logs
 log.csv
