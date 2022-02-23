@@ -1,7 +1,7 @@
 use std::{mem::MaybeUninit, io::{Seek, SeekFrom, Write}};
 
 use hashbrown::HashMap;
-use log::warn;
+use gestalt_logger::warn;
 use serde::{Serialize, Deserialize};
 
 use crate::common::{voxelmath::*, Version};

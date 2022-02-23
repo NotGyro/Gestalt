@@ -8,7 +8,7 @@ use std::{
 use glam::Vec4;
 use hashbrown::{HashMap, HashSet};
 use image::RgbaImage;
-use log::{error, warn};
+use gestalt_logger::{warn, error, info, trace};
 use rend3::types::{Handedness};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -358,7 +358,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             .enumerate_adapters(wgpu::Backends::all())
             .map(|a| a.get_info())
             .collect();
-        println!("Available rendering adapters are: {:?}", adapters);
+        info!("Available rendering adapters are: {:?}", adapters);
         drop(adapters);
         drop(instance);
     }
@@ -466,16 +466,16 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
         terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
     }
     let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
-    println!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+    info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
 
     //Remesh
     let meshing_start = Instant::now();
     terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
     let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-    println!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
+    info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
     terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
     let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-    println!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
+    info!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
 
     let mut last_remesh_time = Instant::now();
 
@@ -587,11 +587,11 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         Some((result_position, result_id))
                     },
                     Err(TileSpaceError::NotYetLoaded(pos) ) => {
-                        println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos);
+                        info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos);
                         None
                     },
                     Err(e) => {
-                        panic!("Tile access error: {:?}", e);
+                        error!("Tile access error: {:?}", e);
                         None
                     },
                 };
@@ -600,8 +600,8 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         Ok(()) => {
                             terrain_renderer.notify_changed(&result_position);
                         },
-                        Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
-                        Err(e) => panic!("Tile access error: {:?}", e),
+                        Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
+                        Err(e) => error!("Tile access error: {:?}", e),
                     }
                 }
             },
@@ -629,7 +629,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 if let Some((result_position, _result_id, hit_side)) = hit {
                     let placement_position = result_position.get_neighbor(hit_side);
 
-                    println!("Placement position is {}", placement_position);
+                    trace!("Placement position is {}", placement_position);
                     if let Ok(placement_id) = world_space.get(placement_position) {
                         //Don't waste time setting stone to stone.
                         if *placement_id != stone_id {
@@ -637,8 +637,8 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                                 Ok(()) => {
                                     terrain_renderer.notify_changed(&placement_position);
                                 },
-                                Err(TileSpaceError::NotYetLoaded(pos) ) => println!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
-                                Err(e) => panic!("Tile access error: {:?}", e),
+                                Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
+                                Err(e) => error!("Tile access error: {:?}", e),
                             }
                         }
                     }
@@ -751,10 +751,10 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     let was_remesh_needed = terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
                     if was_remesh_needed { 
                         let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-                        println!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
+                        info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
                         terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
                         let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-                        println!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
+                        info!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
     
                         last_remesh_time = Instant::now();
                     }
@@ -793,10 +793,10 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 let total_time = game_start_time.elapsed(); 
                 let current_fps = (total_frames as f64)/(total_time.as_secs_f64());
                 if (total_time.as_secs() % 5 == 0) && (fps_counter_print_times < (total_time.as_secs()/5) ) {
-                    println!("Render device is: {:?}", &renderer.adapter_info);
-                    println!("Average frames per second, total runtime of the program, is {}", current_fps);
-                    println!("Last frame took {} millis", elapsed_time.as_millis());
-                    println!("{} millis were spent drawing the frame.", draw_time.as_millis());
+                    info!("Render device is: {:?}", &renderer.adapter_info);
+                    info!("Average frames per second, total runtime of the program, is {}", current_fps);
+                    info!("Last frame took {} millis", elapsed_time.as_millis());
+                    info!("{} millis were spent drawing the frame.", draw_time.as_millis());
                     fps_counter_print_times += 1; 
                 }
 

@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error};
 
 use glam::{vec3, Vec2, Vec3};
 use hashbrown::HashSet;
-use log::{error, warn};
+use gestalt_logger::{error, warn};
 
 use crate::common::voxelmath::VoxelPos;
 use crate::{
@@ -536,7 +536,6 @@ pub fn make_mesh_completely<A: CubeArtMapper<TileId>>(
 
     let state = MesherState::prepare_to_mesh(chunk, tiles_to_art, &mut atlas)?;
 
-    println!("{:?}", state.textures_needed);
     Ok((state.build_mesh()?, atlas))
 }
 

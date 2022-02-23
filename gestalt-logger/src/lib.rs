@@ -1,20 +1,12 @@
-#[macro_use] extern crate lazy_static;
-extern crate chrono;
-extern crate parking_lot;
-
 use chrono::{DateTime, Local};
 use std::collections::VecDeque;
+use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
 use std::sync::atomic::{Ordering, AtomicU64};
-
-
-pub mod prelude {
-    pub use super::{Verbosity, Scope};
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum Verbosity {
@@ -28,51 +20,46 @@ pub enum Verbosity {
 
 #[derive(Debug, Clone)]
 pub struct Scope {
-    name: String,
+    name: &'static str,
     log: Verbosity,
     print: Verbosity,
     display: Verbosity
 }
 
-
 impl Scope {
-    pub fn new(name: &str) -> Self {
+    pub const fn new(name: &'static str) -> Self {
         Scope {
-            name: name.to_string(),
+            name,
             log: Verbosity::Info,
             print: Verbosity::Warning,
             display: Verbosity::Error,
         }
     }
-    pub fn log(&self, verbosity: Verbosity) -> Self {
+    pub const fn log(&self, verbosity: Verbosity) -> Self {
         Scope {
-            name: self.name.clone(),
+            name: self.name,
             log: verbosity,
             print: self.print,
             display: self.display,
         }
     }
-    pub fn print(&self, verbosity: Verbosity) -> Self {
+    pub const fn print(&self, verbosity: Verbosity) -> Self {
         Scope {
-            name: self.name.clone(),
+            name: self.name,
             log: self.log,
             print: verbosity,
             display: self.display,
         }
     }
-    pub fn display(&self, verbosity: Verbosity) -> Self {
+    pub const fn display(&self, verbosity: Verbosity) -> Self {
         Scope {
-            name: self.name.clone(),
+            name: self.name,
             log: self.log,
             print: self.print,
             display: verbosity,
         }
     }
 }
-
-
-// Private types ///////////////////////////////////////////////////////////////////////////////////
-
 
 #[derive(Debug, Clone)]
 struct Record {
@@ -92,8 +79,8 @@ impl Record {
                 self.file, self.line_and_col.0, self.line_and_col.1, self.message)
     }
     pub fn to_stdout(&self, scope_name: &str) -> String {
-        format!("{} ({}) [{}][{:?}] {} @ {}:{}: {}", self.time.format("%H:%M:%S%.3f"),
-                self.tick, scope_name, self.verbosity,
+        format!("{} [{}][{:?}] {} @ {}:{}: {}", self.time.format("%H:%M:%S%.3f"),
+                scope_name, self.verbosity,
                 self.file, self.line_and_col.0, self.line_and_col.1, self.message)
     }
 }
@@ -162,13 +149,15 @@ impl LoggerState {
 }
 
 lazy_static! {
-    static ref STATE: Arc<Mutex<LoggerState>> = Arc::new(Mutex::new(LoggerState::new("log.csv")));
+    static ref STATE: Arc<Mutex<LoggerState>> = { 
+        let logger = LoggerState::new("log.csv");
+        Arc::new(Mutex::new(logger))
+    };
 }
 
 pub fn set_tick_arc(tick: Arc<AtomicU64>) {
     STATE.lock().tick = tick.clone();
 }
-
 pub fn register_scope(scope: Scope) -> u32 {
     let mut lock = STATE.lock();
     let id = lock.next_scope_id;
@@ -194,37 +183,53 @@ pub fn log_internal(verbosity: Verbosity, scope_id: u32, file: &str, line_and_co
 #[macro_export(local_inner_macros)]
 macro_rules! log_macro_internal {
     ($verbosity:ident, $scope:ident, $fmtstr:literal$(, $param:expr)*) => {
-        lumberjack::log_internal(::lumberjack::Verbosity::$verbosity, *crate::lumberjack_scopes::$scope, std::file!(), (std::line!(), std::column!()), std::format!($fmtstr$(, $param)*));
+        gestalt_logger::log_internal(::gestalt_logger::Verbosity::$verbosity, *crate::log_scopes::$scope, std::file!(), (std::line!(), std::column!()), std::format!($fmtstr$(, $param)*));
     }
 }
 #[macro_export]
 macro_rules! trace {
     ($scope:ident, $fmtstr:literal$(, $param:expr)*) => {
-        log_macro_internal!(Trace, $scope, $fmtstr$(, $param)*);
+        gestalt_logger::log_macro_internal!(Trace, $scope, $fmtstr$(, $param)*);
+    };
+    ($fmtstr:literal$(, $param:expr)*) => {
+        gestalt_logger::log_macro_internal!(Trace, DefaultScope, $fmtstr$(, $param)*);
     }
 }
 #[macro_export]
 macro_rules! info {
     ($scope:ident, $fmtstr:literal$(, $param:expr)*) => {
-        log_macro_internal!(Info, $scope, $fmtstr$(, $param)*);
+        gestalt_logger::log_macro_internal!(Info, $scope, $fmtstr$(, $param)*);
+    };
+    ($fmtstr:literal$(, $param:expr)*) => {
+        gestalt_logger::log_macro_internal!(Info, DefaultScope, $fmtstr$(, $param)*);
     }
 }
 #[macro_export]
 macro_rules! warn {
     ($scope:ident, $fmtstr:literal$(, $param:expr)*) => {
-        log_macro_internal!(Warning, $scope, $fmtstr$(, $param)*);
+        gestalt_logger::log_macro_internal!(Warning, $scope, $fmtstr$(, $param)*);
+    };
+    ($fmtstr:literal$(, $param:expr)*) => {
+        gestalt_logger::log_macro_internal!(Warning, DefaultScope, $fmtstr$(, $param)*);
     }
 }
 #[macro_export]
 macro_rules! error {
     ($scope:ident, $fmtstr:literal$(, $param:expr)*) => {
-        log_macro_internal!(Error, $scope, $fmtstr$(, $param)*);
+        gestalt_logger::log_macro_internal!(Error, $scope, $fmtstr$(, $param)*);
+    };
+    ($fmtstr:literal$(, $param:expr)*) => {
+        gestalt_logger::log_macro_internal!(Error, DefaultScope, $fmtstr$(, $param)*);
     }
 }
 #[macro_export]
 macro_rules! fatal {
     ($scope:ident, $fmtstr:literal$(, $param:expr)*) => {
-        log_macro_internal!(Fatal, $scope, $fmtstr$(, $param)*);
+        gestalt_logger::log_macro_internal!(Fatal, $scope, $fmtstr$(, $param)*);
+        panic!();
+    };
+    ($fmtstr:literal$(, $param:expr)*) => {
+        gestalt_logger::log_macro_internal!(Fatal, DefaultScope, $fmtstr$(, $param)*);
         panic!();
     }
 }

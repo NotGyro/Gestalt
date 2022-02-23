@@ -2,6 +2,7 @@
 // ! I stole your apes lmao 
 use std::{path::PathBuf, fs::OpenOptions, io::{BufReader, BufWriter}};
 
+use gestalt_logger::trace;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
@@ -96,7 +97,7 @@ pub fn save_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos, chu
     // it does not corrupt previously-existing world state.
     let in_progress_path = target_path.with_extension("chunk.lock");
 
-    //println!("Saving chunk to: {}", in_progress_path.to_str().unwrap());
+    trace!("Saving chunk to: {}", in_progress_path.to_str().unwrap());
     
     let file = OpenOptions::new()
         .write(true)
