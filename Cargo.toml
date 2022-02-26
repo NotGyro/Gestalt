@@ -2,7 +2,6 @@
 resolver="2"
 
 members = [
-    "gestalt-logger",
     "gestalt-names",
     "gestalt-core",
 ]

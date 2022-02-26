@@ -20,28 +20,10 @@ pub mod world;
 use std::io::Write;
 
 use common::identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys};
-use gestalt_logger::info;
 use mlua::LuaOptions;
 use rand_core::OsRng;
 
 use crate::common::identity::generate_local_keys;
-
-
-#[allow(non_upper_case_globals)]
-pub mod log_scopes {
-    use gestalt_logger::*;
-    use lazy_static::lazy_static;
-    use gestalt_logger::Verbosity::*;
-
-    lazy_static! {
-        pub static ref DefaultScope:    u32 = gestalt_logger::register_scope(Scope::new("").log(Info).print(Warning));
-        pub static ref Core:            u32 = gestalt_logger::register_scope(Scope::new("Core").log(Info).print(Warning));
-        pub static ref Game:            u32 = gestalt_logger::register_scope(Scope::new("Game"));
-        pub static ref Network:         u32 = gestalt_logger::register_scope(Scope::new("Network").print(Info));
-        pub static ref Renderer:        u32 = gestalt_logger::register_scope(Scope::new("Renderer"));
-        pub static ref Mesher:          u32 = gestalt_logger::register_scope(Scope::new("Mesher"));
-    }
-}
 
 #[allow(unused_must_use)]
 fn main() {
@@ -63,9 +45,6 @@ fn main() {
             File::create("latest.log").unwrap(),
         ),
     ]).unwrap();*/
-
-    println!("{:?}", std::mem::size_of::<gestalt_logger::Verbosity>());
-    println!("{:?}", std::mem::size_of::<gestalt_logger::Scope>());
 
     let keys = if do_keys_need_generating() {
         println!("No identity keys found, generating identity keys.");

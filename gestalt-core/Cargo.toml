@@ -6,8 +6,6 @@ edition = "2021"
 
 [dependencies]
 
-gestalt_logger = { path = "../gestalt-logger" }
-
 base64 = "0.13.0"
 bimap = { version = "0.6.2", features = ["serde"] }
 byteorder = "1.3.4"
