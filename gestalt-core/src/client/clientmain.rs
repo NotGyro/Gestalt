@@ -21,7 +21,6 @@ use winit::{
 use crate::{common::{voxelmath::{VoxelPos, VoxelRange}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}}, client::render::TerrainRenderer};
 use crate::{
     client::render::CubeArt,
-    common::identity::NodeIdentity,
     resource::{
         image::{ImageProvider, InternalImage, RetrieveImageError},
         update_global_resource_metadata, ResourceInfo, ResourceId, ResourceStatus,
@@ -137,9 +136,9 @@ impl Default for ClientConfig {
 
 #[derive(thiserror::Error, Debug)]
 pub enum StartClientError {
-    #[error("could not read client config file, i/o error: {0:?}")]
+    #[error("Could not read client config file, i/o error: {0:?}")]
     CouldntOpenConfig(#[from] std::io::Error),
-    #[error("Attempted to create channel {0}, which exists already.")]
+    #[error("Could not parse server config file due to: {0}")]
     CouldntParseConfig(#[from] ron::Error),
     #[error("Could not initialize display: {0:?}")]
     CreateWindowError(#[from] winit::error::OsError),

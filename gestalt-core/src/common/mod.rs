@@ -11,10 +11,13 @@ pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
 macro_rules! version {
     ($major:expr,$minor:expr,$patch:expr,$build:expr) => {
-        Version::new($major as u32, $minor as u32, $patch as u32, $build as u32)
+        crate::common::Version::new($major as u32, $minor as u32, $patch as u32, $build as u32)
     };
     ($major:expr,$minor:expr,$patch:expr) => {
-        Version::new($major as u32, $minor as u32, $patch as u32, 0u32)
+        crate::common::Version::new($major as u32, $minor as u32, $patch as u32, 0u32)
+    };
+    ($major:expr,$minor:expr) => {
+        crate::common::Version::new($major as u32, $minor as u32, 0u32, 0u32)
     };
 }
 
@@ -173,6 +176,50 @@ impl std::fmt::Debug for Version {
     }
 }
 
+// Used for serializing and deserializing for Serde
+// for example in a `#[serde(with = "crate::common::version_string")]` attribute
+pub mod version_string {
+    use std::fmt;
+
+    use serde::{
+        de::{self, Visitor},
+        Deserializer, Serializer,
+    };
+
+    use super::*;
+
+    struct VersionVisitor;
+
+    impl<'de> Visitor<'de> for VersionVisitor {
+        type Value = Version;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a version string with 3 or 4 delimited fields for major.minor.patch or major.minor.patch.build i.e. \"1.12.2-build33\"")
+        }
+
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Version::parse(v).map_err(E::custom)
+        }
+    }
+
+    pub fn serialize<S>(val: &Version, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(val.to_string().as_str())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Version, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_string(VersionVisitor {})
+    }
+}
+
 #[test]
 fn version_order_correct() {
     let ver_new = Version::new(20, 2, 3, 64);
@@ -224,48 +271,4 @@ fn test_parse_version() {
     assert_eq!(ver_cleaned.minor(), 19);
     assert_eq!(ver_cleaned.patch(), 19);
     assert_eq!(ver_cleaned.build(), 1);
-}
-
-// Used for serializing and deserializing for Serde
-// for example in a `#[serde(with = "crate::common::version_string")]` attribute
-pub mod version_string {
-    use std::fmt;
-
-    use serde::{
-        de::{self, Visitor},
-        Deserializer, Serializer,
-    };
-
-    use super::*;
-
-    struct VersionVisitor;
-
-    impl<'de> Visitor<'de> for VersionVisitor {
-        type Value = Version;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a version string with 3 or 4 delimited fields for major.minor.patch or major.minor.patch.build i.e. \"1.12.2-build33\"")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            Version::parse(v).map_err(E::custom)
-        }
-    }
-
-    pub fn serialize<S>(val: &Version, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(val.to_string().as_str())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Version, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_string(VersionVisitor {})
-    }
 }

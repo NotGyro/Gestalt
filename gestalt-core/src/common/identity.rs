@@ -18,6 +18,12 @@ pub const PUBLIC_KEY_LENGTH: usize = 32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct NodeIdentity([u8; PUBLIC_KEY_LENGTH]);
 
+impl NodeIdentity { 
+    pub fn get_bytes<'a>(&'a self) -> &'a [u8] { 
+        &self.0
+    }
+}
+
 impl From<&NodeIdentity> for ed25519_dalek::PublicKey {
     fn from(value: &NodeIdentity) -> Self {
         ed25519_dalek::PublicKey::from_bytes(&value.0).unwrap()
@@ -58,12 +64,26 @@ impl From<&ed25519_dalek::SecretKey> for PrivateKey {
     }
 }
 
+impl PrivateKey { 
+    pub fn get_bytes<'a>(&'a self) -> &'a [u8] { 
+        &self.0
+    }
+}
+
 /// The keys for this node (i.e. the node that this Gestalt executable is being run to host)
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IdentityKeyPair { 
     pub public: NodeIdentity,
     pub private: PrivateKey,
+}
+
+impl IdentityKeyPair { 
+    pub fn generate_for_tests() -> Self { 
+        let mut rng = rand_core::OsRng::default();
+        let keys_dalek = ed25519_dalek::Keypair::generate(&mut rng);
+        (&keys_dalek).into()
+    }
 }
 
 impl From<&IdentityKeyPair> for ed25519_dalek::Keypair {

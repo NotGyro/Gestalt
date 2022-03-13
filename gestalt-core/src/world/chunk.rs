@@ -424,7 +424,6 @@ impl Chunk<TileId> {
 
     pub fn write_chunk<W: Write + Seek>(&self, writer: &mut W) -> Result<(), ChunkIoError> {
         let mut header = ChunkFileHeader {
-            revision: self.revision,
             variant: match &self.inner {
                 ChunkInner::Uniform(_) => ChunkFileVariant::Uniform,
                 ChunkInner::Small(smallchunk) => ChunkFileVariant::Small{highest_idx: smallchunk.highest_idx},
@@ -446,6 +445,7 @@ impl Chunk<TileId> {
 
         let pre_header = ChunkFilePreHeader {
             version: CHUNK_FILE_VERSION.clone(),
+            revision: self.revision,
             header_length: new_header_vec.len() as u32,
         };
         let pre_header_bytes = pre_header.to_le_bytes();
@@ -696,38 +696,49 @@ pub enum ChunkIoError {
 ///"Plain old bytes" descriptive information before the messagepack header.
 pub struct ChunkFilePreHeader { 
     version: Version,
+    /// How many changes have been made to this chunk? 0 implies the chunk is exactly as it was spit out of the world generator. 
+    revision: u64,
     /// Length of the "ChunkFileHeader" that comes after this PreHeader. 
     header_length: u32,
 }
 
 impl ChunkFilePreHeader { 
-    pub fn new(header_length: usize) -> Self { 
+    pub fn new(header_length: usize, revision: u64) -> Self { 
         Self {
             version: CHUNK_FILE_VERSION.clone(),
             header_length: header_length as u32,
+            revision
         }
     }
     pub const fn serialized_length() -> usize { 
-        std::mem::size_of::<u128>() + std::mem::size_of::<u32>()
+        std::mem::size_of::<u128>() + std::mem::size_of::<u64>() + std::mem::size_of::<u32>()
     }
-    pub fn to_le_bytes(&self) -> [u8; std::mem::size_of::<u128>() + std::mem::size_of::<u32>()] { 
-        let mut out_buffer = [0; std::mem::size_of::<u128>() + std::mem::size_of::<u32>()];
+    pub fn to_le_bytes(&self) -> [u8; Self::serialized_length()] { 
+        let mut out_buffer = [0; Self::serialized_length()];
         let version_bytes = self.version.as_bytes();
         out_buffer[0..std::mem::size_of::<u128>()].copy_from_slice(&version_bytes);
+
+        let revision_bytes = self.revision.to_le_bytes();
+        out_buffer[std::mem::size_of::<u128>()..std::mem::size_of::<u128>()+std::mem::size_of::<u64>()].copy_from_slice(&revision_bytes);
+        
         let header_len_bytes = self.header_length.to_le_bytes();
-        out_buffer[std::mem::size_of::<u128>()..std::mem::size_of::<u128>()+std::mem::size_of::<u32>()].copy_from_slice(&header_len_bytes);
+        out_buffer[std::mem::size_of::<u128>()+std::mem::size_of::<u64>()..std::mem::size_of::<u128>()+std::mem::size_of::<u64>()+std::mem::size_of::<u32>()].copy_from_slice(&header_len_bytes);
         out_buffer
     }
-    pub fn from_le_bytes(bytes: &[u8; std::mem::size_of::<u128>() + std::mem::size_of::<u32>()]) -> Self { 
+    pub fn from_le_bytes(bytes: &[u8; Self::serialized_length()]) -> Self { 
         let mut version_buffer = [0;std::mem::size_of::<u128>()];
         version_buffer.copy_from_slice(&bytes[0..std::mem::size_of::<u128>()]);
+        let mut revision_buffer = [0;std::mem::size_of::<u64>()];
+        revision_buffer.copy_from_slice(&bytes[std::mem::size_of::<u128>() .. std::mem::size_of::<u128>() + std::mem::size_of::<u64>()]);
         let mut header_len_buffer = [0;std::mem::size_of::<u32>()];
-        header_len_buffer.copy_from_slice(&bytes[std::mem::size_of::<u128>() .. std::mem::size_of::<u128>() + std::mem::size_of::<u32>()]);
+        header_len_buffer.copy_from_slice(&bytes[std::mem::size_of::<u128>() + std::mem::size_of::<u64>() .. std::mem::size_of::<u128>() + std::mem::size_of::<u64>() + std::mem::size_of::<u32>()]);
 
         let version = Version::from_bytes(&version_buffer);
+        let revision = u64::from_le_bytes(revision_buffer);
         let header_length = u32::from_le_bytes(header_len_buffer);
         Self { 
             version, 
+            revision,
             header_length
         }
     }
@@ -736,7 +747,6 @@ impl ChunkFilePreHeader {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub struct ChunkFileHeader {
-    revision: u64,
     variant: ChunkFileVariant,
     header_end_data_start: u32,
     data_end_palette_start: u32,
@@ -842,7 +852,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
             let value = palette[0];
             Ok(Chunk{ 
                 inner: ChunkInner::Uniform(value),
-                revision: header.revision,
+                revision: pre_header.revision,
             })
         },
         ChunkFileVariant::Small { highest_idx } => {
@@ -871,7 +881,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
                         }
                     )
                 ),
-                revision: header.revision,
+                revision: pre_header.revision,
             })
         },
         ChunkFileVariant::Large => {
@@ -899,7 +909,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
                         }
                     )
                 ),
-                revision: header.revision,
+                revision: pre_header.revision,
             })
         },
     }

@@ -1,6 +1,5 @@
 //! Voxel metaverse "game" you can have some fun in.
 #![feature(drain_filter)]
-#![feature(adt_const_params)]
 #![feature(string_remove_matches)]
 #![feature(generic_const_exprs)]
 #![feature(const_fn_trait_bound)]
@@ -14,7 +13,9 @@ pub mod resource;
 
 pub mod client;
 pub mod entity;
+pub mod net;
 pub mod script;
+pub mod server;
 pub mod world;
 
 use std::io::Write;
