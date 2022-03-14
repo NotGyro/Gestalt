@@ -31,6 +31,11 @@ client.ron
 /target/keys/
 /temp/
 /logs/
+/protocol/
+#Running tests form inside of VSCodium does this sometimes. 
+/gestalt-core/protocol/
+/gestalt-core/keys/
+/gestalt-core/logs/
 
 # Logs
 log.csv

@@ -1,4 +1,5 @@
-use ed25519::signature::Signer;
+use signature::{Signer, Verifier};
+
 use serde::{Deserialize, Serialize};
 
 use std::{fs::{self, OpenOptions}, path::PathBuf, io::Write};
@@ -14,13 +15,50 @@ pub const PRIVATE_KEY_LENGTH: usize = 32;
 /// The length of an ed25519 `PublicKey`, in bytes.
 pub const PUBLIC_KEY_LENGTH: usize = 32;
 
+#[derive(thiserror::Error, Debug)]
+pub enum DecodeIdentityError {
+    #[error("error decoding a node identity from a Base-64 string: {0:?}")]
+    Base64Error(#[from] base64::DecodeError),
+    #[error("node identity length was incorrect. Expected 32, got {0}")]
+    WrongLength(usize),
+}
+
+pub type SignatureError = ed25519::signature::Error; 
+
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub struct NodeIdentity([u8; PUBLIC_KEY_LENGTH]);
 
 impl NodeIdentity { 
     pub fn get_bytes<'a>(&'a self) -> &'a [u8] { 
         &self.0
+    }
+    pub fn to_base64(&self) -> String { 
+        let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
+        base64::encode_config(&self.0, config)
+    }
+    pub fn from_base64(b64: &str) -> Result<Self, DecodeIdentityError> { 
+        let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
+        let buf = base64::decode_config(b64, config)?;
+        match buf.len() == PUBLIC_KEY_LENGTH { 
+            true => { 
+                let mut smaller_buf = [0u8; PUBLIC_KEY_LENGTH];
+                smaller_buf.copy_from_slice(&buf[0..PUBLIC_KEY_LENGTH]);
+                Ok(NodeIdentity(smaller_buf))
+            },
+            false => Err(DecodeIdentityError::WrongLength(buf.len())),
+        }
+    }
+    pub fn verify_signature(&self, message: &[u8], signature: &[u8]) -> Result<(), SignatureError> {
+        let converted_key: ed25519_dalek::PublicKey = self.into();
+        let converted_signature = ed25519_dalek::Signature::from_bytes(signature)?;
+        converted_key.verify(message, &converted_signature)
+    }
+}
+
+impl std::fmt::Debug for NodeIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NodeIdentity({})", self.to_base64())
     }
 }
 
@@ -104,7 +142,7 @@ impl From<&ed25519_dalek::Keypair> for IdentityKeyPair {
 }
 
 impl IdentityKeyPair {
-    pub fn sign(&self, msg: &[u8]) -> Result<Signature, ed25519_dalek::SignatureError> {
+    pub fn sign(&self, msg: &[u8]) -> Result<Signature, SignatureError> {
         let converted_keypair: ed25519_dalek::Keypair = self.into();
         Ok(converted_keypair.sign(msg))
     }
