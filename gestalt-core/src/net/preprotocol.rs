@@ -5,7 +5,7 @@
 //! 
 //! Every pre-protocol message is 32 bytes, little-endian, providing the length of the string that will follow, and then a json string.
 //! 
-//! The motivation here is that I plan to use a reliability layer over UDP for the actual Gestalt protocol, 
+//! The motivation here is that I plan to use a reliability layer over UDP for the actual Gestalt protocol,
 //! but it's possible that the fundamental structure of that reliability layer's packets on the wire could
 //! change. TCP is not going to change, and neither is json - nor are any massive new vulnerabilities likely
 //! to crop up in the fundamental design of TCP or json (implementation specifics notwithsdanding).
@@ -326,8 +326,7 @@ pub mod current_protocol {
             let mut state = builder.local_private_key(&local_noise_keys.private).build_responder()?;
 
             // Read their message.
-            let read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
-            debug!("Noise handshake message came with {}", read_buf_len);
+            let _read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
     
             // Generate "e, ee, s, es" message
             let mut write_buf = [0u8; 1024];
@@ -356,8 +355,7 @@ pub mod current_protocol {
             let mut read_buf = [0u8; 1024];
 
             // Read their message.
-            let read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
-            debug!("Noise handshake message came with {}", read_buf_len);
+            let _read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
 
             // Send our "s, se ->"
             let mut send_buf = [0u8; 1024];
@@ -419,8 +417,7 @@ pub mod current_protocol {
             let mut read_buf = [0u8; 1024];
 
             // Read their message.
-            let read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
-            debug!("Noise handshake message came with {}", read_buf_len);
+            let _read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
 
             // Get Noise key.
             let remote_static = state.get_remote_static().ok_or(HandshakeError::MissingRemoteStatic(3))?;
@@ -461,7 +458,6 @@ pub mod current_protocol {
 
             // Read their message.
             let read_buf_len = state.read_message(0, &bytes_input, &mut read_buf)?;
-            debug!("Noise handshake message came with {}", read_buf_len);
 
             // Get the inner message.
             let msg: HandshakeMessage4 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
@@ -502,7 +498,7 @@ pub mod current_protocol {
 
             // Read their message.
             let read_buf_len = state.read_message(0, &bytes_input, &mut read_buf)?;
-            debug!("Noise handshake message came with {}", read_buf_len);
+            
             // Get the inner message.
             let msg: HandshakeMessage5 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
@@ -544,7 +540,7 @@ pub mod current_protocol {
 
             // Read their message.
             let read_buf_len = state.read_message(1, &bytes_input, &mut read_buf)?;
-            debug!("Noise handshake message came with {}", read_buf_len);
+            
             // Get the inner message.
             let msg: HandshakeMessage6 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
@@ -706,19 +702,16 @@ pub mod current_protocol {
                 HandshakeReceiverState::Init => { 
                     let (state, message) = receive_initial(&self.local_noise_keys, incoming)?;
                     self.last_state = Some(HandshakeReceiverState::SentSecondAwaitThird(state));
-                    debug!("First receiver handshake step.");
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::SentSecondAwaitThird(state) => { 
                     let (new_state, message, nonce, seq) = receive_last_noise(state,incoming, initiator_identity, callback_different_key)?;
                     self.last_state = Some(HandshakeReceiverState::SentFourthAwaitFifth(new_state, nonce, seq));
-                    debug!("Second receiver handshake step.");
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::SentFourthAwaitFifth(state, nonce, _seq) => {
                     let (new_state, message, seq) = responder_sign(state,  incoming, &self.local_gestalt_keys, initiator_identity, nonce)?;
                     self.last_state = Some(HandshakeReceiverState::Done(new_state, seq));
-                    debug!("Third receiver handshake step.");
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::Done(_, _) => {
@@ -886,7 +879,6 @@ impl PreProtocolReceiver {
                 )
             },
             PreProtocolQuery::StartHandshake(start_handshake) => { 
-                debug!("Starting handshake with handshake step {}", start_handshake.handshake.handshake_step);
                 let maybe_ident = NodeIdentity::from_base64(&start_handshake.initiator_identity); 
                 match maybe_ident { 
                     Ok(ident) => { 
@@ -984,7 +976,7 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, peer_address:
                                 write_preprotocol_message( &json_string, &mut stream).unwrap();
 
                                 match receiver.is_handshake_done() {
-                                    true => { 
+                                    true => {
                                         let (transport, seq) = receiver.complete_handshake().unwrap();
                                         info!("Successfully completed handshake with {}!", peer_address);
                                         let completed = SuccessfulConnect {
@@ -1054,7 +1046,6 @@ pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: O
 }
 
 pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
-    println!("1"); 
     let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
         warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
         true
@@ -1063,13 +1054,11 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     let query_introduce = PreProtocolQuery::Introduction(our_identity.public.to_base64());
     let json_query = serde_json::to_string(&query_introduce)?;
     write_preprotocol_message(&json_query, stream)?;
-    println!("2");
 
     let query_request_identity = PreProtocolQuery::RequestIdentity;
     let json_query = serde_json::to_string(&query_request_identity)?;
     write_preprotocol_message(&json_query, stream)?;
     stream.flush()?;
-    println!("3");
 
     let msg = read_preprotocol_message(stream)?;
     let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
@@ -1078,14 +1067,12 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     } else { 
         return Err(HandshakeError::NoIdentity);
     };
-    println!("4");
     
     // Get protocols 
     let query_request_protocols = PreProtocolQuery::SupportedProtocols;
     let json_query = serde_json::to_string(&query_request_protocols)?;
     write_preprotocol_message(&json_query, stream)?;
     stream.flush()?;
-    println!("5");
     
     let msg = read_preprotocol_message(stream)?;
     let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
@@ -1094,7 +1081,6 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     } else { 
         return Err(HandshakeError::NoProtocolsInCommon);
     };
-    println!("6");
 
     // Figure out which protocol to use. Right now, it's either "the current protocol" or "nothing"
     let current_protocol = ProtocolDef{ 
@@ -1104,7 +1090,6 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     if !(server_protocols.contains(&current_protocol)) { 
         return Err(HandshakeError::NoProtocolsInCommon);
     }
-    println!("7");
 
     // Send first handshake message.
     let mut handshake_initiator = HandshakeIntitiator::new(load_noise_local_keys()?, our_identity);
@@ -1116,13 +1101,9 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     });
     let json_query = serde_json::to_string(&query)?;
     write_preprotocol_message(&json_query, stream)?;
-    println!("8");
-
-    let mut step = 8; 
+    
     // Loop until we're done.
     while !handshake_initiator.is_done() {
-        step += 1; 
-        println!("{}", step);
         let msg = read_preprotocol_message(stream)?;
         debug!("Got a pre-protocol reply: {}", &msg);
         let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
@@ -1141,7 +1122,6 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
             current_protocol::HandshakeNext::Done => break,
         }
     }
-    println!("done?");
 
     // We should be done here! Let's go ahead and connect.
 
@@ -1238,7 +1218,6 @@ fn handshake_test_state_machine() {
 
     let mut last_message = Some(current_protocol::HandshakeNext::SendMessage(first_message));
     while let current_protocol::HandshakeNext::SendMessage(msg) = last_message.take().unwrap() {
-        println!("{:?}", &msg);
         if bobs_turn {
             last_message = Some(initiator.advance(msg, &alice_gestalt_keys.public, callback_different_key).unwrap());
         }

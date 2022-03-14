@@ -24,7 +24,7 @@ use log::{LevelFilter, info, error};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
 use common::identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys};
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashSet;
 use mlua::LuaOptions;
 
 use crate::{common::identity::generate_local_keys, net::preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}};
@@ -272,7 +272,7 @@ fn main() {
         }
     }
     else {
-        if let Some( ArgumentMatch{ aliases, parameter: Some(raw_addr) }) = matches.get("--join") { 
+        if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") { 
             let address: SocketAddr = if raw_addr.contains(":") { 
                 raw_addr.parse().unwrap()
             } else { 
@@ -286,9 +286,9 @@ fn main() {
                 match connect_receiver.try_recv() { 
                     Ok(entry) => { 
                         info!("Connected to server {}", entry.peer_identity.to_base64());
-                    }, 
+                    },
                     Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
-                    Err(e) => { 
+                    Err(e) => {
                         error!("Error polling for connections: {:?}", e);
                         break;
                     },
