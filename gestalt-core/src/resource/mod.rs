@@ -9,7 +9,7 @@ use sha2::Digest;
 use std::fmt::Debug;
 use std::{cmp::PartialEq, hash::Hash, sync::Arc};
 
-use string_cache::DefaultAtom as Atom;
+//use string_cache::DefaultAtom as Atom;
 
 pub mod image;
 //pub mod module; //Beware of redundant names. 

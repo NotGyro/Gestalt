@@ -18,7 +18,7 @@ pub mod script;
 pub mod server;
 pub mod world;
 
-use std::{io::Write, path::PathBuf};
+use std::{io::Write, path::PathBuf, net::{SocketAddr, IpAddr}, time::Duration};
 
 use log::{LevelFilter, info, error};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
@@ -27,7 +27,7 @@ use common::identity::{do_keys_need_generating, does_private_key_need_passphrase
 use hashbrown::{HashMap, HashSet};
 use mlua::LuaOptions;
 
-use crate::common::identity::generate_local_keys;
+use crate::{common::identity::generate_local_keys, net::preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}};
 
 // For command-line argument parsing
 enum OneOrTwo {
@@ -243,6 +243,7 @@ fn main() {
 
     info!("Identity keys loaded! Initializing engine...");
 
+    // This doesn't do anything yet. 
     let lua_stdlibs = mlua::StdLib::BIT
         | mlua::StdLib::STRING
         | mlua::StdLib::TABLE
@@ -252,7 +253,50 @@ fn main() {
         | mlua::StdLib::PACKAGE;
     let _vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
 
-    client::clientmain::run_client(keys);
+    let server_mode: bool = matches.get("--server").is_some();
+    
+    if server_mode { 
+        let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
+        launch_preprotocol_listener(keys.clone(), None, connect_sender );
+        loop { 
+            match connect_receiver.try_recv() { 
+                Ok(entry) => { 
+                    info!("User {} connected", entry.peer_identity.to_base64());
+                }, 
+                Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
+                Err(e) => { 
+                    error!("Error polling for connections: {:?}", e);
+                    break;
+                },
+            }
+        }
+    }
+    else {
+        if let Some( ArgumentMatch{ aliases, parameter: Some(raw_addr) }) = matches.get("--join") { 
+            let address: SocketAddr = if raw_addr.contains(":") { 
+                raw_addr.parse().unwrap()
+            } else { 
+                let ip_addr: IpAddr = raw_addr.parse().unwrap();
+                SocketAddr::new(ip_addr, net::preprotocol::PREPROTCOL_PORT)
+            };
+
+            let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
+            preprotocol_connect_to_server(keys.clone(), address, Duration::new(5, 0), connect_sender );
+            loop { 
+                match connect_receiver.try_recv() { 
+                    Ok(entry) => { 
+                        info!("Connected to server {}", entry.peer_identity.to_base64());
+                    }, 
+                    Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
+                    Err(e) => { 
+                        error!("Error polling for connections: {:?}", e);
+                        break;
+                    },
+                }
+            }
+        }
+    }
+    //client::clientmain::run_client(keys);
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 }

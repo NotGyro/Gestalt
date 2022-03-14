@@ -3,6 +3,8 @@
 //! such as "server name", estimating RTT, cryptographic primitives supported, etc. All of this happens *before*, 
 //! not simultaneously with, any gameplay or exchange of content-addressed Gestalt resources.
 //! 
+//! Every pre-protocol message is 32 bytes, little-endian, providing the length of the string that will follow, and then a json string.
+//! 
 //! The motivation here is that I plan to use a reliability layer over UDP for the actual Gestalt protocol, 
 //! but it's possible that the fundamental structure of that reliability layer's packets on the wire could
 //! change. TCP is not going to change, and neither is json - nor are any massive new vulnerabilities likely
@@ -16,22 +18,23 @@
 use lazy_static::lazy_static;
 
 use hashbrown::HashSet;
-use log::{error, info};
+use log::{error, info, warn, debug};
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use snow::StatelessTransportState;
 use snow::params::NoiseParams;
 
-use crate::common::identity::IdentityKeyPair;
+use crate::common::identity::{IdentityKeyPair, DecodeIdentityError};
 use crate::common::{identity::NodeIdentity, Version};
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{thread, fs};
 use std::net::{TcpListener, TcpStream, Shutdown, IpAddr, Ipv4Addr, SocketAddr};
 use std::io::{Read, Write};
 
-use self::current_protocol::{HandshakeReceiver, load_noise_local_keys, HandshakeError};
+use self::current_protocol::{HandshakeReceiver, load_noise_local_keys, HandshakeError, HandshakeIntitiator};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -126,7 +129,6 @@ pub mod current_protocol {
     use std::fs::OpenOptions;
 
     use log::{debug, warn};
-    use pkcs8::rand_core::block::BlockRngCore;
     use rand::Rng;
     use signature::Signature;
 
@@ -151,6 +153,8 @@ pub mod current_protocol {
         JsonError(#[from] serde_json::Error),
         #[error("error decoding Base-64 bytes for handshake: {0:?}")]
         Base64Error(#[from] base64::DecodeError),
+        #[error("error decoding identity: {0:?}")]
+        IdentityDecodeError(#[from] DecodeIdentityError),
         #[error("i/o error interacting with Noise keystore: {0:?}")]
         IoError(#[from] std::io::Error),
         /// Expected, received.
@@ -166,7 +170,7 @@ pub mod current_protocol {
         CannotSign(ed25519_dalek::SignatureError),
         #[error("Gestalt signature sent to us by a peer did not pass validation. The other side's attempt to sign the nonce we gave it resulted in a signature which seems invalid.")]
         BadSignature(ed25519_dalek::SignatureError),
-        #[error("Did not call send_first() on a handshake initiator before calling advance()!")]
+        #[error("Handshake messages were sent in the wrong order")]
         WrongOrder,
         #[error("Called send_first() on a handshake initiator more than once, or after calling advance()")]
         FirstAfterInit,
@@ -174,6 +178,10 @@ pub mod current_protocol {
         AdvanceAfterDone,
         #[error("Attempted to close a handshake before it was done.")]
         CompleteBeforeDone,
+        #[error("No identity when we expected an identity!")]
+        NoIdentity,
+        #[error("Client and server do not have any protocols in common.")]
+        NoProtocolsInCommon,
     }
 
     pub fn noise_protocol_dir() -> PathBuf {
@@ -595,11 +603,11 @@ pub mod current_protocol {
             }
         }
         pub fn send_first(&mut self)
-                -> Result<HandshakeNext, HandshakeError> {
+                -> Result<HandshakeStepMessage, HandshakeError> {
             if self.last_state.as_ref().unwrap().get_step() == HandshakeIntitiatorStep::Init {
                 let (state, message) = initiate_handshake(&self.local_noise_keys)?;
                 self.last_state = Some(HandshakeIntitiatorState::SentFirstAwaitSecond(state));
-                Ok(HandshakeNext::SendMessage(message))
+                Ok(message)
             }
             else { 
                 Err(HandshakeError::FirstAfterInit)
@@ -622,7 +630,7 @@ pub mod current_protocol {
                     self.last_state = Some(HandshakeIntitiatorState::SentFifthAwaitSixth(transport, nonce, seq));
                     Ok(HandshakeNext::SendMessage(message))
                 },
-                HandshakeIntitiatorState::SentFifthAwaitSixth(state, nonce, seq)  => { 
+                HandshakeIntitiatorState::SentFifthAwaitSixth(state, nonce, _seq)  => { 
                     let (transport, new_seq) = initiator_final(state, incoming, receiver_identity, nonce)?;
                     self.last_state = Some(HandshakeIntitiatorState::Done(transport, new_seq));
                     Ok(HandshakeNext::Done)
@@ -671,7 +679,7 @@ pub mod current_protocol {
         pub fn get_step(&self) -> HandshakeReceiverStep { 
             match self {
                 HandshakeReceiverState::Init => HandshakeReceiverStep::Init,
-                HandshakeReceiverState::SentSecondAwaitThird(HandshakeState) => HandshakeReceiverStep::SentSecondAwaitThird,
+                HandshakeReceiverState::SentSecondAwaitThird(_) => HandshakeReceiverStep::SentSecondAwaitThird,
                 HandshakeReceiverState::SentFourthAwaitFifth(_, _, _) => HandshakeReceiverStep::SentFourthAwaitFifth,
                 HandshakeReceiverState::Done(_,_) => HandshakeReceiverStep::Done,
             }
@@ -698,16 +706,19 @@ pub mod current_protocol {
                 HandshakeReceiverState::Init => { 
                     let (state, message) = receive_initial(&self.local_noise_keys, incoming)?;
                     self.last_state = Some(HandshakeReceiverState::SentSecondAwaitThird(state));
+                    debug!("First receiver handshake step.");
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::SentSecondAwaitThird(state) => { 
                     let (new_state, message, nonce, seq) = receive_last_noise(state,incoming, initiator_identity, callback_different_key)?;
                     self.last_state = Some(HandshakeReceiverState::SentFourthAwaitFifth(new_state, nonce, seq));
+                    debug!("Second receiver handshake step.");
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::SentFourthAwaitFifth(state, nonce, _seq) => {
                     let (new_state, message, seq) = responder_sign(state,  incoming, &self.local_gestalt_keys, initiator_identity, nonce)?;
                     self.last_state = Some(HandshakeReceiverState::Done(new_state, seq));
+                    debug!("Third receiver handshake step.");
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::Done(_, _) => {
@@ -738,7 +749,6 @@ pub mod current_protocol {
     }
 }
 
-
 lazy_static! {
     pub static ref SUPPORTED_PROTOCOL_SET: HashSet<ProtocolDef> = { 
         let mut set = HashSet::new(); 
@@ -757,7 +767,9 @@ lazy_static! {
 #[derive(thiserror::Error, Debug)]
 pub enum PreProtocolError {
     #[error("Bad handshake: {0:?}")]
-    Base64Error(#[from] current_protocol::HandshakeError),
+    HandshakeError(#[from] current_protocol::HandshakeError),
+    #[error("Identity parsing error: {0:?}")]
+    IdentityError(#[from] DecodeIdentityError),
     #[error("Attempted to start a handshake, but the Initiator has not provided a node identity.")]
     HandshakeNoIdentity,
     #[error("Received a Handshake message but a handshake was never started.")]
@@ -836,7 +848,8 @@ impl PreProtocolReceiver {
         }
     }
     pub fn receive_and_reply(&mut self, incoming: PreProtocolQuery) -> Result<PreProtocolOutput, PreProtocolError>{
-        let callback_different_key = |_node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
+        let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
+            warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
             true
         };
         Ok(match incoming {
@@ -873,6 +886,7 @@ impl PreProtocolReceiver {
                 )
             },
             PreProtocolQuery::StartHandshake(start_handshake) => { 
+                debug!("Starting handshake with handshake step {}", start_handshake.handshake.handshake_step);
                 let maybe_ident = NodeIdentity::from_base64(&start_handshake.initiator_identity); 
                 match maybe_ident { 
                     Ok(ident) => { 
@@ -897,11 +911,13 @@ impl PreProtocolReceiver {
                 }
             },
             PreProtocolQuery::Handshake(msg) => { 
+                debug!("Handshake step message received: {}", msg.handshake_step);
                 match &mut self.state { 
                     PreProtocolReceiverState::Handshake(receiver) => { 
                         let out = receiver.advance(msg, &self.peer_identity.unwrap(), callback_different_key);
                         match out { 
                             Ok(current_protocol::HandshakeNext::SendMessage(message)) => {
+                                debug!("Sending handshake step: {}", message.handshake_step);
                                 PreProtocolOutput::Reply(PreProtocolReply::Handshake(message))
                             },
                             // Receiver doesn't work this way.
@@ -926,6 +942,7 @@ impl PreProtocolReceiver {
 
 /// Represents a client who has completed a handshake in the pre-protocol and will now be moving over to the game protocol proper
 pub struct SuccessfulConnect {
+    pub peer_identity: NodeIdentity,
     pub peer_address: SocketAddr,
     pub transport_cryptography: StatelessTransportState,
     pub transport_sequence_number: u64,
@@ -934,31 +951,49 @@ pub struct SuccessfulConnect {
 pub const PREPROTCOL_PORT: u16 = 54134;
 pub const GESTALT_PORT: u16 = 54135;
 
+pub fn write_preprotocol_message(json: &str, stream: &mut TcpStream) -> Result<(), std::io::Error> { 
+    let bytes = json.as_bytes();
+    let message_len_bytes = (bytes.len() as u32).to_le_bytes();
+    assert_eq!(message_len_bytes.len(), 4);
+    stream.write_all(&message_len_bytes)?;
+    stream.write_all(bytes)?;
+    stream.flush()?;
+    Ok(())
+}
+
+pub fn read_preprotocol_message(stream: &mut TcpStream) -> Result<String, std::io::Error> { 
+    let mut next_message_size_buf = [0 as u8; 4];
+    stream.read_exact(&mut next_message_size_buf)?;
+    stream.flush()?;
+    let next_message_size = u32::from_le_bytes(next_message_size_buf);
+    let mut message_buf: Vec<u8> = vec![0u8; next_message_size as usize];
+    stream.read_exact(&mut message_buf)?;
+
+    Ok(String::from_utf8_lossy(&message_buf).to_string())
+}
+
 pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, peer_address: SocketAddr, mut stream: TcpStream, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) {
-    const BUFFER_SIZE: usize = 65535;
-    let mut buffer = [0 as u8; BUFFER_SIZE];
     let mut receiver = PreProtocolReceiver::new(our_identity);
-    while match stream.read(&mut buffer) {
-        Ok(length_read) => {
-            let buffer_slice = &buffer[0..length_read];
-            match serde_json::from_slice::<PreProtocolQuery>(buffer_slice) { 
+    while match read_preprotocol_message(&mut stream) {
+        Ok(msg) => match serde_json::from_str::<PreProtocolQuery>(&msg) { 
                 Ok(query) => {
                     match receiver.receive_and_reply(query) {
                         Ok(out) => match out {
                             PreProtocolOutput::Reply(to_send) => {
                                 let json_string = serde_json::to_string(&to_send).unwrap();
-                                stream.write(json_string.as_bytes()).unwrap();
+                                write_preprotocol_message( &json_string, &mut stream).unwrap();
 
                                 match receiver.is_handshake_done() {
                                     true => { 
                                         let (transport, seq) = receiver.complete_handshake().unwrap();
                                         info!("Successfully completed handshake with {}!", peer_address);
                                         let completed = SuccessfulConnect {
+                                            peer_identity: receiver.peer_identity.unwrap(),
                                             peer_address,
                                             transport_cryptography: transport,
                                             transport_sequence_number: seq,
                                         };
-                                        completed_channel.send(completed);
+                                        completed_channel.send(completed).unwrap();
                                         // Done with this part, stop sending. 
                                         false 
                                     },
@@ -981,10 +1016,9 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, peer_address:
                     error!("Error parsing PreProtocolQuery from json received from {}: {:?}", stream.peer_addr().unwrap(), e);
                     false
                 },
-            }
-        },
+            },
         Err(_) => {
-            error!("An error occurred, terminating connection with {}", stream.peer_addr().unwrap());
+            error!("Error getting message length from {}", stream.peer_addr().unwrap());
             false
         }
     } {}
@@ -992,9 +1026,9 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, peer_address:
 }
 
 /// Spawns a thread which listens for pre-protocol connections on TCP.
-pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_ip: Option<IpAddr>, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) { 
+pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: Option<IpAddr>, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) { 
     std::thread::spawn( move || { 
-        let ip = match our_ip { 
+        let ip = match our_address { 
             Some(value) => value, 
             None => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         };
@@ -1002,12 +1036,12 @@ pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_ip: Option
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    let peer_ip = stream.peer_addr().unwrap();
+                    let peer_address = stream.peer_addr().unwrap();
                     info!("New PreProtocol connection: {}", stream.peer_addr().unwrap());
                     let completed_channel_clone = completed_channel.clone();
                     thread::spawn( move || {
                         // connection succeeded
-                        preprotocol_receiver_session(our_identity.clone(), peer_ip, stream, completed_channel_clone);
+                        preprotocol_receiver_session(our_identity.clone(), peer_address, stream, completed_channel_clone);
                     });
                 }
                 Err(e) => {
@@ -1015,6 +1049,130 @@ pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_ip: Option
                     /* connection failed */
                 }
             }
+        }
+    });
+}
+
+pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
+    println!("1"); 
+    let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
+        warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
+        true
+    };
+    // Exchange identities.
+    let query_introduce = PreProtocolQuery::Introduction(our_identity.public.to_base64());
+    let json_query = serde_json::to_string(&query_introduce)?;
+    write_preprotocol_message(&json_query, stream)?;
+    println!("2");
+
+    let query_request_identity = PreProtocolQuery::RequestIdentity;
+    let json_query = serde_json::to_string(&query_request_identity)?;
+    write_preprotocol_message(&json_query, stream)?;
+    stream.flush()?;
+    println!("3");
+
+    let msg = read_preprotocol_message(stream)?;
+    let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
+    let server_identity = if let PreProtocolReply::Identity(identity) = reply { 
+        NodeIdentity::from_base64(&identity)?
+    } else { 
+        return Err(HandshakeError::NoIdentity);
+    };
+    println!("4");
+    
+    // Get protocols 
+    let query_request_protocols = PreProtocolQuery::SupportedProtocols;
+    let json_query = serde_json::to_string(&query_request_protocols)?;
+    write_preprotocol_message(&json_query, stream)?;
+    stream.flush()?;
+    println!("5");
+    
+    let msg = read_preprotocol_message(stream)?;
+    let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
+    let server_protocols = if let PreProtocolReply::SupportedProtocols(protocols) = reply { 
+        protocols.supported_protocols
+    } else { 
+        return Err(HandshakeError::NoProtocolsInCommon);
+    };
+    println!("6");
+
+    // Figure out which protocol to use. Right now, it's either "the current protocol" or "nothing"
+    let current_protocol = ProtocolDef{ 
+        protocol: current_protocol::PROTOCOL_NAME.to_string(), 
+        version: current_protocol::PROTOCOL_VERSION.clone(),
+    };
+    if !(server_protocols.contains(&current_protocol)) { 
+        return Err(HandshakeError::NoProtocolsInCommon);
+    }
+    println!("7");
+
+    // Send first handshake message.
+    let mut handshake_initiator = HandshakeIntitiator::new(load_noise_local_keys()?, our_identity);
+    let handshake_first = handshake_initiator.send_first()?;
+    let query = PreProtocolQuery::StartHandshake(StartHandshakeMsg{
+        use_protocol: current_protocol.clone(),
+        initiator_identity: our_identity.public.to_base64(),
+        handshake: handshake_first,
+    });
+    let json_query = serde_json::to_string(&query)?;
+    write_preprotocol_message(&json_query, stream)?;
+    println!("8");
+
+    let mut step = 8; 
+    // Loop until we're done.
+    while !handshake_initiator.is_done() {
+        step += 1; 
+        println!("{}", step);
+        let msg = read_preprotocol_message(stream)?;
+        debug!("Got a pre-protocol reply: {}", &msg);
+        let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
+        let handshake_step = if let PreProtocolReply::Handshake(step) = reply { 
+            step
+        } else { 
+            return Err(HandshakeError::WrongOrder);
+        };
+
+        match handshake_initiator.advance(handshake_step, &server_identity, callback_different_key)? {
+            current_protocol::HandshakeNext::SendMessage(msg) => {
+                let query = PreProtocolQuery::Handshake(msg);
+                let json_query = serde_json::to_string(&query)?;
+                write_preprotocol_message(&json_query, stream)?;
+            },
+            current_protocol::HandshakeNext::Done => break,
+        }
+    }
+    println!("done?");
+
+    // We should be done here! Let's go ahead and connect.
+
+    let (transport, counter) = handshake_initiator.complete()?;
+
+    Ok(SuccessfulConnect{
+        peer_identity: server_identity,
+        peer_address: server_address,
+        transport_cryptography: transport,
+        transport_sequence_number: counter,
+    })
+}
+
+pub fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server_address: SocketAddr, connect_timeout: Duration, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) { 
+    std::thread::spawn( move || {
+        match TcpStream::connect_timeout(&server_address, connect_timeout) {
+            Ok(mut stream) => {
+                match preprotocol_connect_inner(&mut stream, our_identity, server_address) {
+                    Ok(completed_connection) => {
+                        completed_channel.send(completed_connection).unwrap();
+                    },
+                    Err(error) => {
+                        error!("Handshake error connecting to server: {:?}", error);
+                        let error_to_send = PreProtocolQuery::HandshakeFailed(format!("{:?}", error));
+                        let json_error = serde_json::to_string(&error_to_send).unwrap();
+                        write_preprotocol_message(&json_error, &mut stream).unwrap();
+                    },
+                }
+                stream.shutdown(Shutdown::Both).unwrap();
+            },
+            Err(e) => error!("Could not initiate connection to server: {:?}", e),
         }
     });
 }
@@ -1073,15 +1231,7 @@ fn handshake_test_state_machine() {
         true
     };
     
-    let first_message = {
-        if let current_protocol::HandshakeNext::SendMessage(msg) = initiator.send_first().unwrap() { 
-            msg 
-        }
-        else { 
-            panic!("First message was a done-state!")
-        }
-    };
-
+    let first_message = initiator.send_first().unwrap();
     let mut bobs_turn = false; 
 
     let mut steps_counter: usize = 1; // Step 1 is first message, we just sent that. 

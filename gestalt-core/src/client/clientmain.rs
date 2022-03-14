@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TileCoord, TilePos}, client::render::TerrainRenderer};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -588,7 +588,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         None
                     },
                 };
-                if let Some((result_position, result_id)) = hit {    
+                if let Some((result_position, _result_id)) = hit {    
                     match world_space.set(result_position, air_id) {
                         Ok(()) => {
                             terrain_renderer.notify_changed(&result_position);
@@ -616,7 +616,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     },
                     Err(e) => {
                         panic!("Tile access error: {:?}", e);
-                        None
+                        //None
                     },
                 };
                 if let Some((result_position, _result_id, hit_side)) = hit {

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::entity::EntityId;
 use crate::script::ModuleId;
-use crate::world::{ChunkPos, WorldId};
+use crate::world::WorldId;
 
 /// Runtime type identifier for a type of message.
 pub type MsgTypeId = Uuid;
