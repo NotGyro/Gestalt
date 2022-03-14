@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use glam::f32::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
-use shipyard::{EntityId, IntoIter};
+use shipyard::IntoIter;
 
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -13,6 +13,8 @@ pub struct Transform {
     pub position: Vec3,
     pub rotation: Quat,
 }
+
+pub type EntityId = shipyard::EntityId;
 
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 #[repr(transparent)]

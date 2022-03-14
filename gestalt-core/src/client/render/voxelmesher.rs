@@ -536,7 +536,6 @@ pub fn make_mesh_completely<A: CubeArtMapper<TileId>>(
 
     let state = MesherState::prepare_to_mesh(chunk, tiles_to_art, &mut atlas)?;
 
-    println!("{:?}", state.textures_needed);
     Ok((state.build_mesh()?, atlas))
 }
 

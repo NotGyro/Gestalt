@@ -2,10 +2,10 @@ use crate::resource::image::{
     ImageProvider, InternalImage, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE,
 };
 use crate::resource::ResourceId;
+use log::error;
 use glam::Vec2;
 use hashbrown::HashMap;
 use image::{GenericImage, ImageError};
-use log::error;
 
 use super::{generate_missing_texture_image, generate_pending_texture_image};
 
@@ -244,6 +244,7 @@ pub fn build_tile_atlas<TextureSource: ImageProvider>(
         if !((texture_to_use.width() == layout.tile_size)
             && (texture_to_use.height() == layout.tile_size))
         {
+            
             error!(
                 "Tried to add texture {} into a block texture atlas, but the image size is ({},{}). The expected image size was ({},{})",
                 resource_debug!(resource_tile),

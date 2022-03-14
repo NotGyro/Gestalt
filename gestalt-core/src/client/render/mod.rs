@@ -175,6 +175,7 @@ impl TerrainRenderer {
             Ok(false)
         }
         else { 
+            let mut did_mesh = false;
             let remesh_list: HashSet<ChunkPos> = self.pending_remesh.drain().collect();
             for chunk_position in remesh_list.iter() { 
                 //let is_new_chunk = !self.gpu_chunks.contains_key(&chunk_position);
@@ -201,13 +202,14 @@ impl TerrainRenderer {
                         })?;
                         
                     if mesh.verticies.len() > 0 {
+                        did_mesh = true;
                         self.texture_for_chunk.insert(chunk_position.clone(), texture_binding);
                         self.meshed_chunks.insert(chunk_position.clone(), mesh);
                     }
                 }
             }
 
-            Ok(true)
+            Ok(did_mesh)
         }
     }
     /// Takes any of the changed or new chunk meshes made in process_remesh() and makes them available for rendering. 

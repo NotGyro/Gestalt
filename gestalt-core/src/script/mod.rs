@@ -63,8 +63,8 @@ pub struct PackageDescriptor {
     pub language: SupportedLanguages,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
 /// Manifest for a script package. package.ron, for instance
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
     /// Version of the package manifest format we're using.
     #[serde(with = "crate::common::version_string")]

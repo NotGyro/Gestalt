@@ -1183,11 +1183,11 @@ where
     }
 }
 
-/*#[derive(Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct VoxelRaycast {
     pub pos: VoxelPos<i32>,
-    t_max: Vector3<f64>, //Where does the ray cross the first voxel boundary? (in all directions)
-    t_delta: Vector3<f64>, //How far along do we need to move for the length of that movement to equal the width of a voxel?
+    t_max: glam::Vec3, //Where does the ray cross the first voxel boundary? (in all directions)
+    t_delta: glam::Vec3, //How far along do we need to move for the length of that movement to equal the width of a voxel?
     step_dir: VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
     last_direction: VoxelAxis,
 }
@@ -1256,7 +1256,7 @@ impl VoxelRaycast {
         }
     }
     #[allow(dead_code)]
-    pub fn new(origin: Point3<f64>, direction: Vector3<f64>) -> VoxelRaycast {
+    pub fn new(origin: glam::Vec3, direction: glam::Vec3) -> VoxelRaycast {
         //Voxel is assumed to be 1x1x1 in this situation.
         //Set up our step sign variable.
         let mut step_dir: VoxelPos<i32> = VoxelPos { x: 0, y: 0, z: 0 };
@@ -1302,40 +1302,40 @@ impl VoxelRaycast {
         let next_voxel_boundary = voxel_origin + step_dir;
 
         //Set up our t_max - distances to next cell
-        let mut t_max: Vector3<f64> = Vector3::new(0.0, 0.0, 0.0);
+        let mut t_max: glam::Vec3 = glam::Vec3::new(0.0, 0.0, 0.0);
         if direction.x != 0.0 {
-            t_max.x = (next_voxel_boundary.x as f64 - origin.x) / direction.x;
+            t_max.x = (next_voxel_boundary.x as f32 - origin.x) / direction.x;
         } else {
-            t_max.x = f64::MAX; //Undefined in this direction
+            t_max.x = f32::MAX; //Undefined in this direction
         }
         if direction.y != 0.0 {
-            t_max.y = (next_voxel_boundary.y as f64 - origin.y) / direction.y;
+            t_max.y = (next_voxel_boundary.y as f32 - origin.y) / direction.y;
         } else {
-            t_max.y = f64::MAX; //Undefined in this direction
+            t_max.y = f32::MAX; //Undefined in this direction
         }
         if direction.z != 0.0 {
-            t_max.z = (next_voxel_boundary.z as f64 - origin.z) / direction.z;
+            t_max.z = (next_voxel_boundary.z as f32 - origin.z) / direction.z;
         } else {
-            t_max.z = f64::MAX; //Undefined in this direction
+            t_max.z = f32::MAX; //Undefined in this direction
         }
 
         //Set up our t_delta - movement per iteration.
         //Again, voxel is assumed to be 1x1x1 in this situation.
-        let mut t_delta: Vector3<f64> = Vector3::new(0.0, 0.0, 0.0);
+        let mut t_delta: glam::Vec3 = glam::Vec3::new(0.0, 0.0, 0.0);
         if direction.x != 0.0 {
-            t_delta.x = 1.0 / (direction.x * step_dir.x as f64);
+            t_delta.x = 1.0 / (direction.x * step_dir.x as f32);
         } else {
-            t_delta.x = f64::MAX; //Undefined in this direction
+            t_delta.x = f32::MAX; //Undefined in this direction
         }
         if direction.y != 0.0 {
-            t_delta.y = 1.0 / (direction.y * step_dir.y as f64);
+            t_delta.y = 1.0 / (direction.y * step_dir.y as f32);
         } else {
-            t_delta.y = f64::MAX; //Undefined in this direction
+            t_delta.y = f32::MAX; //Undefined in this direction
         }
         if direction.z != 0.0 {
-            t_delta.z = 1.0 / (direction.z * step_dir.z as f64);
+            t_delta.z = 1.0 / (direction.z * step_dir.z as f32);
         } else {
-            t_delta.z = f64::MAX; //Undefined in this direction
+            t_delta.z = f32::MAX; //Undefined in this direction
         }
 
         VoxelRaycast {
@@ -1346,7 +1346,36 @@ impl VoxelRaycast {
             last_direction: VoxelAxis::Z,
         }
     }
-}*/
+    pub fn hit_side(&self) -> VoxelSide {
+        match self.last_direction {
+            VoxelAxis::X => {
+                if self.step_dir.x >= 0 { 
+                    VoxelSide::PosiX
+                }
+                else { 
+                    VoxelSide::NegaX
+                }
+            },
+            VoxelAxis::Y => {
+                if self.step_dir.y >= 0 { 
+                    VoxelSide::PosiY
+                }
+                else { 
+                    VoxelSide::NegaY
+                }
+            },
+            VoxelAxis::Z => {
+                if self.step_dir.z >= 0 { 
+                    VoxelSide::PosiZ
+                }
+                else { 
+                    VoxelSide::NegaZ
+                }
+            },
+        }.opposite()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SidesArray<T>
 where
