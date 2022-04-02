@@ -148,9 +148,9 @@ impl IdentityKeyPair {
     }
 }
 
-const KEYS_DIRECTORY:       &'static str = "keys";
-const PUB_KEY_FILENAME:     &'static str = "identity_key_public.pem";
-const PRIV_KEY_FILENAME:    &'static str = "identity_key_private.pem";
+const KEYS_DIRECTORY:       &str = "keys";
+const PUB_KEY_FILENAME:     &str = "identity_key_public.pem";
+const PRIV_KEY_FILENAME:    &str = "identity_key_private.pem";
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum KeyPairLoadError {
@@ -177,19 +177,15 @@ pub fn do_keys_need_generating() -> bool {
     if !pub_key_path.exists() {
         return true;
     }
-    else { 
-        if pub_key_path.is_dir() {
-            panic!("Public key file {} cannot be a directory!", pub_key_path.display());
-        }
+    else if pub_key_path.is_dir() {
+        panic!("Public key file {} cannot be a directory!", pub_key_path.display());
     }
 
     if !priv_key_path.exists() {
         return true;
     }
-    else { 
-        if priv_key_path.is_dir() {
-            panic!("Public key file {} cannot be a directory!", priv_key_path.display());
-        }
+    else if priv_key_path.is_dir() {
+        panic!("Public key file {} cannot be a directory!", priv_key_path.display());
     }
 
     // All sanity checks passed, keys exist so we don't need to generate them.

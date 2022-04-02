@@ -120,7 +120,7 @@ impl<T: Voxel> ChunkSmall<T> {
             None => {
                 self.palette_dirty = true;
                 //We have run out of space.
-                if self.highest_idx >= 255 {
+                if self.highest_idx == 255 {
                     return None;
                 } else {
                     self.highest_idx += 1;

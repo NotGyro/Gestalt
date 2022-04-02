@@ -254,7 +254,6 @@ fn test_parse_version() {
     assert_eq!(ver.major(), 0);
     assert_eq!(ver.minor(), 1);
     assert_eq!(ver.patch(), 12);
-    drop(stringy);
 
     let stringy_with_build = "v7.20.1-build18";
     let ver_with_build = Version::parse(stringy_with_build).unwrap();

@@ -271,28 +271,26 @@ fn main() {
             }
         }
     }
-    else {
-        if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") { 
-            let address: SocketAddr = if raw_addr.contains(":") { 
-                raw_addr.parse().unwrap()
-            } else { 
-                let ip_addr: IpAddr = raw_addr.parse().unwrap();
-                SocketAddr::new(ip_addr, net::preprotocol::PREPROTCOL_PORT)
-            };
+    else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") { 
+        let address: SocketAddr = if raw_addr.contains(":") { 
+            raw_addr.parse().unwrap()
+        } else { 
+            let ip_addr: IpAddr = raw_addr.parse().unwrap();
+            SocketAddr::new(ip_addr, net::preprotocol::PREPROTCOL_PORT)
+        };
 
-            let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
-            preprotocol_connect_to_server(keys.clone(), address, Duration::new(5, 0), connect_sender );
-            loop { 
-                match connect_receiver.try_recv() { 
-                    Ok(entry) => { 
-                        info!("Connected to server {}", entry.peer_identity.to_base64());
-                    },
-                    Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
-                    Err(e) => {
-                        error!("Error polling for connections: {:?}", e);
-                        break;
-                    },
-                }
+        let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
+        preprotocol_connect_to_server(keys.clone(), address, Duration::new(5, 0), connect_sender );
+        loop { 
+            match connect_receiver.try_recv() { 
+                Ok(entry) => { 
+                    info!("Connected to server {}", entry.peer_identity.to_base64());
+                },
+                Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
+                Err(e) => {
+                    error!("Error polling for connections: {:?}", e);
+                    break;
+                },
             }
         }
     }

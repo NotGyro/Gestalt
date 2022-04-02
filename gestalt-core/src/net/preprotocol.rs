@@ -137,7 +137,7 @@ pub mod current_protocol {
     use crate::common::{identity::NodeIdentity, Version};
 
     pub const PROTOCOL_VERSION: Version = version!(1,0,0);
-    pub const PROTOCOL_NAME: &'static str = "Gestalt_Noise_XX";
+    pub const PROTOCOL_NAME: &'static str = "gestalt_noise_laminar_udp";
 
     pub const NOISE_PARAM_STR: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 

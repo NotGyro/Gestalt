@@ -34,8 +34,8 @@ use crate::{
 
 use super::camera::{self, Camera};
 
-pub const WINDOW_TITLE: &'static str = "Gestalt";
-pub const CLIENT_CONFIG_FILENAME: &'static str = "client_config.ron";
+pub const WINDOW_TITLE: &str = "Gestalt";
+pub const CLIENT_CONFIG_FILENAME: &str = "client_config.ron";
 
 // Core / main part of the game client. Windowing and event dispatching lives here.
 // Input events come in through here.
