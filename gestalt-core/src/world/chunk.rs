@@ -71,7 +71,7 @@ impl<T: Voxel> ChunkSmall<T> {
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: T) -> Option<u8> {
-        self.reverse_palette.get(&tile).map(|v| *v)
+        self.reverse_palette.get(&tile).copied()
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<&T> {
@@ -121,7 +121,7 @@ impl<T: Voxel> ChunkSmall<T> {
                 self.palette_dirty = true;
                 //We have run out of space.
                 if self.highest_idx == 255 {
-                    return None;
+                    None
                 } else {
                     self.highest_idx += 1;
                     let idx = self.highest_idx;
@@ -151,7 +151,7 @@ impl<T: Voxel> ChunkLarge<T> {
     }
     #[inline(always)]
     pub fn get(&self, coord: VoxelPos<u16>) -> &T {
-        &self.palette.get(&self.inner.get_raw(coord)).unwrap()
+        self.palette.get(self.inner.get_raw(coord)).unwrap()
     }
     #[inline(always)]
     pub fn get_raw_i(&self, i: usize) -> &u16 {
@@ -164,7 +164,7 @@ impl<T: Voxel> ChunkLarge<T> {
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: T) -> Option<u16> {
-        self.reverse_palette.get(&tile).map(|v| *v)
+        self.reverse_palette.get(&tile).copied()
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<&T> {
@@ -311,8 +311,8 @@ impl<T: Voxel> Chunk<T> {
                     reverse_palette.insert(tile, 1);
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
                         inner: structure,
-                        palette: palette,
-                        reverse_palette: reverse_palette,
+                        palette,
+                        reverse_palette,
                         highest_idx: 1,
                         palette_dirty: false,
                     }));
@@ -369,7 +369,7 @@ impl Chunk<TileId> {
                 let entry = SmallPaletteEntry {
                     to_tile: *value,
                 };
-                let entry_bytes = entry.to_le_bytes();
+                let entry_bytes = entry.as_le_bytes();
                 writer.write_all(&entry_bytes)?;
                 entry_bytes.len()
             },
@@ -379,9 +379,9 @@ impl Chunk<TileId> {
                     let entry = SmallPaletteEntry {
                         to_tile: value,
                     };
-                    let entry_bytes = entry.to_le_bytes();
+                    let entry_bytes = entry.as_le_bytes();
                     writer.write_all(&entry_bytes)?;
-                    total = total + entry_bytes.len();
+                    total += entry_bytes.len();
                 }
                 total
             },
@@ -392,9 +392,9 @@ impl Chunk<TileId> {
                         from_index: *idx,
                         to_tile: *tile,
                     };
-                    let entry_bytes = entry.to_le_bytes();
+                    let entry_bytes = entry.as_le_bytes();
                     writer.write_all(&entry_bytes)?;
-                    total = total + entry_bytes.len();
+                    total += entry_bytes.len();
                 }
                 total
             },
@@ -444,7 +444,7 @@ impl Chunk<TileId> {
         assert!(new_header_vec.len() <= header_len);
 
         let pre_header = ChunkFilePreHeader {
-            version: CHUNK_FILE_VERSION.clone(),
+            version: CHUNK_FILE_VERSION,
             revision: self.revision,
             header_length: new_header_vec.len() as u32,
         };
@@ -510,7 +510,7 @@ impl SmallPaletteEntry {
     pub const fn serialized_length() -> usize {
         std::mem::size_of::<TileId>()
     }
-    fn to_le_bytes(&self) -> [u8; 4] {
+    fn as_le_bytes(&self) -> [u8; 4] {
         #[cfg(debug_assertions)]
         {
             assert_eq!(Self::serialized_length(), 4)
@@ -544,7 +544,7 @@ impl LargePaletteEntry {
         std::mem::size_of::<u16>()
         + std::mem::size_of::<TileId>()
     }
-    fn to_le_bytes(&self) -> [u8; 6] { 
+    fn as_le_bytes(&self) -> [u8; 6] { 
         #[cfg(debug_assertions)]
         {
             assert_eq!(Self::serialized_length(), 6)
@@ -640,13 +640,13 @@ pub fn deserialize_small_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -
         let mut buffer =  MaybeUninit::<[u8; CHUNK_SIZE_CUBED]>::uninit();
         let ptr = { &mut *buffer.as_mut_ptr() };
         reader.read_exact(ptr)?;
-        drop(ptr);
         buffer.assume_init()
     };
 
     Ok(output)
 }
 
+#[allow(clippy::needless_range_loop)]
 pub fn deserialize_large_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -> Result<[u16; CHUNK_SIZE_CUBED], ChunkIoError> {
     let output = unsafe {
         // Avoid writing CHUNK_SIZE_CUBED zeroes - we will need to tell Rust to do things it considers evil. 
@@ -705,7 +705,7 @@ pub struct ChunkFilePreHeader {
 impl ChunkFilePreHeader { 
     pub fn new(header_length: usize, revision: u64) -> Self { 
         Self {
-            version: CHUNK_FILE_VERSION.clone(),
+            version: CHUNK_FILE_VERSION,
             header_length: header_length as u32,
             revision
         }
@@ -866,7 +866,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
 
             let mut reverse_palette = HashMap::new();
             for (i, elem) in palette.iter().enumerate() { 
-                reverse_palette.insert(elem.clone(), i as u8);
+                reverse_palette.insert(*elem, i as u8);
             }
 
             Ok(Chunk{ 
@@ -895,7 +895,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
 
             let mut reverse_palette = HashMap::new();
             for (i, elem) in palette.iter() { 
-                reverse_palette.insert(elem.clone(), i.clone());
+                reverse_palette.insert(*elem, *i);
             }
 
             Ok(Chunk{ 
@@ -1071,8 +1071,8 @@ fn assignemnts_to_chunk() {
 fn chunk_serialize_deserialize() {
     use std::io::{BufWriter, Cursor};
 
-    let air_block = 0; 
-    let stone_block = 37; 
+    let air_block = 0;
+    let stone_block = 37;
 
     let starting_chunk: Chunk<TileId> = Chunk {
         revision: 1337,

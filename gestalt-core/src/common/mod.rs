@@ -96,7 +96,7 @@ impl Version {
         in_progress.remove_matches("version");
 
         //Make sure it contains at least one separator character.
-        if !(in_progress.contains(".") || in_progress.contains(":") || in_progress.contains("-")) {
+        if !(in_progress.contains('.') || in_progress.contains(':') || in_progress.contains('-')) {
             return Err(ParseVersionError::NoSeparators(value.to_string()));
         }
         let split = in_progress.split(|c| {
@@ -117,7 +117,7 @@ impl Version {
             field: &str,
             original_string: String,
         ) -> Result<u32, ParseVersionError> {
-            let big_number = u128::from_str_radix(field, 10).map_err(|_e| {
+            let big_number = field.parse::<u128>().map_err(|_e| {
                 ParseVersionError::NotNumber(field.to_string(), original_string.clone())
             })?;
             if big_number > (u32::MAX as u128) {
@@ -172,7 +172,7 @@ impl Display for Version {
 }
 impl std::fmt::Debug for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Version({})", self.to_string())
+        write!(f, "Version({})", self)
     }
 }
 

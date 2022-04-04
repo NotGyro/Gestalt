@@ -48,12 +48,12 @@ impl Vertex {
     }
 }
 
-impl Into<Vec3> for Vertex {
-    fn into(self) -> Vec3 {
+impl From<Vertex> for Vec3 {
+    fn from(val: Vertex) -> Self {
         vec3(
-            self.position[0] as f32,
-            self.position[1] as f32,
-            self.position[2] as f32,
+            val.position[0] as f32,
+            val.position[1] as f32,
+            val.position[2] as f32,
         )
     }
 }
@@ -150,12 +150,12 @@ const NEGATIVE_Z_FACE: [Vertex; 6] = [
 
 fn get_face_verts(side: VoxelSide) -> [Vertex; 6] {
     match side {
-        VoxelSide::PosiX => return POSITIVE_X_FACE,
-        VoxelSide::NegaX => return NEGATIVE_X_FACE,
-        VoxelSide::PosiY => return POSITIVE_Y_FACE,
-        VoxelSide::NegaY => return NEGATIVE_Y_FACE,
-        VoxelSide::PosiZ => return POSITIVE_Z_FACE,
-        VoxelSide::NegaZ => return NEGATIVE_Z_FACE,
+        VoxelSide::PosiX => POSITIVE_X_FACE,
+        VoxelSide::NegaX => NEGATIVE_X_FACE,
+        VoxelSide::PosiY => POSITIVE_Y_FACE,
+        VoxelSide::NegaY => NEGATIVE_Y_FACE,
+        VoxelSide::PosiZ => POSITIVE_Z_FACE,
+        VoxelSide::NegaZ => NEGATIVE_Z_FACE,
     }
 }
 
@@ -180,21 +180,11 @@ pub struct UvCache {
 
 type SidesCache = SidesArray<UvCache>;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct CubeArtNotes {
     pub visible: bool,
     pub cull_self: bool,   //Do we cull the same material?
     pub cull_others: bool, //Do we cull materials other than this one?
-}
-
-impl Default for CubeArtNotes {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            cull_self: false,
-            cull_others: false,
-        }
-    }
 }
 
 impl From<&CubeArt> for CubeArtNotes {
@@ -266,8 +256,8 @@ fn sides_cache_from_art(
         )?))),
         CubeTex::AllSides(a) => {
             let mut result_array: [UvCache; 6] = [UvCache::default(); 6];
-            for i in 0..6 {
-                result_array[i] = uv_cache_from_resource(a.get_i(i), layout)?;
+            for (i, uv_cache) in result_array.iter_mut().enumerate() {
+                *uv_cache = uv_cache_from_resource(a.get_i(i), layout)?;
             }
             Ok(Some(SidesCache { data: result_array }))
         }
@@ -423,7 +413,7 @@ impl<'a> MesherState<'a> {
                 let cube_art = match tiles_to_art.get_art_for_tile(val) {
                     Some(art) => {
                         for t in art.all_textures() {
-                            textures_needed.insert(t.clone());
+                            textures_needed.insert(*t);
                         }
                         ArtCacheEntry::new(art, atlas)
                     }
@@ -432,7 +422,7 @@ impl<'a> MesherState<'a> {
                             "No art loaded for world-level tile ID {}. Using missing texture.",
                             val
                         );
-                        missing_texture.clone()
+                        missing_texture
                     }
                 };
                 let art_cache = ArtCacheUniform::new(cube_art, missing_texture);
@@ -449,7 +439,7 @@ impl<'a> MesherState<'a> {
                     let cube_art = match tiles_to_art.get_art_for_tile(&tile) {
                         Some(art) => {
                             for t in art.all_textures() {
-                                textures_needed.insert(t.clone());
+                                textures_needed.insert(*t);
                             }
                             ArtCacheEntry::new(art, atlas)
                         }
@@ -458,7 +448,7 @@ impl<'a> MesherState<'a> {
                                 "No art loaded for world-level tile ID {}. Using missing texture.",
                                 tile
                             );
-                            missing_texture.clone()
+                            missing_texture
                         }
                     };
                     art_palette[i as usize] = cube_art;
@@ -477,7 +467,7 @@ impl<'a> MesherState<'a> {
                     let cube_art = match tiles_to_art.get_art_for_tile(tile) {
                         Some(art) => {
                             for t in art.all_textures() {
-                                textures_needed.insert(t.clone());
+                                textures_needed.insert(*t);
                             }
                             ArtCacheEntry::new(art, atlas)
                         }
@@ -486,7 +476,7 @@ impl<'a> MesherState<'a> {
                                 "No art loaded for world-level tile ID {}. Using missing texture.",
                                 tile
                             );
-                            missing_texture.clone()
+                            missing_texture
                         }
                     };
                     art_palette.insert(*idx, cube_art);

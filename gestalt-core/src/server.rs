@@ -28,7 +28,7 @@ pub enum StartServerError {
     CreateWindowError( #[from] winit::error::OsError),
 }
 
-pub const SERVER_CONFIG_FILENAME: &'static str = "server_config.ron";
+pub const SERVER_CONFIG_FILENAME: &str = "server_config.ron";
 
 pub fn load_server_config() -> Result<ServerConfig, StartServerError> { 
     // Open config
@@ -37,16 +37,16 @@ pub fn load_server_config() -> Result<ServerConfig, StartServerError> {
 
     let config_maybe: Result<ServerConfig, StartServerError> = open_options
         .open(SERVER_CONFIG_FILENAME)
-        .map_err(|e| StartServerError::from(e))
+        .map_err(StartServerError::from)
         .and_then(|file| {
             let mut buf_reader = BufReader::new(file);
             let mut contents = String::new();
             buf_reader
                 .read_to_string(&mut contents)
-                .map_err(|e| StartServerError::from(e))?;
+                .map_err(StartServerError::from)?;
             Ok(contents)
         })
-        .and_then(|e| Ok(ron::from_str(e.as_str()).map_err(|e| StartServerError::from(e))?));
+        .and_then(|e| ron::from_str(e.as_str()).map_err(StartServerError::from));
     //If that didn't load, just use built-in defaults.
     Ok(match config_maybe {
         Ok(c) => c,

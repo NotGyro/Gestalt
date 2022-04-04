@@ -30,7 +30,7 @@ pub type SignatureError = ed25519::signature::Error;
 pub struct NodeIdentity([u8; PUBLIC_KEY_LENGTH]);
 
 impl NodeIdentity { 
-    pub fn get_bytes<'a>(&'a self) -> &'a [u8] { 
+    pub fn get_bytes(&self) -> &[u8] { 
         &self.0
     }
     pub fn to_base64(&self) -> String { 
@@ -70,7 +70,7 @@ impl From<&NodeIdentity> for ed25519_dalek::PublicKey {
 
 impl From<&ed25519_dalek::PublicKey> for NodeIdentity {
     fn from(value: &ed25519_dalek::PublicKey) -> Self {
-        NodeIdentity(value.to_bytes().clone())
+        NodeIdentity(value.to_bytes())
     }
 }
 
@@ -98,12 +98,12 @@ impl From<&PrivateKey> for ed25519_dalek::SecretKey {
 }
 impl From<&ed25519_dalek::SecretKey> for PrivateKey {
     fn from(value: &ed25519_dalek::SecretKey) -> Self {
-        PrivateKey(value.to_bytes().clone())
+        PrivateKey(value.to_bytes())
     }
 }
 
 impl PrivateKey { 
-    pub fn get_bytes<'a>(&'a self) -> &'a [u8] { 
+    pub fn get_bytes(&self) -> &[u8] {
         &self.0
     }
 }
@@ -189,7 +189,7 @@ pub fn do_keys_need_generating() -> bool {
     }
 
     // All sanity checks passed, keys exist so we don't need to generate them.
-    return false;  
+    false
 }
 
 pub fn generate_local_keys(passphrase: Option<String>) -> Result<IdentityKeyPair, Box<dyn std::error::Error>> {
@@ -223,8 +223,8 @@ pub fn generate_local_keys(passphrase: Option<String>) -> Result<IdentityKeyPair
     let keys: IdentityKeyPair = (&keys_dalek).into();
 
     let keypair_bytes = ed25519::pkcs8::KeypairBytes {
-        secret_key: keys_dalek.secret.to_bytes().clone(),
-        public_key: Some(keys_dalek.public.to_bytes().clone()),
+        secret_key: keys_dalek.secret.to_bytes(),
+        public_key: Some(keys_dalek.public.to_bytes()),
     };
 
     

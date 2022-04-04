@@ -193,10 +193,10 @@ impl DevImageLoader {
         rid.verify(buf.as_slice())?;
 
         let metadata = ResourceInfo {
-            id: rid.clone(),
+            id: rid,
             filename: filename.to_string(),
             path: None,
-            creator: creator_identity.public.clone(),
+            creator: creator_identity.public,
             resource_type: "image/png".to_string(),
             authors: "Gyro".to_string(),
             description: Some("Image for early testing purposes.".to_string()),
@@ -206,10 +206,15 @@ impl DevImageLoader {
 
         update_global_resource_metadata(&rid, metadata.clone());
 
-        self.images.insert(rid.clone(), image.into_rgba8());
+        self.images.insert(rid, image.into_rgba8());
         self.metadata.insert(rid, metadata);
 
         Ok(rid)
+    }
+}
+impl Default for DevImageLoader {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -220,31 +225,34 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
     const DIRT_ID: TileId = 2; 
     const GRASS_ID: TileId = 3; 
 
-    if chunk_position.y > 0 { 
-        Chunk {
+    match chunk_position.y { 
+        value if value > 0 => Chunk {
             revision: 0,
             inner: ChunkInner::Uniform(AIR_ID),
-        }
-    } else if chunk_position.y == 0 {
-        let mut chunk = Chunk::new(STONE_ID);
-        for pos in chunk.get_bounds() { 
-            if pos.y == (CHUNK_SIZE as u16 - 1) {
-                chunk.set(pos, GRASS_ID).unwrap();
-            } else if pos.y > (CHUNK_SIZE as u16 - 4) { 
-                chunk.set(pos, DIRT_ID).unwrap();
+        }, 
+        0 => {
+            let mut chunk = Chunk::new(STONE_ID);
+            for pos in chunk.get_bounds() { 
+                if pos.y == (CHUNK_SIZE as u16 - 1) {
+                    chunk.set(pos, GRASS_ID).unwrap();
+                } else if pos.y > (CHUNK_SIZE as u16 - 4) { 
+                    chunk.set(pos, DIRT_ID).unwrap();
+                }
+                //Otherwise it stays stone. 
             }
-            //Otherwise it stays stone. 
-        }
-        chunk
-    } else /* chunk_position.y is less than zero */ { 
-        Chunk {
-            revision: 0,
-            inner: ChunkInner::Uniform(STONE_ID),
+            chunk
+        },
+        _ => { 
+            /* chunk_position.y is less than zero */
+            Chunk {
+                revision: 0,
+                inner: ChunkInner::Uniform(STONE_ID),
+            }
         }
     }
 }
 
-pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &Vec<TileId>, max_steps: u32) -> Result<(TilePos, TileId, VoxelSide), TileSpaceError> {
+pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], max_steps: u32) -> Result<(TilePos, TileId, VoxelSide), TileSpaceError> {
     let mut raycast = VoxelRaycast::new(*camera.get_position(), *camera.get_front());
     for _i in 0..max_steps {
         let resl = world_space.get(raycast.pos)?;
@@ -264,16 +272,16 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     let config_maybe: Result<ClientConfig, StartClientError> = open_options
         .open(CLIENT_CONFIG_FILENAME)
-        .map_err(|e| StartClientError::from(e))
+        .map_err(StartClientError::from)
         .and_then(|file| {
             let mut buf_reader = BufReader::new(file);
             let mut contents = String::new();
             buf_reader
                 .read_to_string(&mut contents)
-                .map_err(|e| StartClientError::from(e))?;
+                .map_err(StartClientError::from)?;
             Ok(contents)
         })
-        .and_then(|e| Ok(ron::from_str(e.as_str()).map_err(|e| StartClientError::from(e))?));
+        .and_then(|e| ron::from_str(e.as_str()).map_err(StartClientError::from));
     //If that didn't load, just use built-in defaults.
     let config: ClientConfig = match config_maybe {
         Ok(c) => c,
@@ -303,7 +311,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             drop(buf_reader);
             drop(defaults_file);
             drop(contents);
-            match world_defaults.lobby_world_id.clone() {
+            match world_defaults.lobby_world_id {
                 Some(uuid) => uuid,
                 None => {
                     let uuid = Uuid::new_v4();
@@ -341,7 +349,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
     };
     let world_id = WorldId { 
         uuid: lobby_world_id,
-        host: identity_keys.public.clone(),
+        host: identity_keys.public,
     };
 
     // Set up window and event loop.
@@ -429,10 +437,10 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     let mut image_loader = DevImageLoader::new();
 
-    let test_dome_thing_image_id = image_loader.preload_image_file("test.png", identity_keys.clone()).unwrap();
-    let test_grass_image_id = image_loader.preload_image_file("testgrass.png", identity_keys.clone()).unwrap();
-    let test_stone_image_id = image_loader.preload_image_file("teststone.png", identity_keys.clone()).unwrap();
-    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png", identity_keys.clone()).unwrap();
+    let test_dome_thing_image_id = image_loader.preload_image_file("test.png", identity_keys).unwrap();
+    let test_grass_image_id = image_loader.preload_image_file("testgrass.png", identity_keys).unwrap();
+    let test_stone_image_id = image_loader.preload_image_file("teststone.png", identity_keys).unwrap();
+    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png", identity_keys).unwrap();
 
     let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
@@ -663,7 +671,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = true; 
                     }
-                    let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
+                    let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);
                     if let Some(dir) = dir_maybe { 
                         current_down.insert(dir);
                     }
@@ -683,7 +691,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = false; 
                     }
-                    let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
+                    let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);
                     if let Some(dir) = dir_maybe { 
                         current_down.remove(&dir);
                     }
@@ -729,7 +737,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 if has_focus { 
                     //Move camera
                     for dir in current_down.iter() {
-                        camera.key_interact(*dir, elapsed_time.clone());
+                        camera.key_interact(*dir, elapsed_time);
                     }
                     //Update camera
                     renderer.set_camera_data(rend3::types::Camera {

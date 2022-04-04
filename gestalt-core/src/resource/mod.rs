@@ -113,7 +113,7 @@ impl ResourceId {
             return Err(ParseResourceIdError::TooManySeparators(value.to_string()));
         }
 
-        let version = u8::from_str_radix(*fields.get(0).unwrap(), 10)
+        let version = (*fields.get(0).unwrap()).parse::<u8>()
             .map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;
         if version != CURRENT_RESOURCE_ID_FORMAT {
             return Err(ParseResourceIdError::UnrecognizedVersion(
@@ -122,7 +122,7 @@ impl ResourceId {
             ));
         }
 
-        let length = u64::from_str_radix(*fields.get(1).unwrap(), 10)
+        let length = (*fields.get(1).unwrap()).parse::<u64>()
             .map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;
 
         let bytes = base64::decode(fields.get(2).unwrap())?;
@@ -174,7 +174,7 @@ impl std::fmt::Display for ResourceId {
 
 impl std::fmt::Debug for ResourceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ResourceId:({})", self.to_string())
+        write!(f, "ResourceId:({})", self)
     }
 }
 
@@ -346,12 +346,12 @@ lazy_static! {
 }
 
 pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceInfo) {
-    RESOURCE_METADATA.lock().insert(id.clone(), info.clone());
+    RESOURCE_METADATA.lock().insert(*id, info);
 }
 
 pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceInfo> {
     let guard = RESOURCE_METADATA.lock();
-    guard.get(id).map(|v| v.clone())
+    guard.get(id).cloned()
 }
 
 #[derive(Clone)]
@@ -433,7 +433,6 @@ fn resource_id_to_string() {
     {
         rng.fill(&mut buf1);
     }
-    drop(rng);
 
     let rid1 = ResourceId::from_buf(&buf1);
 
@@ -447,11 +446,11 @@ fn resource_id_to_string() {
     let format_string = format!("{}", CURRENT_RESOURCE_ID_FORMAT);
     assert!(stringified.starts_with(&format_string));
 
-    let after_split: Vec<&str> = stringified.split("-").collect();
+    let after_split: Vec<&str> = stringified.split('-').collect();
 
     assert_eq!(after_split.len(), 3);
     assert_eq!(
-        u64::from_str_radix(after_split.get(1).unwrap(), 10).unwrap(),
+        after_split.get(1).unwrap().parse::<u64>().unwrap(),
         BUF_SIZE as u64
     );
 }

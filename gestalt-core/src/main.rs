@@ -6,6 +6,8 @@
 #![feature(int_roundings)]
 #![feature(associated_type_bounds)]
 
+#![allow(clippy::large_enum_variant)]
+
 #[macro_use]
 pub mod common;
 #[macro_use]
@@ -35,10 +37,10 @@ enum OneOrTwo {
     Two(String, String)
 }
 fn split_on_unquoted_equals(input: &str) -> OneOrTwo { 
-    if input.contains(" ") { 
+    if input.contains(' ') { 
         //If it contains spaces, it wasn't split up already by the OS or Rust's std::env,
         //which means it's in quotes. 
-        OneOrTwo::One(input.to_string());
+        return OneOrTwo::One(input.to_string());
     }
     let in_quotes = false;
     let mut previous_was_escape = false; 
@@ -47,11 +49,6 @@ fn split_on_unquoted_equals(input: &str) -> OneOrTwo {
         if char == '\\' && !previous_was_escape { 
             previous_was_escape = true;
         }
-        // OS or Rust's std::env does quote escapes, so if there's a quote here implicitly it has already been escaped. 
-        // else if (char == '\"') && !previous_was_escape { 
-        //    in_quotes = !in_quotes; 
-        //    previous_was_escape = false;
-        //}
         else if (char == '=') && !previous_was_escape && !in_quotes { 
             // We found one!
             position_to_split = position;
@@ -60,6 +57,11 @@ fn split_on_unquoted_equals(input: &str) -> OneOrTwo {
         else { 
             previous_was_escape = false;
         }
+        // OS or Rust's std::env does quote escapes, so if there's a quote here implicitly it has already been escaped. 
+        // else if (char == '\"') && !previous_was_escape { 
+        //    in_quotes = !in_quotes; 
+        //    previous_was_escape = false;
+        //}
     }
     if position_to_split != 0 { 
         let (left, right) = input.split_at(position_to_split);
@@ -100,7 +102,6 @@ impl ArgumentMatches {
 pub struct ProgramArgs { 
     arguments: Vec<Argument>,
 }
-
 
 impl ProgramArgs { 
     pub fn new() -> Self { 
@@ -164,6 +165,12 @@ impl ProgramArgs {
     }
 }
 
+impl Default for ProgramArgs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[allow(unused_must_use)]
 fn main() {
     // Parse command-line arguments
@@ -201,7 +208,7 @@ fn main() {
         ),
         WriteLogger::new(
             level_filter,
-            log_config.clone(),
+            log_config,
             std::fs::File::create(log_file_path).unwrap(),
         ),
     ]).unwrap();
@@ -257,7 +264,7 @@ fn main() {
     
     if server_mode { 
         let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
-        launch_preprotocol_listener(keys.clone(), None, connect_sender );
+        launch_preprotocol_listener(keys, None, connect_sender );
         loop { 
             match connect_receiver.try_recv() { 
                 Ok(entry) => { 
@@ -272,7 +279,7 @@ fn main() {
         }
     }
     else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") { 
-        let address: SocketAddr = if raw_addr.contains(":") { 
+        let address: SocketAddr = if raw_addr.contains(':') { 
             raw_addr.parse().unwrap()
         } else { 
             let ip_addr: IpAddr = raw_addr.parse().unwrap();
@@ -280,7 +287,7 @@ fn main() {
         };
 
         let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
-        preprotocol_connect_to_server(keys.clone(), address, Duration::new(5, 0), connect_sender );
+        preprotocol_connect_to_server(keys, address, Duration::new(5, 0), connect_sender );
         loop { 
             match connect_receiver.try_recv() { 
                 Ok(entry) => { 

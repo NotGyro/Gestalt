@@ -53,13 +53,13 @@ impl Health {
         if damage >= self.current {
             self.current = 0;
         } else {
-            self.current = self.current - damage;
+            self.current -= damage;
         }
     }
     /// Increase current health. Not named "heal" to avoid confusion -
     /// this does no game logic, it just simply adds to current health, checking max to ensure we don't go over.
     pub fn increase(&mut self, healing: u32) {
-        self.current = self.current + healing;
+        self.current += healing;
         if self.current > self.maximum {
             self.current = self.maximum;
         }
@@ -107,10 +107,10 @@ pub mod message {
 
     pub fn apply_entity_changes<T: ModifyEntity, I: Iterator<Item = T>>(
         world_view: &mut ViewMut<T::Component>,
-        mut messages: I,
+        messages: I,
     ) -> Result<(), ModifyEntityMessageError> {
         //Iterate through list of modify entity messages
-        while let Some(message) = messages.next() {
+        for message in messages {
             //Look up the entity we need and the component on that entity
             let target = message
                 .get_target()

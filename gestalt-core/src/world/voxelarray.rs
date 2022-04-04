@@ -48,6 +48,7 @@ pub const fn get_pos_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
     }
 }
 #[inline(always)]
+#[allow(clippy::question_mark)]
 pub const fn get_neg_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
     if chunk_i_to_xyz(i, chunk_size).0.checked_sub(1).is_none() {
         return None;
@@ -66,6 +67,7 @@ pub const fn get_pos_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
     }
 }
 #[inline(always)]
+#[allow(clippy::question_mark)]
 pub const fn get_neg_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
     if chunk_i_to_xyz(i, chunk_size).1.checked_sub(1).is_none() {
         return None;
@@ -84,6 +86,7 @@ pub const fn get_pos_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
     }
 }
 #[inline(always)]
+#[allow(clippy::question_mark)]
 pub const fn get_neg_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
     if chunk_i_to_xyz(i, chunk_size).2.checked_sub(1).is_none() {
         return None;
@@ -183,7 +186,7 @@ impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
             coord.z as usize,
             self.size as usize,
         ));
-        return Ok(result.unwrap());
+        Ok(result.unwrap())
     }
 
     fn set(
@@ -290,7 +293,7 @@ where
             coord.z as usize,
             SIZE,
         ));
-        return Ok(result.unwrap());
+        Ok(result.unwrap())
     }
 
     fn set(
@@ -379,7 +382,7 @@ fn test_array_iterative() {
 fn chunk_index_reverse() {
     use rand::Rng;
 
-    let chunk_sz = 16 as usize;
+    let chunk_sz = 16_usize;
     let mut rng = rand::thread_rng();
     for _ in 0..4096 {
         let x = rng.gen_range(0, 16);
@@ -397,7 +400,7 @@ fn chunk_index_reverse() {
 
 #[test]
 fn chunk_index_bounds() {
-    let chunk_sz = 16 as usize;
+    let chunk_sz = 16_usize;
     let chunk_volume = chunk_sz * chunk_sz * chunk_sz;
     for x in 0..chunk_sz {
         for y in 0..chunk_sz {

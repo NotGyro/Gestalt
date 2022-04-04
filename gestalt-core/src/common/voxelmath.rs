@@ -311,6 +311,7 @@ where
     }
     /// Make sure that the coordinates in upper are higher numbers than the coordinates in lower and vice-versa
     #[inline]
+    #[must_use]
     pub fn get_validated(&self) -> VoxelRange<T> {
         VoxelRange {
             lower: self.get_validated_lower(),
@@ -345,6 +346,7 @@ where
     }
     /// Shift / move our position by offset
     #[allow(dead_code)]
+    #[must_use]
     pub fn get_shifted(&self, offset: VoxelPos<T>) -> VoxelRange<T> {
         VoxelRange {
             lower: self.lower + offset,
@@ -713,6 +715,7 @@ pub mod axis {
 
     impl VoxelSide {
         #[inline(always)]
+        #[must_use]
         pub const fn opposite(&self) -> VoxelSide {
             match &self {
                 VoxelSide::PosiX => VoxelSide::NegaX,
@@ -809,6 +812,7 @@ pub mod axis {
 
         /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-X direction?
         #[allow(dead_code)]
+        #[must_use]
         pub fn get_2d_x(&self) -> VoxelSide {
             match self {
                 VoxelSide::PosiX => VoxelSide::PosiZ,
@@ -822,6 +826,7 @@ pub mod axis {
 
         /// If you are looking straight at this side (assuming no roll), what direction is its' local 2D positive-Y direction?
         #[allow(dead_code)]
+        #[must_use]
         pub fn get_2d_y(&self) -> VoxelSide {
             match self {
                 VoxelSide::PosiX => VoxelSide::PosiY,
@@ -1048,6 +1053,7 @@ where
 {
     /// Returns the cell adjacent to this one in the direction passed
     #[inline(always)]
+    #[must_use]
     pub fn get_neighbor(&self, direction: VoxelSide) -> VoxelPos<T> {
         match direction {
             VoxelSide::PosiX => VoxelPos {
@@ -1418,10 +1424,10 @@ where
         (*self.data.get_mut(i).unwrap()) = value;
     }
 
-    pub fn iter<'a>(&'a self) -> SidesArrayIterator<'a, T> {
+    pub fn iter(&self) -> SidesArrayIterator<T> {
         SidesArrayIterator {
             next_index: 0,
-            data: &self,
+            data: self,
         }
     }
 }
@@ -1485,9 +1491,9 @@ fn test_voxel_range_iteration() {
 
     let mut counter = 0;
     for i in ran {
-        assert!(!(i.x >= side1));
-        assert!(!(i.y >= side2));
-        assert!(!(i.z >= side3));
+        assert!(i.x < side1);
+        assert!(i.y < side2);
+        assert!(i.z < side3);
         counter += 1;
     }
     assert!(counter == sz);
@@ -1512,8 +1518,8 @@ fn test_side_iteration() {
 
     let mut counter = 0;
     for i in ran.get_side_iterator(VoxelSide::PosiY) {
-        assert!(!(i.x >= side_x));
-        assert!(!(i.z >= side_z));
+        assert!(i.x < side_x);
+        assert!(i.z < side_z);
         assert!(i.y == ran.upper.y);
         counter += 1;
     }
@@ -1521,8 +1527,8 @@ fn test_side_iteration() {
 
     counter = 0;
     for i in ran.get_side_iterator(VoxelSide::NegaX) {
-        assert!(!(i.y >= side_y));
-        assert!(!(i.z >= side_z));
+        assert!(i.y < side_y);
+        assert!(i.z < side_z);
         assert!(i.x == ran.lower.x);
         counter += 1;
     }

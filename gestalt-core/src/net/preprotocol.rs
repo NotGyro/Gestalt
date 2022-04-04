@@ -116,7 +116,7 @@ pub enum PreProtocolReply {
 }
 
 pub fn protocol_store_dir() -> PathBuf { 
-    const PROTOCOL_STORE_DIR: &'static str = "protocol/"; 
+    const PROTOCOL_STORE_DIR: &str = "protocol/"; 
     let path = PathBuf::from(PROTOCOL_STORE_DIR);
     if !path.exists() { 
         fs::create_dir(&path).unwrap(); 
@@ -137,9 +137,9 @@ pub mod current_protocol {
     use crate::common::{identity::NodeIdentity, Version};
 
     pub const PROTOCOL_VERSION: Version = version!(1,0,0);
-    pub const PROTOCOL_NAME: &'static str = "gestalt_noise_laminar_udp";
+    pub const PROTOCOL_NAME: &str = "gestalt_noise_laminar_udp";
 
-    pub const NOISE_PARAM_STR: &'static str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
+    pub const NOISE_PARAM_STR: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 
     lazy_static! {
         pub(crate) static ref NOISE_PARAMS: NoiseParams = NOISE_PARAM_STR.parse().unwrap();
@@ -185,7 +185,7 @@ pub mod current_protocol {
     }
 
     pub fn noise_protocol_dir() -> PathBuf {
-        const SUB_DIR: &'static str = "noise/";
+        const SUB_DIR: &str = "noise/";
         let path = protocol_store_dir().join(PathBuf::from(SUB_DIR));
         if !path.exists() {
             fs::create_dir_all(&path).unwrap();
@@ -194,7 +194,7 @@ pub mod current_protocol {
     }
 
     pub fn noise_peer_dir() -> PathBuf {
-        const SUB_DIR: &'static str = "peers/";
+        const SUB_DIR: &str = "peers/";
         let path = noise_protocol_dir().join(PathBuf::from(SUB_DIR));
         if !path.exists() { 
             fs::create_dir_all(&path).unwrap(); 
@@ -203,7 +203,7 @@ pub mod current_protocol {
     }
 
     pub fn load_noise_local_keys() -> Result<snow::Keypair, HandshakeError> { 
-        const FILENAME: &'static str = "local_keys"; 
+        const FILENAME: &str = "local_keys"; 
         let path = noise_protocol_dir().join(PathBuf::from(FILENAME));
         let keypair = if path.exists() {
             let mut private = [0u8;32];
@@ -256,18 +256,12 @@ pub mod current_protocol {
             file.flush()?;
             drop(file);
             
-            if &public == peer_noise_key { 
-                // Valid identity, this is what we were expecting.
+            if (public == peer_noise_key) || callback_nonmatching(peer_identity, &public, peer_noise_key) { 
+                // Valid identity, this is what we were expecting. OR, our request to go forward with this is approved. 
                 Ok(())
             }
-            else {
-                if callback_nonmatching(peer_identity, &public, peer_noise_key) { 
-                    // Our request to go forward with this is approved. 
-                    Ok(())
-                }
-                else { 
-                    Err(HandshakeError::IdentityChanged(peer_identity.to_base64()))
-                }
+            else { 
+                Err(HandshakeError::IdentityChanged(peer_identity.to_base64()))
             }
         }
         else {
@@ -279,7 +273,7 @@ pub mod current_protocol {
                 .truncate(false)
                 .open(&path)?;
 
-            file.write_all(&peer_noise_key)?;
+            file.write_all(peer_noise_key)?;
             file.flush()?;
             Ok(())
         }
@@ -462,11 +456,11 @@ pub mod current_protocol {
             // Get the inner message.
             let msg: HandshakeMessage4 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             let to_sign = base64::decode(msg.please_sign)?;
-            let our_signature = our_keys.sign(&to_sign).map_err(|e| HandshakeError::CannotSign(e))?; 
+            let our_signature = our_keys.sign(&to_sign).map_err(HandshakeError::CannotSign)?; 
             let our_signature_bytes = our_signature.as_bytes();
             let our_signature_b64 = base64::encode(our_signature_bytes);
             
-            // Build a HandshakeMessage asking for a signature. 
+            // Build a HandshakeMessage asking for a signature.
             let nonce = make_signing_nonce();
             let base64_nonce = base64::encode(&nonce); 
             let message = HandshakeMessage5 { 
@@ -503,11 +497,11 @@ pub mod current_protocol {
             let msg: HandshakeMessage5 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
             let their_sig = base64::decode(msg.initiator_signature)?;
-            peer_identity.verify_signature(&our_nonce, &their_sig).map_err(|e| HandshakeError::BadSignature(e))?;
+            peer_identity.verify_signature(&our_nonce, &their_sig).map_err(HandshakeError::BadSignature)?;
 
             // Make our signature.
             let to_sign = base64::decode(msg.please_sign)?;
-            let our_signature = our_keys.sign(&to_sign).map_err(|e| HandshakeError::CannotSign(e))?; 
+            let our_signature = our_keys.sign(&to_sign).map_err(HandshakeError::CannotSign)?; 
             let our_signature_bytes = our_signature.as_bytes();
             let our_signature_b64 = base64::encode(our_signature_bytes);
             
@@ -545,7 +539,7 @@ pub mod current_protocol {
             let msg: HandshakeMessage6 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
             let their_sig = base64::decode(msg.responder_signature)?;
-            peer_identity.verify_signature(&our_nonce, &their_sig).map_err(|e| HandshakeError::BadSignature(e))?;
+            peer_identity.verify_signature(&our_nonce, &their_sig).map_err(HandshakeError::BadSignature)?;
 
             Ok((state, 1))
         } else { 
@@ -582,6 +576,11 @@ pub mod current_protocol {
                 HandshakeIntitiatorState::SentFifthAwaitSixth(_, _, _) => HandshakeIntitiatorStep::SentFifthAwaitSixth,
                 HandshakeIntitiatorState::Done(_, _) => HandshakeIntitiatorStep::Done,
             }
+        }
+    }
+    impl Default for HandshakeIntitiatorState {
+        fn default() -> Self {
+            Self::new()
         }
     }
     pub struct HandshakeIntitiator {
@@ -637,12 +636,7 @@ pub mod current_protocol {
             }
         }
         pub fn is_done(&self) -> bool { 
-            if let HandshakeIntitiatorState::Done(_,_) = &self.last_state.as_ref().unwrap() { 
-                true
-            }
-            else { 
-                false
-            }
+            matches!(self.last_state.as_ref().unwrap(), HandshakeIntitiatorState::Done(_,_))
         }
         pub fn complete(mut self) -> Result<(snow::StatelessTransportState, MessageCounter), HandshakeError> { 
             if let HandshakeIntitiatorState::Done(transport, counter) = self.last_state.take().unwrap() { 
@@ -679,6 +673,11 @@ pub mod current_protocol {
                 HandshakeReceiverState::SentFourthAwaitFifth(_, _, _) => HandshakeReceiverStep::SentFourthAwaitFifth,
                 HandshakeReceiverState::Done(_,_) => HandshakeReceiverStep::Done,
             }
+        }
+    }
+    impl Default for HandshakeReceiverState {
+        fn default() -> Self {
+            Self::new()
         }
     }
     pub struct HandshakeReceiver {
@@ -720,12 +719,7 @@ pub mod current_protocol {
             }
         }
         pub fn is_done(&self) -> bool { 
-            if let HandshakeReceiverState::Done(_,_) = &self.last_state.as_ref().unwrap() { 
-                true
-            }
-            else { 
-                false
-            }
+            matches!(self.last_state.as_ref().unwrap(), HandshakeReceiverState::Done(_,_))
         }
         pub fn complete(mut self) -> Result<(snow::StatelessTransportState, MessageCounter), HandshakeError> { 
             if let HandshakeReceiverState::Done(transport, counter) = self.last_state.take().unwrap() { 
@@ -747,7 +741,7 @@ lazy_static! {
         let mut set = HashSet::new(); 
         set.insert(ProtocolDef{ 
             protocol: current_protocol::PROTOCOL_NAME.to_string(), 
-            version: current_protocol::PROTOCOL_VERSION.clone(),
+            version: current_protocol::PROTOCOL_VERSION,
         });
         set
     };
@@ -834,7 +828,7 @@ impl PreProtocolReceiver {
     }
     pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, current_protocol::MessageCounter), PreProtocolError> { 
         match std::mem::take(&mut self.state) {
-            PreProtocolReceiverState::QueryAnswerer => return Err(HandshakeError::CompleteBeforeDone.into()),
+            PreProtocolReceiverState::QueryAnswerer => Err(HandshakeError::CompleteBeforeDone.into()),
             PreProtocolReceiverState::Handshake(receiver) => {
                 receiver.complete().map_err(|e| e.into())
             },
@@ -870,7 +864,7 @@ impl PreProtocolReceiver {
             },
             PreProtocolQuery::RequestServerStatus => { 
                 PreProtocolOutput::Reply( 
-                    PreProtocolReply::Status(SERVER_STATUS.clone().lock().clone())
+                    PreProtocolReply::Status(*SERVER_STATUS.clone().lock())
                 )
             },
             PreProtocolQuery::RequestServerInfo => { 
@@ -882,9 +876,9 @@ impl PreProtocolReceiver {
                 let maybe_ident = NodeIdentity::from_base64(&start_handshake.initiator_identity); 
                 match maybe_ident { 
                     Ok(ident) => { 
-                        self.peer_identity = Some(ident.clone());
+                        self.peer_identity = Some(ident);
                         if !self.state.is_in_handshake() { 
-                            let mut receiver_state = HandshakeReceiver::new(load_noise_local_keys()?, self.our_identity.clone());
+                            let mut receiver_state = HandshakeReceiver::new(load_noise_local_keys()?, self.our_identity);
                             let out = receiver_state.advance(start_handshake.handshake, &ident, callback_different_key);
                             match out { 
                                 Ok(current_protocol::HandshakeNext::SendMessage(message)) => { 
@@ -954,7 +948,7 @@ pub fn write_preprotocol_message(json: &str, stream: &mut TcpStream) -> Result<(
 }
 
 pub fn read_preprotocol_message(stream: &mut TcpStream) -> Result<String, std::io::Error> { 
-    let mut next_message_size_buf = [0 as u8; 4];
+    let mut next_message_size_buf = [0_u8; 4];
     stream.read_exact(&mut next_message_size_buf)?;
     stream.flush()?;
     let next_message_size = u32::from_le_bytes(next_message_size_buf);
@@ -1033,7 +1027,7 @@ pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: O
                     let completed_channel_clone = completed_channel.clone();
                     thread::spawn( move || {
                         // connection succeeded
-                        preprotocol_receiver_session(our_identity.clone(), peer_address, stream, completed_channel_clone);
+                        preprotocol_receiver_session(our_identity, peer_address, stream, completed_channel_clone);
                     });
                 }
                 Err(e) => {
@@ -1085,7 +1079,7 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     // Figure out which protocol to use. Right now, it's either "the current protocol" or "nothing"
     let current_protocol = ProtocolDef{ 
         protocol: current_protocol::PROTOCOL_NAME.to_string(), 
-        version: current_protocol::PROTOCOL_VERSION.clone(),
+        version: current_protocol::PROTOCOL_VERSION,
     };
     if !(server_protocols.contains(&current_protocol)) { 
         return Err(HandshakeError::NoProtocolsInCommon);
@@ -1095,7 +1089,7 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     let mut handshake_initiator = HandshakeIntitiator::new(load_noise_local_keys()?, our_identity);
     let handshake_first = handshake_initiator.send_first()?;
     let query = PreProtocolQuery::StartHandshake(StartHandshakeMsg{
-        use_protocol: current_protocol.clone(),
+        use_protocol: current_protocol,
         initiator_identity: our_identity.public.to_base64(),
         handshake: handshake_first,
     });
@@ -1204,8 +1198,8 @@ fn handshake_test_state_machine() {
     let bob_noise_keys = builder.generate_keypair().unwrap();
     let alice_noise_keys = builder.generate_keypair().unwrap();
     
-    let mut initiator = current_protocol::HandshakeIntitiator::new(bob_noise_keys, bob_gestalt_keys.clone());
-    let mut receiver = current_protocol::HandshakeReceiver::new(alice_noise_keys, alice_gestalt_keys.clone());
+    let mut initiator = current_protocol::HandshakeIntitiator::new(bob_noise_keys, bob_gestalt_keys);
+    let mut receiver = current_protocol::HandshakeReceiver::new(alice_noise_keys, alice_gestalt_keys);
 
     let callback_different_key = |_node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
         true

@@ -186,9 +186,9 @@ pub mod voxel_bulk_ops {
         dest: &mut VB,
     ) -> Result<(), FusedError<VA::Error, VB::Error>> {
         for pos in source_range {
-            let voxel = source.get(pos).map_err(|a| FusedError::ErrorA(a))?;
+            let voxel = source.get(pos).map_err(FusedError::ErrorA)?;
             let offset_pos = (pos - source_range.lower) + dest_origin;
-            dest.set(offset_pos, voxel.clone()).map_err(|b| FusedError::ErrorB(b))?;
+            dest.set(offset_pos, voxel.clone()).map_err(FusedError::ErrorB)?;
         }
         Ok(())
     }
