@@ -1132,7 +1132,7 @@ fn chunk_serialize_deserialize() {
     
     // Let's modify the chunk a bit, getting a Large variant chunk
     for pos in chunk.get_bounds() {
-        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileId;
+        let value = (((((pos.x % 16) as usize) * (pos.y % 16) as usize) * (pos.z % 16) as usize) % 4096) as TileId;
         chunk.set(pos, value).unwrap();
     }
 
@@ -1152,7 +1152,7 @@ fn chunk_serialize_deserialize() {
     drop(buffer);
 
     for pos in chunk.get_bounds() { 
-        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileId;
+        let value = ((((pos.x % 16) as usize) * ((pos.y % 16) as usize) * ((pos.z % 16) as usize)) % 4096) as TileId;
         assert_eq!(*chunk.get(pos).unwrap(), value);
     }
 }
