@@ -13,7 +13,7 @@ use super::{
 
 pub const CHUNK_FILE_VERSION: Version = version!(0,0,1);
 
-pub const CHUNK_EXP : usize = 4;
+pub const CHUNK_EXP : usize = 5;
 pub const CHUNK_SIZE: usize = 2_usize.pow(CHUNK_EXP as u32);
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
@@ -42,7 +42,7 @@ pub enum ChunkError {
 pub struct ChunkSmall<T: Voxel> {
     //Attempting to use the constant causes Rust to freak out for some reason
     //so I simply type 16
-    pub inner: VoxelArrayStatic<u8, 16>,
+    pub inner: VoxelArrayStatic<u8, 32>,
     pub palette: [T; 256],
     pub reverse_palette: HashMap<T, u8>,
     pub highest_idx: u8,
@@ -138,7 +138,7 @@ impl<T: Voxel> ChunkSmall<T> {
 pub struct ChunkLarge<T: Voxel> {
     //Attempting to use the constant causes Rust to freak out for some reason
     //so I simply type 16
-    pub inner: VoxelArrayStatic<u16, 16>,
+    pub inner: VoxelArrayStatic<u16, 32>,
     pub palette: HashMap<u16, T>,
     pub reverse_palette: HashMap<T, u16>,
     pub palette_dirty: bool,

@@ -57,17 +57,3 @@ pub enum ConnectionRole {
     /// We are the client and we are connected to a server. 
     ClientToServer,
 }
-
-pub enum Subsystem { 
-    NetworkInternal = 0,
-    Resource = 1,
-    Entity = 2,
-    Voxel = 3,
-    Audio = 4, 
-    
-}
-
-//3 4 1 
-pub struct NetMsgId { 
-
-}

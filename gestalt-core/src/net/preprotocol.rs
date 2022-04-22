@@ -400,7 +400,7 @@ pub mod current_protocol {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct HandshakeMessage4 {
+    pub (crate) struct HandshakeMessage4 {
         /// Contains a Base-64 encoded buf to sign.
         pub please_sign: String,
     }
@@ -553,13 +553,13 @@ pub mod current_protocol {
             let msg: HandshakeMessage5 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
             let their_sig = base64::decode(msg.initiator_signature)?;
-            peer_identity.verify_signature(&our_challenge.as_bytes(), &their_sig).map_err(HandshakeError::BadSignature)?;
+            peer_identity.verify_signature(our_challenge.as_bytes(), &their_sig).map_err(HandshakeError::BadSignature)?;
 
             // Get the inner message.
             let msg: HandshakeMessage4 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             let challenge_string = msg.please_sign.clone();
             // Make our signature.
-            let our_signature = our_keys.sign(&challenge_string.as_bytes()).map_err(HandshakeError::CannotSign)?; 
+            let our_signature = our_keys.sign(challenge_string.as_bytes()).map_err(HandshakeError::CannotSign)?; 
             let our_signature_bytes = our_signature.as_bytes();
             let our_signature_b64 = base64::encode(our_signature_bytes);
 
@@ -1311,4 +1311,75 @@ fn handshake_test_state_machine() {
 
     assert!(receiver.is_done());
     let (_alice_transport, _alice_seq) = receiver.complete().unwrap();
+}
+
+
+#[test]
+fn test_catch_bad_challenge() {
+    fn receive_last_noise_evil<Callback>(mut state: snow::HandshakeState, input: HandshakeStepMessage, peer_gestalt_identity: &NodeIdentity, _our_gestalt_identity: &NodeIdentity, callback_different_key: Callback) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, current_protocol::MessageCounter), HandshakeError>
+            where Callback: FnOnce(&NodeIdentity, &[u8], &[u8]) -> bool { 
+        if input.handshake_step == 3 {
+            let bytes_input = base64::decode(input.data)?;
+            let mut read_buf = [0u8; 1024];
+
+            // Read their message.
+            let _read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
+
+            // Get Noise key.
+            let remote_static = state.get_remote_static().ok_or(HandshakeError::MissingRemoteStatic(3))?;
+            // Make sure we notice if the key changed.
+            current_protocol::load_validate_noise_peer_key(peer_gestalt_identity, remote_static, callback_different_key)?;
+
+            // Turn handshake state into a transport
+            let transport = state.into_stateless_transport_mode()?;
+
+            // Build a HandshakeMessage asking for a signature. 
+            let mut fake_challenge: Vec<u8> = Vec::new(); 
+            
+            for i in 0u32..3333u32 { 
+                fake_challenge.push((i % 256) as u8);
+            }
+
+            let b64_challenge = base64::encode(&fake_challenge);
+            let message = current_protocol::HandshakeMessage4 { 
+                please_sign: b64_challenge.clone(),
+            };
+            let json_message = serde_json::to_string(&message)?;
+            
+            let mut buf = vec![0u8; 65535];
+            let encoded_length = transport.write_message(0, json_message.as_bytes(), &mut buf)?;
+            let buf_bytes = &buf[0..encoded_length];
+            let encoded_message = base64::encode(&buf_bytes);
+
+            let step = HandshakeStepMessage {
+                handshake_step: 4,
+                data: encoded_message,
+            };
+            
+            Ok((transport, step, b64_challenge, 0))
+        } else { 
+            Err(HandshakeError::UnexpectedStep(3, input.handshake_step))
+        }
+    }
+
+    let bob_gestalt_keys = IdentityKeyPair::generate_for_tests();
+    let alice_gestalt_keys = IdentityKeyPair::generate_for_tests();
+
+    let builder: snow::Builder<'_> = snow::Builder::new(current_protocol::NOISE_PARAMS.clone());
+    let bob_noise_keys = builder.generate_keypair().unwrap();
+    let alice_noise_keys = builder.generate_keypair().unwrap();
+
+    let callback_different_key = |_node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
+        true
+    };
+    
+    let (bob_state, message_1) = current_protocol::initiate_handshake(&bob_noise_keys).unwrap();
+    let (alice_state, message_2) = current_protocol::receive_initial(&alice_noise_keys, message_1).unwrap();
+    let (bob_transport, message_3) = current_protocol::initiator_reply(bob_state, message_2, &alice_gestalt_keys.public, callback_different_key).unwrap();
+    let (_alice_transport, message_4, _alice_nonce, _alice_seq) = receive_last_noise_evil(alice_state, message_3, &bob_gestalt_keys.public, &alice_gestalt_keys.public, callback_different_key).unwrap();
+    let error_output = current_protocol::initiator_sign_buf(bob_transport, message_4, alice_gestalt_keys.public, &bob_gestalt_keys).unwrap_err();
+    match error_output {
+        HandshakeError::BadChallengeHeader => { /* as expected */ }, 
+        _ => panic!("Expected HandshakeError::BadChallengeHeader"),
+    }
 }
