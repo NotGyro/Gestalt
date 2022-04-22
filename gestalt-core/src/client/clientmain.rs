@@ -2,7 +2,7 @@ use std::{
     error::Error,
     io::{BufReader, Read, Write},
     sync::Arc,
-    time::Instant, fs::OpenOptions,
+    time::Instant, fs::{OpenOptions, File}, cmp::Ordering,
 };
 
 use glam::Vec4;
@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::{ChunkInner, CHUNK_SIZE_CUBED}, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -225,12 +225,13 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
     const DIRT_ID: TileId = 2; 
     const GRASS_ID: TileId = 3; 
 
+    /*
     match chunk_position.y { 
         value if value > 0 => Chunk {
             revision: 0,
             inner: ChunkInner::Uniform(AIR_ID),
         }, 
-        0 => {
+        0 => {*/
             let mut chunk = Chunk::new(STONE_ID);
             for pos in chunk.get_bounds() { 
                 if pos.y == (CHUNK_SIZE as u16 - 1) {
@@ -240,7 +241,7 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
                 }
                 //Otherwise it stays stone. 
             }
-            chunk
+            chunk /*
         },
         _ => { 
             /* chunk_position.y is less than zero */
@@ -249,7 +250,7 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
                 inner: ChunkInner::Uniform(STONE_ID),
             }
         }
-    }
+    }*/
 }
 
 pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], max_steps: u32) -> Result<(TilePos, TileId, VoxelSide), TileSpaceError> {
@@ -453,39 +454,149 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
         CubeArt::simple_solid_block(&test_dome_thing_image_id),
     );
 
-    // Set up our test world a bit 
-    let mut world_space = TileSpace::new();
-    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(4,4,4), lower: vpos!(-3,-3,-3) };
-    // Set up our voxel mesher.
-    let mut terrain_renderer = TerrainRenderer::new(64);
+    
+fn partition(data: &[f64]) -> Option<(Vec<f64>, f64, Vec<f64>)> {
+    match data.len() {
+        0 => None,
+        _ => {
+            let (pivot_slice, tail) = data.split_at(1);
+            let pivot = pivot_slice[0];
+            let (left, right) = tail.iter()
+                .fold((vec![], vec![]), |mut splits, next| {
+                    {
+                        let (ref mut left, ref mut right) = &mut splits;
+                        if next < &pivot {
+                            left.push(*next);
+                        } else {
+                            right.push(*next);
+                        }
+                    }
+                    splits
+                });
 
-    let worldgen_start = Instant::now();
-    // Build chunks and then immediately let the mesher know they're new. 
-    for chunk_position in test_world_range {
-        let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
-        let chunk = if chunk_file_path.exists() {
-            fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
+            Some((left, pivot, right))
         }
-        else {
-            gen_test_chunk(chunk_position)
-        };
-        world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
-        terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
     }
-    let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
-    info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+}
 
-    //Remesh
-    let meshing_start = Instant::now();
-    terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
-    let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-    info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
-    terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
-    let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-    info!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
+fn select(data: &[f64], k: usize) -> Option<f64> {
+    let part = partition(data);
 
+    match part {
+        None => None,
+        Some((left, pivot, right)) => {
+            let pivot_idx = left.len();
+
+            match pivot_idx.cmp(&k) {
+                Ordering::Equal => Some(pivot),
+                Ordering::Greater => select(&left, k),
+                Ordering::Less => select(&right, k - (pivot_idx + 1)),
+            }
+        },
+    }
+}
+
+fn median(data: &[f64]) -> Option<f64> {
+    let size = data.len();
+
+    match size {
+        even if even % 2 == 0 => {
+            let fst_med = select(data, (even / 2) - 1);
+            let snd_med = select(data, even / 2);
+
+            match (fst_med, snd_med) {
+                (Some(fst), Some(snd)) => Some((fst + snd) as f64 / 2.0),
+                _ => None
+            }
+        },
+        odd => select(data, odd / 2).map(|x| x as f64)
+    }
+}
+
+    fn to_csv(data: &[f64]) -> String { 
+        let mut out = String::default();
+        for point in data { 
+            let elem = format!("{},", point);
+            out.push_str(&elem);
+        }
+        out
+    }
+
+    let mut worldgen_data: Vec<f64> = Vec::default();    
+    let mut mesh_data: Vec<f64> = Vec::default();
+    let mut mesh_and_push_data: Vec<f64> = Vec::default();
+
+    const ITERATIONS:usize = 2048;
+
+    for _i in 0..ITERATIONS { 
+        // Set up our test world a bit 
+        let mut world_space = TileSpace::new();
+        let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(1,0,1), lower: vpos!(-1,-0,-1) };
+        // Set up our voxel mesher.
+        let mut terrain_renderer = TerrainRenderer::new(64);
+    
+        let mut num_chunks = 0;
+        let worldgen_start = Instant::now();
+        // Build chunks and then immediately let the mesher know they're new. 
+        #[allow(clippy::explicit_counter_loop)]
+        for chunk_position in test_world_range {
+            //let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
+            //let chunk = if chunk_file_path.exists() {
+            //    fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
+            //}
+            //else {
+            let chunk = gen_test_chunk(chunk_position);
+            //};
+            world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
+            terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
+            num_chunks +=1;
+        }
+        let worldgen_elapsed_micros = worldgen_start.elapsed().as_micros() as f64;
+        let block_count = (num_chunks*CHUNK_SIZE_CUBED) as f64;
+        worldgen_data.push(worldgen_elapsed_micros/block_count);
+    
+        //Remesh
+        let meshing_start = Instant::now();
+        terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
+        let meshing_elapsed_micros = meshing_start.elapsed().as_micros() as f64;
+        mesh_data.push(meshing_elapsed_micros/block_count);
+
+        terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
+        let meshing_elapsed_micros = meshing_start.elapsed().as_micros() as f64; 
+        mesh_and_push_data.push(meshing_elapsed_micros/block_count);
+    }
+
+    let worldgen_median = median(&worldgen_data).unwrap();
+    let mesh_median = median(&mesh_data).unwrap();
+    let mesh_and_push_median = median(&mesh_and_push_data).unwrap();
+
+    info!("Our chunks are {}x{}x{}. ", CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE );
+    info!("After {} iterations, median times, in microseconds PER BLOCK, are:", ITERATIONS);
+    info!("Worldgen: {}", worldgen_median);
+    info!("Meshing: {}", mesh_median);
+    info!("Meshing + push_to_gpu() step: {}", mesh_and_push_median);
+
+    let worldgen_filename = format!("chunk{}_worldgen.csv", CHUNK_SIZE);
+    let mesh_filename = format!("chunk{}_meshing.csv", CHUNK_SIZE);
+    let mesh_and_push_filename = format!("chunk{}_mesh_and_push.csv", CHUNK_SIZE);
+
+    let mut file = File::create(&worldgen_filename).unwrap();
+    let st = to_csv(&worldgen_data);
+    file.write_all(st.as_bytes()).unwrap(); 
+    file.flush().unwrap();
+
+    let mut file = File::create(&mesh_filename).unwrap();
+    let st = to_csv(&mesh_data);
+    file.write_all(st.as_bytes()).unwrap(); 
+    file.flush().unwrap();
+
+    let mut file = File::create(&mesh_and_push_filename).unwrap();
+    let st = to_csv(&mesh_and_push_data);
+    file.write_all(st.as_bytes()).unwrap(); 
+    file.flush().unwrap();
+    
+/*
     let mut last_remesh_time = Instant::now();
-
     // Set up camera and view 
     const FAST_CAMERA_SPEED: f32 = 16.0;
     const SLOW_CAMERA_SPEED: f32 = 4.0;
@@ -734,7 +845,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 let elapsed_time = prev_frame_time.elapsed();
                 prev_frame_time = Instant::now();
         
-                if has_focus { 
+                if has_focus {
                     //Move camera
                     for dir in current_down.iter() {
                         camera.key_interact(*dir, elapsed_time);
@@ -842,4 +953,5 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             *control = winit::event_loop::ControlFlow::Poll;
         }
     });
+    */
 }

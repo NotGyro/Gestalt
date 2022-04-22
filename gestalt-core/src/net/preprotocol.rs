@@ -182,6 +182,8 @@ pub mod current_protocol {
         NoIdentity,
         #[error("Client and server do not have any protocols in common.")]
         NoProtocolsInCommon,
+        #[error("Key challenge header failed to validate in handshake.")]
+        BadChallengeHeader,
     }
 
     pub fn noise_protocol_dir() -> PathBuf {
@@ -278,6 +280,22 @@ pub mod current_protocol {
             Ok(())
         }
     }
+
+    /// Header used to ensure the process of proving we own our public key can't be used to sign arbitrary things / impersonate us. 
+    /// Transmitted as json
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Hash)]
+    pub(crate) struct KeyChallenge { 
+        /// Signed on a constant string to make it harder to forge this. 
+        pub static_challenge_name: String,
+        /// Identity of the user sending this challenge, base-64.
+        pub sender_ident: String,
+        /// Identity of the user receiving this challenge, base-64.
+        pub receiver_ident: String,
+        /// Base-64 random challenge bytes.
+        pub challenge: String,
+    } 
+
+    pub const CHALLENGE_NAME: &str = "GESTALT_IDENTITY_CHALLENGE";
 
     // Handshake steps:
     // * Step 0 is reserved.
@@ -383,7 +401,7 @@ pub mod current_protocol {
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct HandshakeMessage4 {
-        /// Base-64 encoded buf to sign here.
+        /// Contains a Base-64 encoded buf to sign.
         pub please_sign: String,
     }
     
@@ -391,7 +409,7 @@ pub mod current_protocol {
     struct HandshakeMessage5 {
         /// Base-64 encoded initiator signature on responder's HandshakeMessage4 "please_sign"
         pub initiator_signature: String,
-        /// Base-64 encoded buf to sign here.
+        /// Contains a Base-64 encoded buf to sign.
         pub please_sign: String,
     }
     
@@ -404,7 +422,7 @@ pub mod current_protocol {
     pub type MessageCounter = u64;
 
     /// Receiver-sided, receive step 3 message from initiator and finish Noise handshake. Now we do funky identity stuff, sending a buffer and asking the other side to sign it. 
-    pub fn receive_last_noise<Callback>(mut state: snow::HandshakeState, input: HandshakeStepMessage, peer_gestalt_identity: &NodeIdentity, callback_different_key: Callback) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, [u8;32], MessageCounter), HandshakeError>
+    pub fn receive_last_noise<Callback>(mut state: snow::HandshakeState, input: HandshakeStepMessage, peer_gestalt_identity: &NodeIdentity, our_gestalt_identity: &NodeIdentity, callback_different_key: Callback) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter), HandshakeError>
             where Callback: FnOnce(&NodeIdentity, &[u8], &[u8]) -> bool { 
         if input.handshake_step == 3 {
             let bytes_input = base64::decode(input.data)?;
@@ -424,8 +442,16 @@ pub mod current_protocol {
             // Build a HandshakeMessage asking for a signature. 
             let nonce = make_signing_nonce();
             let base64_nonce = base64::encode(&nonce); 
+            let challenge = KeyChallenge {
+                static_challenge_name: CHALLENGE_NAME.to_string(),
+                sender_ident: our_gestalt_identity.to_base64(),
+                receiver_ident: peer_gestalt_identity.to_base64(),
+                challenge: base64_nonce,
+            };
+            let json_challenge = serde_json::to_string(&challenge)?;
+            let b64_challenge = base64::encode(&json_challenge.as_bytes());
             let message = HandshakeMessage4 { 
-                please_sign: base64_nonce,
+                please_sign: b64_challenge.clone(),
             };
             let json_message = serde_json::to_string(&message)?;
             
@@ -439,13 +465,13 @@ pub mod current_protocol {
                 data: encoded_message,
             };
             
-            Ok((transport, step, nonce, 0))
+            Ok((transport, step, b64_challenge, 0))
         } else { 
             Err(HandshakeError::UnexpectedStep(3, input.handshake_step))
         }
     }
     /// Receive step 4 message, produce step 5 message.
-    pub fn initiator_sign_buf(state: snow::StatelessTransportState, input: HandshakeStepMessage, our_keys: &IdentityKeyPair) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, [u8;32], MessageCounter), HandshakeError> { 
+    pub fn initiator_sign_buf(state: snow::StatelessTransportState, input: HandshakeStepMessage, their_key: NodeIdentity, our_keys: &IdentityKeyPair) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter), HandshakeError> { 
         if input.handshake_step == 4 {
             let bytes_input = base64::decode(input.data)?;
             let mut read_buf = [0u8; 65535];
@@ -455,16 +481,46 @@ pub mod current_protocol {
 
             // Get the inner message.
             let msg: HandshakeMessage4 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
-            let to_sign = base64::decode(msg.please_sign)?;
-            let our_signature = our_keys.sign(&to_sign).map_err(HandshakeError::CannotSign)?; 
+            let challenge_string = msg.please_sign.clone();
+            let our_signature = our_keys.sign(challenge_string.as_bytes()).map_err(HandshakeError::CannotSign)?; 
             let our_signature_bytes = our_signature.as_bytes();
             let our_signature_b64 = base64::encode(our_signature_bytes);
+
+            // Validate header
+            let resulting_string = String::from_utf8(
+                base64::decode(msg.please_sign).map_err(|_| HandshakeError::BadChallengeHeader)?
+                ).map_err(|_| HandshakeError::BadChallengeHeader)?;
+            let challenge: KeyChallenge = serde_json::from_str(&resulting_string)
+                .map_err(|_| HandshakeError::BadChallengeHeader)?;
+
+            if challenge.static_challenge_name != CHALLENGE_NAME { 
+                return Err(HandshakeError::BadChallengeHeader);
+            }
+
+            let decoded_sender_key = NodeIdentity::from_base64(&challenge.sender_ident)
+                .map_err(|_| HandshakeError::BadChallengeHeader)?;
+            if decoded_sender_key != their_key { 
+                return Err(HandshakeError::BadChallengeHeader);
+            }
+            let decoded_receiver_key = NodeIdentity::from_base64(&challenge.receiver_ident)
+                .map_err(|_| HandshakeError::BadChallengeHeader)?;
+            if decoded_receiver_key != our_keys.public { 
+                return Err(HandshakeError::BadChallengeHeader);
+            }
             
             // Build a HandshakeMessage asking for a signature.
             let nonce = make_signing_nonce();
             let base64_nonce = base64::encode(&nonce); 
+            let challenge = KeyChallenge {
+                static_challenge_name: CHALLENGE_NAME.to_string(),
+                sender_ident: our_keys.public.to_base64(),
+                receiver_ident: their_key.to_base64(),
+                challenge: base64_nonce,
+            };
+            let json_challenge = serde_json::to_string(&challenge)?;
+            let b64_challenge = base64::encode(&json_challenge.as_bytes());
             let message = HandshakeMessage5 { 
-                please_sign: base64_nonce,
+                please_sign: b64_challenge.clone(),
                 initiator_signature: our_signature_b64,
             };
             let json_message = serde_json::to_string(&message)?;
@@ -479,13 +535,13 @@ pub mod current_protocol {
                 data: encoded_message,
             };
             
-            Ok((state, step, nonce, 0))
+            Ok((state, step, b64_challenge, 0))
         } else { 
             Err(HandshakeError::UnexpectedStep(4, input.handshake_step))
         }
     } 
     /// Receive step 5 message, produce step 6 message.
-    pub fn responder_sign(state: snow::StatelessTransportState, input: HandshakeStepMessage, our_keys: &IdentityKeyPair, peer_identity: &NodeIdentity, our_nonce: [u8;32]) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, MessageCounter), HandshakeError> { 
+    pub fn responder_sign(state: snow::StatelessTransportState, input: HandshakeStepMessage, our_keys: &IdentityKeyPair, peer_identity: &NodeIdentity, our_challenge: String) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, MessageCounter), HandshakeError> { 
         if input.handshake_step == 5 {
             let bytes_input = base64::decode(input.data)?;
             let mut read_buf = [0u8; 65535];
@@ -497,13 +553,37 @@ pub mod current_protocol {
             let msg: HandshakeMessage5 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
             let their_sig = base64::decode(msg.initiator_signature)?;
-            peer_identity.verify_signature(&our_nonce, &their_sig).map_err(HandshakeError::BadSignature)?;
+            peer_identity.verify_signature(&our_challenge.as_bytes(), &their_sig).map_err(HandshakeError::BadSignature)?;
 
+            // Get the inner message.
+            let msg: HandshakeMessage4 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
+            let challenge_string = msg.please_sign.clone();
             // Make our signature.
-            let to_sign = base64::decode(msg.please_sign)?;
-            let our_signature = our_keys.sign(&to_sign).map_err(HandshakeError::CannotSign)?; 
+            let our_signature = our_keys.sign(&challenge_string.as_bytes()).map_err(HandshakeError::CannotSign)?; 
             let our_signature_bytes = our_signature.as_bytes();
             let our_signature_b64 = base64::encode(our_signature_bytes);
+
+            // Validate header
+            let resulting_string = String::from_utf8(
+                base64::decode(msg.please_sign).map_err(|_| HandshakeError::BadChallengeHeader)?
+                ).map_err(|_| HandshakeError::BadChallengeHeader)?;
+            let challenge: KeyChallenge = serde_json::from_str(&resulting_string)
+                .map_err(|_| HandshakeError::BadChallengeHeader)?;
+
+            if challenge.static_challenge_name != CHALLENGE_NAME { 
+                return Err(HandshakeError::BadChallengeHeader);
+            }
+
+            let decoded_sender_key = NodeIdentity::from_base64(&challenge.sender_ident)
+                .map_err(|_| HandshakeError::BadChallengeHeader)?;
+            if decoded_sender_key != *peer_identity { 
+                return Err(HandshakeError::BadChallengeHeader);
+            }
+            let decoded_receiver_key = NodeIdentity::from_base64(&challenge.receiver_ident)
+                .map_err(|_| HandshakeError::BadChallengeHeader)?;
+            if decoded_receiver_key != our_keys.public { 
+                return Err(HandshakeError::BadChallengeHeader);
+            };
             
             // Build a HandshakeMessage sending our signature.
             let message = HandshakeMessage6 {
@@ -527,7 +607,7 @@ pub mod current_protocol {
         }
     }
     /// Receive step 6 message, ending handshake.
-    pub fn initiator_final(state: snow::StatelessTransportState, input: HandshakeStepMessage, peer_identity: &NodeIdentity, our_nonce: [u8;32]) -> Result<(snow::StatelessTransportState, MessageCounter), HandshakeError> { 
+    pub fn initiator_final(state: snow::StatelessTransportState, input: HandshakeStepMessage, peer_identity: &NodeIdentity, our_challenge: String) -> Result<(snow::StatelessTransportState, MessageCounter), HandshakeError> { 
         if input.handshake_step == 6 {
             let bytes_input = base64::decode(input.data)?;
             let mut read_buf = [0u8; 65535];
@@ -539,7 +619,7 @@ pub mod current_protocol {
             let msg: HandshakeMessage6 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
             // Validate their signature
             let their_sig = base64::decode(msg.responder_signature)?;
-            peer_identity.verify_signature(&our_nonce, &their_sig).map_err(HandshakeError::BadSignature)?;
+            peer_identity.verify_signature(our_challenge.as_bytes(), &their_sig).map_err(HandshakeError::BadSignature)?;
 
             Ok((state, 1))
         } else { 
@@ -552,7 +632,7 @@ pub mod current_protocol {
         Init, 
         SentFirstAwaitSecond(snow::HandshakeState),
         SentThirdAwaitFourth(snow::StatelessTransportState),
-        SentFifthAwaitSixth(snow::StatelessTransportState, [u8;32], MessageCounter),
+        SentFifthAwaitSixth(snow::StatelessTransportState, String, MessageCounter),
         Done(snow::StatelessTransportState, MessageCounter),
     }
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -621,7 +701,7 @@ pub mod current_protocol {
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeIntitiatorState::SentThirdAwaitFourth(state) => { 
-                    let (transport, message, nonce, seq) = initiator_sign_buf(state, incoming, &self.local_gestalt_keys)?;
+                    let (transport, message, nonce, seq) = initiator_sign_buf(state, incoming, *receiver_identity, &self.local_gestalt_keys)?;
                     self.last_state = Some(HandshakeIntitiatorState::SentFifthAwaitSixth(transport, nonce, seq));
                     Ok(HandshakeNext::SendMessage(message))
                 },
@@ -651,7 +731,7 @@ pub mod current_protocol {
     pub enum HandshakeReceiverState { 
         Init, 
         SentSecondAwaitThird(snow::HandshakeState),
-        SentFourthAwaitFifth(snow::StatelessTransportState, [u8;32], MessageCounter),
+        SentFourthAwaitFifth(snow::StatelessTransportState, String, MessageCounter),
         Done(snow::StatelessTransportState, MessageCounter),
     }
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -704,7 +784,7 @@ pub mod current_protocol {
                     Ok(HandshakeNext::SendMessage(message))
                 },
                 HandshakeReceiverState::SentSecondAwaitThird(state) => { 
-                    let (new_state, message, nonce, seq) = receive_last_noise(state,incoming, initiator_identity, callback_different_key)?;
+                    let (new_state, message, nonce, seq) = receive_last_noise(state,incoming, initiator_identity, &self.local_gestalt_keys.public, callback_different_key)?;
                     self.last_state = Some(HandshakeReceiverState::SentFourthAwaitFifth(new_state, nonce, seq));
                     Ok(HandshakeNext::SendMessage(message))
                 },
@@ -931,7 +1011,7 @@ pub struct SuccessfulConnect {
     pub peer_identity: NodeIdentity,
     pub peer_address: SocketAddr,
     pub transport_cryptography: StatelessTransportState,
-    pub transport_sequence_number: u64,
+    pub transport_counter: u64,
 }
 
 pub const PREPROTCOL_PORT: u16 = 54134;
@@ -977,7 +1057,7 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, peer_address:
                                             peer_identity: receiver.peer_identity.unwrap(),
                                             peer_address,
                                             transport_cryptography: transport,
-                                            transport_sequence_number: seq,
+                                            transport_counter: seq,
                                         };
                                         completed_channel.send(completed).unwrap();
                                         // Done with this part, stop sending. 
@@ -1125,7 +1205,7 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
         peer_identity: server_identity,
         peer_address: server_address,
         transport_cryptography: transport,
-        transport_sequence_number: counter,
+        transport_counter: counter,
     })
 }
 
@@ -1167,8 +1247,8 @@ fn handshake_test() {
     let (bob_state, message_1) = current_protocol::initiate_handshake(&bob_noise_keys).unwrap();
     let (alice_state, message_2) = current_protocol::receive_initial(&alice_noise_keys, message_1).unwrap();
     let (bob_transport, message_3) = current_protocol::initiator_reply(bob_state, message_2, &alice_gestalt_keys.public, callback_different_key).unwrap();
-    let (alice_transport, message_4, alice_nonce, _alice_seq) = current_protocol::receive_last_noise(alice_state, message_3, &bob_gestalt_keys.public, callback_different_key).unwrap();
-    let (bob_transport, message_5, bob_nonce, _bob_seq) = current_protocol::initiator_sign_buf(bob_transport, message_4, &bob_gestalt_keys).unwrap();
+    let (alice_transport, message_4, alice_nonce, _alice_seq) = current_protocol::receive_last_noise(alice_state, message_3, &bob_gestalt_keys.public, &alice_gestalt_keys.public, callback_different_key).unwrap();
+    let (bob_transport, message_5, bob_nonce, _bob_seq) = current_protocol::initiator_sign_buf(bob_transport, message_4, alice_gestalt_keys.public, &bob_gestalt_keys).unwrap();
     let (alice_transport, message_6, _alice_seq) = current_protocol::responder_sign(alice_transport, message_5, &alice_gestalt_keys, &bob_gestalt_keys.public, alice_nonce).unwrap();
     let (bob_transport, _bob_seq) = current_protocol::initiator_final(bob_transport, message_6, &alice_gestalt_keys.public, bob_nonce).unwrap();
 
@@ -1185,7 +1265,7 @@ fn handshake_test() {
     let mut write_buf = [0u8; 1024];
     let write_len = bob_transport.write_message(123, "This should fail!".as_bytes(), &mut write_buf).unwrap();
 
-    // This should fail because sequence number doesn't match
+    // This should fail because counter doesn't match
     let mut read_buf = [0u8; 1024];
     let _err = alice_transport.read_message(456, &write_buf[0..write_len], &mut read_buf).unwrap_err();
 }

@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 /*use std::boxed::Box;
 use std::error::Error;
 use std::marker::PhantomData;
@@ -31,6 +33,7 @@ pub mod preprotocol;
 
 /// Describes what kind of ordering guarantees are made about a packet.
 /// Directly inspired by (and currently maps to!) Laminar's reliability types.
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum PacketGuarantees {
     /// No guarantees - it'll get there when it gets there.
     UnreliableUnordered,
@@ -44,4 +47,27 @@ pub enum PacketGuarantees {
     /// Guaranteed it will get there (resend if we don't get ack),
     /// and if an older packet arrives after a newer one it will be discarded.
     ReliableSequenced,
+}
+
+/// Runtime information specifying what kind of connection we are looking at.
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ConnectionRole {
+    /// We are the server and we are connected to a client.
+    ServerToClient,
+    /// We are the client and we are connected to a server. 
+    ClientToServer,
+}
+
+pub enum Subsystem { 
+    NetworkInternal = 0,
+    Resource = 1,
+    Entity = 2,
+    Voxel = 3,
+    Audio = 4, 
+    
+}
+
+//3 4 1 
+pub struct NetMsgId { 
+
 }

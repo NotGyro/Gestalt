@@ -196,6 +196,8 @@ fn main() {
         LevelFilter::Info
     };
     log_config_builder.set_target_level(level_filter);
+    //Prevent enormous log spam.
+    log_config_builder.add_filter_ignore_str("wgpu_core::device");
     let log_config = log_config_builder.build();
 
     let log_file_path = PathBuf::from("logs/").join("latest.log");
@@ -301,7 +303,9 @@ fn main() {
             }
         }
     }
-    //client::clientmain::run_client(keys);
+    else {
+        client::clientmain::run_client(keys);
+    }
 
     std::thread::sleep(std::time::Duration::from_millis(100));
 }
