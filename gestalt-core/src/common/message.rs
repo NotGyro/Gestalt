@@ -12,7 +12,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entity::EntityId;
 use crate::script::ModuleId;
 use crate::world::WorldId;
 
@@ -311,7 +310,7 @@ pub enum MessageError {
 pub enum ChannelDomain {
     Global,
     World(WorldId),
-    Entity(WorldId, EntityId),
+    //Entity(WorldId, EntityId),
     Module(ModuleId),
     WorldModule(WorldId, ModuleId),
 }

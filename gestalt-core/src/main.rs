@@ -25,11 +25,13 @@ use std::{io::Write, path::PathBuf, net::{SocketAddr, IpAddr}, time::Duration};
 use log::{LevelFilter, info, error};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
-use common::identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys};
+use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version};
 use hashbrown::HashSet;
 use mlua::LuaOptions;
 
-use crate::{common::identity::generate_local_keys, net::preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}};
+use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}}, common::identity::generate_local_keys};
+
+pub const ENGINE_VERSION: Version = version!(0,0,1);
 
 // For command-line argument parsing
 enum OneOrTwo {
@@ -173,6 +175,8 @@ impl Default for ProgramArgs {
 
 #[allow(unused_must_use)]
 fn main() {
+    // Announce the engine launching, for our command-line friends. 
+    println!("Launching Gestalt Engine v{}", ENGINE_VERSION);
     // Parse command-line arguments
     let mut arg_list: Vec<String> = Vec::new();
     for argument in std::env::args() {
@@ -285,21 +289,18 @@ fn main() {
             raw_addr.parse().unwrap()
         } else { 
             let ip_addr: IpAddr = raw_addr.parse().unwrap();
-            SocketAddr::new(ip_addr, net::preprotocol::PREPROTCOL_PORT)
+            SocketAddr::new(ip_addr, PREPROTCOL_PORT)
         };
 
         let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
         preprotocol_connect_to_server(keys, address, Duration::new(5, 0), connect_sender );
-        loop { 
-            match connect_receiver.try_recv() { 
-                Ok(entry) => { 
-                    info!("Connected to server {}", entry.peer_identity.to_base64());
-                },
-                Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
-                Err(e) => {
-                    error!("Error polling for connections: {:?}", e);
-                    break;
-                },
+        match connect_receiver.recv_timeout(Duration::from_secs(10)) {
+            Ok(connection) => { 
+                info!("Connected to server {}", connection.peer_identity.to_base64());
+                info!("Because this is an early test build, the engine will now quit.");
+            }
+            Err(e) => {
+                error!("Error in connecting to server: {:?}", e);
             }
         }
     }
