@@ -38,6 +38,8 @@ client.ron
 /gestalt-core/keys/
 /gestalt-core/logs/
 /gestalt-core/worlds/
+/gestalt-core/temp/
+/gestalt-core/cache/
 
 # Logs
 log.csv

@@ -32,10 +32,11 @@ string_cache = "0.8"
 #tar = "0.4.38"
 thiserror = "1.0.30"
 uuid = { version = "1.0.0", features = ["serde", "v4"] }
+vu64 = "0.1.5"
 
 # Network
 laminar = "0.5.0" 
-tokio = { version = "1", features = ["sync", "rt", "net", "io-util", "macros"] }
+tokio = { version = "1.19.2", features = ["sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
 
 # Scripting
 mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "serialize"] }

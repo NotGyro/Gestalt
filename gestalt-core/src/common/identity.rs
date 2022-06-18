@@ -117,6 +117,7 @@ pub struct IdentityKeyPair {
 }
 
 impl IdentityKeyPair { 
+    #[cfg(test)]
     pub fn generate_for_tests() -> Self { 
         let mut rng = rand_core::OsRng::default();
         let keys_dalek = ed25519_dalek::Keypair::generate(&mut rng);

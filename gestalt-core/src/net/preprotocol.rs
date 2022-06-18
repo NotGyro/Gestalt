@@ -22,6 +22,8 @@ use log::{error, info, warn, debug};
 use parking_lot::Mutex;
 use serde::__private::de::IdentifierDeserializer;
 use serde::{Serialize, Deserialize};
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::sync::mpsc;
 
 use crate::common::identity::{IdentityKeyPair, DecodeIdentityError};
 use crate::common::{identity::NodeIdentity, Version};
@@ -30,13 +32,14 @@ use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
 use std::sync::Arc;
 use std::time::Duration;
 use std::thread;
-use std::net::{TcpListener, TcpStream, Shutdown, IpAddr, Ipv4Addr, SocketAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, Ipv6Addr};
 use std::io::{Read, Write};
+use tokio::net::{TcpStream, TcpListener};
 
 use super::handshake::HandshakeNext;
 use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, load_noise_local_keys, HandshakeError, HandshakeIntitiator}};
 
-use super::{PREPROTCOL_PORT, MessageCounter};
+use super::{PREPROTCOL_PORT, MessageCounter, GESTALT_PORT};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -65,7 +68,7 @@ pub const SERVER_ROLE: u8 = 1;
 pub const CLIENT_ROLE: u8 = 2;
 
 #[repr(u8)]
-#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
 pub enum NetworkRole { 
     Unknown = UNKNOWN_ROLE,
     Server = SERVER_ROLE,
@@ -373,38 +376,38 @@ impl PreProtocolReceiver {
         })
     }
 }
-pub fn write_preprotocol_message(json: &str, stream: &mut TcpStream) -> Result<(), std::io::Error> { 
+pub async fn write_preprotocol_message(json: &str, stream: &mut TcpStream) -> Result<(), std::io::Error> { 
     let bytes = json.as_bytes();
     let message_len_bytes = (bytes.len() as u32).to_le_bytes();
     assert_eq!(message_len_bytes.len(), 4);
-    stream.write_all(&message_len_bytes)?;
-    stream.write_all(bytes)?;
-    stream.flush()?;
+    stream.write_all(&message_len_bytes).await?;
+    stream.write_all(bytes).await?;
+    stream.flush().await?;
     Ok(())
 }
 
-pub fn read_preprotocol_message(stream: &mut TcpStream) -> Result<String, std::io::Error> { 
+pub async fn read_preprotocol_message(stream: &mut TcpStream) -> Result<String, std::io::Error> { 
     let mut next_message_size_buf = [0_u8; 4];
-    stream.read_exact(&mut next_message_size_buf)?;
-    stream.flush()?;
+    stream.read_exact(&mut next_message_size_buf).await?;
+    stream.flush().await?;
     let next_message_size = u32::from_le_bytes(next_message_size_buf);
     let mut message_buf: Vec<u8> = vec![0u8; next_message_size as usize];
-    stream.read_exact(&mut message_buf)?;
+    stream.read_exact(&mut message_buf).await?;
 
     Ok(String::from_utf8_lossy(&message_buf).to_string())
 }
 
-pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: NetworkRole /* In most cases this will be Server for a receiver, but I want to leave it flexible. */, 
-        peer_address: SocketAddr, mut stream: TcpStream, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) {
+pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: NetworkRole /* In most cases this will be Server for a receiver, but I want to leave it flexible. */, 
+        peer_address: SocketAddr, mut stream: TcpStream, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>) {
     let mut receiver = PreProtocolReceiver::new(our_identity, our_role);
-    while match read_preprotocol_message(&mut stream) {
+    while match read_preprotocol_message(&mut stream).await {
         Ok(msg) => match serde_json::from_str::<PreProtocolQuery>(&msg) { 
                 Ok(query) => {
                     match receiver.receive_and_reply(query) {
                         Ok(out) => match out {
                             PreProtocolOutput::Reply(to_send) => {
                                 let json_string = serde_json::to_string(&to_send).unwrap();
-                                write_preprotocol_message( &json_string, &mut stream).unwrap();
+                                write_preprotocol_message( &json_string, &mut stream).await.unwrap();
 
                                 match receiver.is_handshake_done() {
                                     true => {
@@ -435,7 +438,7 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: Net
                                                     format!("{:?}", PreProtocolError::NoIntroduction)
                                                 );
                                                 let json_string = serde_json::to_string(&reply).unwrap();
-                                                write_preprotocol_message( &json_string, &mut stream).unwrap();
+                                                write_preprotocol_message( &json_string, &mut stream).await.unwrap();
 
                                                 false
                                             }
@@ -456,7 +459,7 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: Net
                                 format!("Preprotocol loop error: {:?}", e)
                             );
                             let json_string = serde_json::to_string(&reply).unwrap();
-                            write_preprotocol_message( &json_string, &mut stream).unwrap();
+                            write_preprotocol_message( &json_string, &mut stream).await.unwrap();
 
                             false
                         },
@@ -468,7 +471,7 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: Net
                         format!("Parsing error: {:?}", e)
                     );
                     let json_string = serde_json::to_string(&reply).unwrap();
-                    write_preprotocol_message( &json_string, &mut stream).unwrap();
+                    write_preprotocol_message( &json_string, &mut stream).await.unwrap();
 
                     false
                 },
@@ -477,43 +480,39 @@ pub fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: Net
             error!("Error getting message length from {}", stream.peer_addr().unwrap());
             let reply = PreProtocolReply::Err(String::from("Error getting message length."));
             let json_string = serde_json::to_string(&reply).unwrap();
-            write_preprotocol_message( &json_string, &mut stream).unwrap();
+            write_preprotocol_message( &json_string, &mut stream).await.unwrap();
 
             false
         }
     } {}
-    stream.shutdown(Shutdown::Both).unwrap();
+    stream.shutdown().await.unwrap();
 }
 
 /// Spawns a thread which listens for pre-protocol connections on TCP.
-pub fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: Option<IpAddr>, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) { 
-    std::thread::spawn( move || { 
-        let ip = match our_address { 
-            Some(value) => value, 
-            None => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-        };
-        let listener = TcpListener::bind(std::net::SocketAddr::new(ip, PREPROTCOL_PORT) ).unwrap();
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
-                    let peer_address = stream.peer_addr().unwrap();
-                    info!("New PreProtocol connection: {}", stream.peer_addr().unwrap());
-                    let completed_channel_clone = completed_channel.clone();
-                    thread::spawn( move || {
-                        // connection succeeded
-                        preprotocol_receiver_session(our_identity,  NetworkRole::Server, peer_address, stream, completed_channel_clone);
-                    });
-                }
-                Err(e) => {
-                    error!("PreProtocol connection error: {}", e);
-                    /* connection failed */
-                }
+pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: Option<SocketAddr>, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>) { 
+    let ip = match our_address { 
+        Some(value) => value, 
+        None => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), GESTALT_PORT),
+    };
+    let listener = TcpListener::bind(ip).await.unwrap();
+    loop {
+        match listener.accept().await {
+            Ok((stream, peer_address)) => { 
+                info!("New PreProtocol connection: {}", peer_address);
+                let completed_channel_clone = completed_channel.clone();
+                tokio::spawn(
+                    // connection succeeded
+                    preprotocol_receiver_session(our_identity,  NetworkRole::Server, peer_address, stream, completed_channel_clone)
+                );
+            }, 
+            Err(e) => { 
+                error!("An error was encountered in accepting an incoming session: {:?}", e);
             }
         }
-    });
+    }
 }
 
-pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, our_role: NetworkRole, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
+pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, our_role: NetworkRole, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
     let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
         warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
         true
@@ -527,14 +526,14 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     // Exchange identities.
     let query_introduce = PreProtocolQuery::Introduction(introduction.clone());
     let json_query = serde_json::to_string(&query_introduce)?;
-    write_preprotocol_message(&json_query, stream)?;
+    write_preprotocol_message(&json_query, stream).await?;
 
     let query_request_identity = PreProtocolQuery::RequestIdentity;
     let json_query = serde_json::to_string(&query_request_identity)?;
-    write_preprotocol_message(&json_query, stream)?;
-    stream.flush()?;
+    write_preprotocol_message(&json_query, stream).await?;
+    stream.flush().await?;
 
-    let msg = read_preprotocol_message(stream)?;
+    let msg = read_preprotocol_message(stream).await?;
     let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
     let server_introduction = if let PreProtocolReply::Identity(introduction) = reply { 
         introduction
@@ -547,10 +546,10 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     // Get protocols 
     let query_request_protocols = PreProtocolQuery::SupportedProtocols;
     let json_query = serde_json::to_string(&query_request_protocols)?;
-    write_preprotocol_message(&json_query, stream)?;
-    stream.flush()?;
+    write_preprotocol_message(&json_query, stream).await?;
+    stream.flush().await?;
     
-    let msg = read_preprotocol_message(stream)?;
+    let msg = read_preprotocol_message(stream).await?;
     let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
     let server_protocols = if let PreProtocolReply::SupportedProtocols(protocols) = reply { 
         protocols.supported_protocols
@@ -576,11 +575,11 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
         handshake: handshake_first,
     });
     let json_query = serde_json::to_string(&query)?;
-    write_preprotocol_message(&json_query, stream)?;
+    write_preprotocol_message(&json_query, stream).await?;
     
     // Loop until we're done.
     while !handshake_initiator.is_done() {
-        let msg = read_preprotocol_message(stream)?;
+        let msg = read_preprotocol_message(stream).await?;
         debug!("Got a pre-protocol reply: {}", &msg);
         let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
         let handshake_step = if let PreProtocolReply::Handshake(step) = reply { 
@@ -593,7 +592,7 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
             HandshakeNext::SendMessage(msg) => {
                 let query = PreProtocolQuery::Handshake(msg);
                 let json_query = serde_json::to_string(&query)?;
-                write_preprotocol_message(&json_query, stream)?;
+                write_preprotocol_message(&json_query, stream).await?;
             },
             HandshakeNext::Done => break,
         }
@@ -614,50 +613,60 @@ pub fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityK
     })
 }
 
-pub fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server_address: SocketAddr, connect_timeout: Duration, completed_channel: crossbeam_channel::Sender<SuccessfulConnect>) { 
-    std::thread::spawn( move || {
-        match TcpStream::connect_timeout(&server_address, connect_timeout) {
-            Ok(mut stream) => {
-                // TODO figure out how connections where the initiator will be a non-client at some point
-                match preprotocol_connect_inner(&mut stream, our_identity, NetworkRole::Client, server_address) {
-                    Ok(completed_connection) => {
-                        info!("Successfully initiated connection to a server with identity {}, running Gestalt v{}", completed_connection.peer_identity.to_base64(), &completed_connection.peer_engine_version);
-                        completed_channel.send(completed_connection).unwrap();
-                    },
-                    Err(error) => {
-                        error!("Handshake error connecting to server: {:?}", error);
-                        let error_to_send = PreProtocolQuery::HandshakeFailed(format!("{:?}", error));
-                        let json_error = serde_json::to_string(&error_to_send).unwrap();
-                        write_preprotocol_message(&json_error, &mut stream).unwrap();
-                    },
-                }
-                stream.shutdown(Shutdown::Both).unwrap();
-            },
-            Err(e) => error!("Could not initiate connection to server: {:?}", e),
-        }
-    });
+pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server_address: SocketAddr, connect_timeout: Duration) -> Result<SuccessfulConnect, HandshakeError> {
+    match tokio::time::timeout(connect_timeout, TcpStream::connect(&server_address)).await {
+        Ok(Ok(mut stream)) => {
+            // TODO figure out how connections where the initiator will be a non-client at some point
+            match preprotocol_connect_inner(&mut stream, our_identity, NetworkRole::Client, server_address).await {
+                Ok(completed_connection) => {
+                    info!("Successfully initiated connection to a server with identity {}, running Gestalt v{}", completed_connection.peer_identity.to_base64(), &completed_connection.peer_engine_version);
+                    stream.shutdown().await.unwrap();
+                    Ok(completed_connection)
+                },
+                Err(error) => {
+                    error!("Handshake error connecting to server: {:?}", error);
+                    let error_to_send = PreProtocolQuery::HandshakeFailed(format!("{:?}", error));
+                    let json_error = serde_json::to_string(&error_to_send).unwrap();
+                    write_preprotocol_message(&json_error, &mut stream).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                    Err(error)
+                },
+            }
+        },
+        Err(e) => { 
+            error!("Timed out attempting to connect to server: {:?}", e);
+            Err(e.into())
+        },
+        Ok(Err(e)) => { 
+            error!("Could not initiate connection to server: {:?}", e);
+            Err(e.into())
+        },
+    }
 }
 
-#[test] 
-fn connect_to_localhost() {
+
+#[tokio::test(flavor = "multi_thread")]
+async fn preprotocol_connect_to_localhost() {
     let server_key_pair = IdentityKeyPair::generate_for_tests();
     let client_key_pair = IdentityKeyPair::generate_for_tests();
-    let (serv_completed_sender, serv_completed_receiver) : (crossbeam_channel::Sender<SuccessfulConnect>, crossbeam_channel::Receiver<SuccessfulConnect>) = crossbeam_channel::unbounded();
-    let (client_completed_sender, client_completed_receiver) : (crossbeam_channel::Sender<SuccessfulConnect>, crossbeam_channel::Receiver<SuccessfulConnect>) = crossbeam_channel::unbounded();
+    let (serv_completed_sender, mut serv_completed_receiver) = mpsc::unbounded_channel();
+    let (client_completed_sender, mut client_completed_receiver) = mpsc::unbounded_channel();
     let connect_timeout = Duration::from_secs(2);
 
-    let server_addr = Ipv6Addr::LOCALHOST;
+    let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
+    let server_socket_addr = SocketAddr::new(server_addr.clone(), GESTALT_PORT);
     //Launch the server
-    launch_preprotocol_listener(server_key_pair, Some(std::net::IpAddr::V6(server_addr.clone())), serv_completed_sender);
+    tokio::spawn(launch_preprotocol_listener(server_key_pair, Some(server_socket_addr), serv_completed_sender));
     //Give it a moment
-    std::thread::sleep(Duration::from_millis(100));
+    tokio::time::sleep(Duration::from_millis(100)).await;
     //Try to connect
-    preprotocol_connect_to_server(client_key_pair, SocketAddr::new(std::net::IpAddr::V6(server_addr.clone()), PREPROTCOL_PORT), connect_timeout, client_completed_sender);
+    let client_connection = preprotocol_connect_to_server(client_key_pair, server_socket_addr, connect_timeout).await.unwrap();
+    client_completed_sender.send(client_connection).unwrap();
 
     let success_timeout = Duration::from_secs(2);
-    //Make sure it has a little time to complete this. 
-    let successful_server_end = serv_completed_receiver.recv_timeout(success_timeout).unwrap();
-    let successful_client_end = client_completed_receiver.recv_timeout(success_timeout).unwrap();
+    //Make sure it has a little time to complete this.
+    let successful_server_end = tokio::time::timeout(success_timeout, serv_completed_receiver.recv()).await.unwrap().unwrap();
+    let successful_client_end = tokio::time::timeout(success_timeout, client_completed_receiver.recv()).await.unwrap().unwrap();
     // Check if all is valid
     assert_eq!(successful_server_end.peer_identity, client_key_pair.public);
     assert_eq!(successful_client_end.peer_identity, server_key_pair.public);

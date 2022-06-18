@@ -71,6 +71,8 @@
         NoProtocolsInCommon,
         #[error("Key challenge header failed to validate in handshake.")]
         BadChallengeHeader,
+        #[error("Timeout in handshake: {0:?}.")]
+        Timeout(#[from] tokio::time::error::Elapsed),
     }
 
     pub fn noise_protocol_dir() -> PathBuf {

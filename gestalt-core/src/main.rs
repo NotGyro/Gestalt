@@ -20,16 +20,17 @@ pub mod script;
 pub mod server;
 pub mod world;
 
-use std::{io::Write, path::PathBuf, net::{SocketAddr, IpAddr}, time::Duration};
+use std::{io::Write, path::PathBuf, net::{SocketAddr, IpAddr, SocketAddrV6, Ipv6Addr}, time::Duration};
 
 use log::{LevelFilter, info, error};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
 use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version};
-use hashbrown::HashSet;
+use hashbrown::{HashSet, HashMap};
 use mlua::LuaOptions;
+use tokio::sync::mpsc;
 
-use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}}, common::identity::generate_local_keys};
+use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server, NetworkRole}, GESTALT_PORT, run_network_system, LaminarConfig}, common::identity::generate_local_keys};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -187,7 +188,7 @@ fn main() {
     }
     let mut program_args = ProgramArgs::new(); 
     program_args.add_arg(vec!["--join", "-j"], true);
-    program_args.add_arg(vec!["--server", "-s"], false);
+    program_args.add_arg(vec!["--server", "-s"], true);
     program_args.add_arg(vec!["--verbose", "-v"], false);
 
     let matches = program_args.get_matches(arg_list);
@@ -266,23 +267,38 @@ fn main() {
         | mlua::StdLib::PACKAGE;
     let _vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
 
-    let server_mode: bool = matches.get("--server").is_some();
-    
-    if server_mode { 
-        let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
-        launch_preprotocol_listener(keys, None, connect_sender );
-        loop { 
-            match connect_receiver.try_recv() { 
-                Ok(entry) => { 
-                    info!("User {} connected", entry.peer_identity.to_base64());
-                }, 
-                Err(crossbeam_channel::TryRecvError::Empty) => {/* wait for more output */},
-                Err(e) => { 
-                    error!("Error polling for connections: {:?}", e);
-                    break;
-                },
-            }
+
+    let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+
+    let async_runtime = match runtime_builder.build() { 
+        Ok(rt) => rt, 
+        Err(e) => { 
+            error!("Unable to start async runtime: {:?}", e); 
+            panic!("Unable to start async runtime: {:?}", e);
         }
+    };
+
+    if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) } ) = matches.get("--server") { 
+        let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
+
+        let udp_address: SocketAddr = if raw_addr.contains(':') { 
+            raw_addr.parse().unwrap()
+        } else { 
+            let ip_addr: IpAddr = raw_addr.parse().unwrap();
+            SocketAddr::new(ip_addr, GESTALT_PORT)
+        };
+
+        async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender ));
+
+        async_runtime.spawn(
+            run_network_system(NetworkRole::Server,
+                udp_address, 
+                connect_receiver,
+                keys.clone(), 
+                HashMap::new(),
+                LaminarConfig::default(),
+                Duration::from_millis(250))
+        );
     }
     else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") { 
         let address: SocketAddr = if raw_addr.contains(':') { 
@@ -292,17 +308,18 @@ fn main() {
             SocketAddr::new(ip_addr, PREPROTCOL_PORT)
         };
 
-        let (connect_sender, connect_receiver) = crossbeam_channel::unbounded();
-        preprotocol_connect_to_server(keys, address, Duration::new(5, 0), connect_sender );
-        match connect_receiver.recv_timeout(Duration::from_secs(10)) {
-            Ok(connection) => { 
-                info!("Connected to server {}", connection.peer_identity.to_base64());
-                info!("Because this is an early test build, the engine will now quit.");
-            }
-            Err(e) => {
-                error!("Error in connecting to server: {:?}", e);
-            }
-        }
+        let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
+        async_runtime.spawn(
+            run_network_system( NetworkRole::Client,  SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, GESTALT_PORT, 0, 0)), 
+                connect_receiver,
+                keys.clone(), 
+                HashMap::new(),
+                LaminarConfig::default(),
+                Duration::from_millis(250))
+        );
+        let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
+                Duration::new(5, 0))).unwrap();
+        connect_sender.send(completed).unwrap();
     }
     else {
         client::clientmain::run_client(keys);

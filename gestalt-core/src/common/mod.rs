@@ -1,3 +1,4 @@
+pub mod growable_buffer;
 pub mod identity;
 pub mod message;
 #[macro_use]
