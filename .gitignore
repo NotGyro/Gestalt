@@ -62,3 +62,7 @@ Cargo.lock
 
 # Informal notes (I should use Github tasks soon)
 todo.md
+
+# Generated code
+
+/gestalt-names/src/generated/
