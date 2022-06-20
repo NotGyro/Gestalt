@@ -12,10 +12,12 @@ use std::time::Instant;
 use futures::FutureExt;
 use hashbrown::HashMap;
 use laminar::Connection;
+use laminar::ConnectionMessenger;
 use laminar::VirtualConnection;
 use log::error;
 use log::info;
 use log::warn;
+use serde::Deserialize;
 use serde::{Serialize, de::DeserializeOwned};
 
 use snow::StatelessTransportState;
@@ -205,6 +207,7 @@ struct TransportWrapper {
     pub outbox: VecDeque<(SocketAddr, Vec<u8>)>, 
     // Packets received
     pub inbox: VecDeque<laminar::SocketEvent>,
+
 }
 
 impl laminar::ConnectionMessenger<laminar::SocketEvent> for TransportWrapper {
@@ -236,30 +239,33 @@ pub type LaminarConfig = laminar::Config;
 pub struct LaminarConnectionManager {
     peer_address: SocketAddr,
     connection_state: VirtualConnection,
-    messenger: TransportWrapper,
+    pub(in crate::net) messenger: TransportWrapper,
 }
 
 impl LaminarConnectionManager {
 
-    pub fn new(peer_address: SocketAddr, laminar_config: &LaminarConfig, time: Instant) -> Self { 
-        let send_to = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 54444);
+    pub fn new(peer_address: SocketAddr, laminar_config: &LaminarConfig, time: Instant) -> Self {
+        let mut messenger = TransportWrapper {
+            laminar_config: laminar_config.clone(),
+            outbox: VecDeque::default(),
+            inbox: VecDeque::default(),
+        };
+        let connection_state = VirtualConnection::create_connection(&mut messenger, peer_address, time);
+
         LaminarConnectionManager {
             peer_address,
-            connection_state: VirtualConnection::new(send_to, laminar_config, time),
-            messenger: TransportWrapper {
-                laminar_config: laminar_config.clone(),
-                outbox: VecDeque::default(),
-                inbox: VecDeque::default(),
-            }
+            connection_state,
+            messenger,
         }
     }
 
     /// Ingests a batch of packets coming off the wire.
     pub fn process_inbound<T: IntoIterator< Item: AsRef<[u8]> >>(&mut self, inbound_messages: T, time: Instant) -> Result<(), LaminarWrapperError> {
+        info!("Processing inbound packets.");
         let mut at_least_one = false; 
         let messenger = &mut self.messenger;
         for payload in inbound_messages.into_iter() {
-            at_least_one = true;  
+            at_least_one = true;
             let was_est = self.connection_state.is_established();
             //Processing inbound
             self.connection_state.process_packet(messenger, payload.as_ref(), time);
@@ -267,7 +273,7 @@ impl LaminarConnectionManager {
                 info!("Connection established with {:?}", self.peer_address);
             }
         }
-        if at_least_one { 
+        if at_least_one {
             self.connection_state.last_heard = time.clone(); 
         }
 
@@ -276,7 +282,7 @@ impl LaminarConnectionManager {
         match self.connection_state.should_drop(messenger, time) { 
             false => Ok(()),
             true => {
-                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(time)); 
+                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
                 Err(LaminarWrapperError::Disconnect(self.peer_address))
             }
         }
@@ -288,7 +294,7 @@ impl LaminarConnectionManager {
         match self.connection_state.should_drop(messenger, time) {
             false => Ok(()),
             true => {
-                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(time));  
+                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
                 Err(LaminarWrapperError::Disconnect(self.peer_address))
             }
         }
@@ -310,7 +316,7 @@ impl LaminarConnectionManager {
         match self.connection_state.should_drop(&mut self.messenger, time) { 
             false => Ok(()),
             true => {
-                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(time)); 
+                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
                 Err(LaminarWrapperError::Disconnect(self.peer_address))
             }
         }
@@ -337,6 +343,8 @@ pub struct OuterEnvelope {
 /// What type of packet are we sending/receiving? Should 1-to-1 correspond with a type of NetMessage.
 /// On the wire, this will be Vu64's variable-length encoding.
 pub type NetMsgId = u32;
+
+pub const DISCONNECT_RESERVED: NetMsgId = 0;
 
 /// Information required to interconvert between raw packets and structured Rust types.
 #[derive(Debug, Copy, Clone)]
@@ -454,6 +462,49 @@ impl<T: NetMsg> TypedNetMsgReceiver<T> {
     }
 }
 
+//Packet with no destination.
+#[derive(Clone, Debug)]
+pub struct PacketIntermediary { 
+    pub guarantees: PacketGuarantees, 
+    pub stream: StreamSelector, 
+    pub payload: Vec<u8>,
+}
+
+impl PacketIntermediary { 
+    pub fn make_full_packet(self, send_to: SocketAddr) -> laminar::Packet { 
+        use laminar::Packet;
+        // Branch on our message properties to figure out what kind of packet to construct.
+        match self.guarantees {
+            PacketGuarantees::UnreliableUnordered => {
+                // Unordered packets have no concept of a "stream"
+                Packet::unreliable(send_to, self.payload)
+            },
+            PacketGuarantees::UnreliableSequenced => {
+                match self.stream {
+                    StreamSelector::Any => Packet::unreliable_sequenced(send_to, self.payload, None),
+                    StreamSelector::Specific(id) => Packet::unreliable_sequenced(send_to, self.payload, Some(id)),
+                }
+            },
+            PacketGuarantees::ReliableUnordered => {
+                // Unordered packets have no concept of a "stream"
+                Packet::reliable_unordered(send_to, self.payload)
+            },
+            PacketGuarantees::ReliableOrdered => {
+                match self.stream {
+                    StreamSelector::Any => Packet::reliable_ordered(send_to, self.payload, None),
+                    StreamSelector::Specific(id) => Packet::reliable_ordered(send_to, self.payload, Some(id)),
+                }
+            },
+            PacketGuarantees::ReliableSequenced => {
+                match self.stream {
+                    StreamSelector::Any => Packet::reliable_sequenced(send_to, self.payload, None),
+                    StreamSelector::Specific(id) => Packet::reliable_sequenced(send_to, self.payload, Some(id)),
+                }
+            },
+        }
+    }
+}
+
 pub const PACKET_ENCODE_MAX: usize = 1024 * 1024 * 512;
 pub const RECEIVED_PACKET_BROADCASTER_MAX: usize = 2048;
 
@@ -473,12 +524,7 @@ pub trait NetMsg: Serialize + DeserializeOwned + Clone {
         }
     }
     
-    fn construct_packet(&self) -> Result<laminar::Packet, Box<dyn std::error::Error>> {
-        use laminar::Packet;
-
-        // Laminar instances are separated and are not actually responsible for sending the packets. 
-        let send_to = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 54444);
-
+    fn construct_packet(&self) -> Result<PacketIntermediary, Box<dyn std::error::Error>> {
         // Start by writing our tag.
         let encode_start: Vec<u8> = vu64::encode(Self::net_msg_id() as u64).as_ref().to_vec();
         // Write our data.
@@ -486,35 +532,7 @@ pub trait NetMsg: Serialize + DeserializeOwned + Clone {
         rmp_serde::encode::write(&mut buffer, self)?;
         let encoded = buffer.into_inner();
 
-        // Branch on our message properties to figure out what kind of packet to construct.
-        Ok(match Self::net_msg_guarantees() {
-            PacketGuarantees::UnreliableUnordered => {
-                // Unordered packets have no concept of a "stream"
-                Packet::unreliable(send_to, encoded)
-            },
-            PacketGuarantees::UnreliableSequenced => {
-                match Self::net_msg_stream() {
-                    StreamSelector::Any => Packet::unreliable_sequenced(send_to, encoded, None),
-                    StreamSelector::Specific(id) => Packet::unreliable_sequenced(send_to, encoded, Some(id)),
-                }
-            },
-            PacketGuarantees::ReliableUnordered => {
-                // Unordered packets have no concept of a "stream"
-                Packet::reliable_unordered(send_to, encoded)
-            },
-            PacketGuarantees::ReliableOrdered => {
-                match Self::net_msg_stream() {
-                    StreamSelector::Any => Packet::reliable_ordered(send_to, encoded, None),
-                    StreamSelector::Specific(id) => Packet::reliable_ordered(send_to, encoded, Some(id)),
-                }
-            },
-            PacketGuarantees::ReliableSequenced => {
-                match Self::net_msg_stream() {
-                    StreamSelector::Any => Packet::reliable_sequenced(send_to, encoded, None),
-                    StreamSelector::Specific(id) => Packet::reliable_sequenced(send_to, encoded, Some(id)),
-                }
-            },
-        })
+        Ok(PacketIntermediary{ guarantees: Self::net_msg_guarantees(), stream: Self::net_msg_stream(), payload: encoded})
     }
 }
 
@@ -596,6 +614,11 @@ pub enum SessionLayerError {
 pub type PushSender = mpsc::UnboundedSender<Vec<OuterEnvelope>>;
 pub type PushReceiver = mpsc::UnboundedReceiver<Vec<OuterEnvelope>>;
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DisconnectMsg {}
+
+impl_netmsg!(DisconnectMsg, DISCONNECT_RESERVED, ReliableUnordered);
+
 /// One per session, handles both cryptography and Laminar reliable-UDP logic.
 pub struct Session {
     /// Handles reliability-over-UDP.
@@ -614,6 +637,8 @@ pub struct Session {
 
     /// Channels to distribute out inbound packets to the rest of the engine on. 
     received_channels: HashMap<NetMsgId, NetMsgSender>,
+
+    pub disconnect_deliberate: bool,
 }
 
 impl Session {
@@ -629,6 +654,13 @@ impl Session {
             transport_cryptography: connection.transport_cryptography,
             push_channel,
             received_channels: received_message_channels,
+            disconnect_deliberate: false,
+        }
+    }
+    pub fn get_session_name(&self) -> FullSessionName { 
+        FullSessionName {
+            peer_address: self.peer_address.clone(),
+            session_id: self.session_id.clone(),
         }
     }
 
@@ -638,10 +670,7 @@ impl Session {
         let mut buffer = vec![0u8; ( (plaintext.as_ref().len() as usize) * 3) + 64 ];
         let len_written = self.transport_cryptography.write_message(self.local_counter as u64, plaintext.as_ref(), &mut buffer)?;
         buffer.truncate(len_written);
-        let full_session_name = FullSessionName { 
-            session_id: self.session_id, 
-            peer_address: self.peer_address 
-        };
+        let full_session_name = self.get_session_name();
         Ok(
             OuterEnvelope {
                 session_id: full_session_name,
@@ -696,7 +725,9 @@ impl Session {
             match drop_packets.first().unwrap() {
                 laminar::SocketEvent::Timeout(addr) => errors.push(SessionLayerError::LaminarTimeout(addr.clone())),
                 laminar::SocketEvent::Disconnect(addr) => errors.push(SessionLayerError::LaminarDisconnect(addr.clone())),
-                laminar::SocketEvent::Connect(_addr) => {}, // Due to the way my weird Laminar+Tokio+Noise fusion works, this is a non-issue. //errors.push(SessionLayerError::ConnectAfterStarted(addr.clone())),
+                laminar::SocketEvent::Connect(_addr) => {
+                    self.laminar.connection_state.last_heard = time;
+                },
                 laminar::SocketEvent::Packet(_) => unreachable!(), 
             }
         }
@@ -730,17 +761,26 @@ impl Session {
         };
         // Push our messages out to the rest of the application.
         for (message_type, message_buf) in finished_packets { 
-            if let Some(channel) = self.received_channels.get_mut(&(message_type as NetMsgId)) { 
-                match channel.send(message_buf)
-                    .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
-                    Ok(_x) => {},
-                    Err(e) => errors.push(e),
+            match message_type {
+                DISCONNECT_RESERVED => { 
+                    info!("Peer {} has disconnected (deliberately - this is not an error)", self.peer_identity.to_base64()); 
+                    self.disconnect_deliberate = true;
                 }
-            }
-            else {
-                error!("A NetMessage of type {} has been receved from {}, but we have no handlers associated with that type of message. \n It's possible this peer is using a newer version of Gestalt.", 
-                    message_type, self.peer_identity.to_base64());
-                errors.push(SessionLayerError::NoHandler(message_type, self.peer_identity.to_base64()));
+                _ => {
+                    //Non-reserved, game-defined net msg IDs.  
+                    if let Some(channel) = self.received_channels.get_mut(&(message_type as NetMsgId)) { 
+                        match channel.send(message_buf)
+                            .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
+                            Ok(_x) => {},
+                            Err(e) => errors.push(e),
+                        }
+                    }
+                    else {
+                        error!("A NetMessage of type {} has been receved from {}, but we have no handlers associated with that type of message. \n It's possible this peer is using a newer version of Gestalt.", 
+                            message_type, self.peer_identity.to_base64());
+                        errors.push(SessionLayerError::NoHandler(message_type, self.peer_identity.to_base64()));
+                    }
+                }
             }
         }
 
@@ -756,6 +796,10 @@ impl Session {
             }
         }
 
+        if !processed_reply_buf.is_empty() {
+            self.laminar.connection_state.record_send();
+        }
+
         //Send to UDP socket.
         match self.push_channel.send(processed_reply_buf) {
             Ok(()) => {},
@@ -766,19 +810,25 @@ impl Session {
     }
 
     pub async fn process_update(&mut self, time: Instant) -> Result<(), SessionLayerError> {
-        self.laminar.process_update(time)?;
-
         let mut errors: Vec<SessionLayerError> = Vec::default();
+        match self.laminar.process_update(time) {
+            Ok(()) => {},
+            Err(e) => errors.push(e.into()),
+        }
 
-        // Check to see if we need to send anything. 
+        // Check to see if we need to send anything.
         let to_send: Vec<(SocketAddr, Vec<u8>)> = self.laminar.empty_outbox();
         let mut processed_send: Vec<OuterEnvelope> = Vec::with_capacity(to_send.len());
         
-        for (_ip, packet) in to_send { 
+        for (_, packet) in to_send {
             match self.encrypt_packet(&packet) {
                 Ok(envelope) => processed_send.push(envelope),
                 Err(e) => errors.push(e),
             }
+        }
+
+        if !processed_send.is_empty() {
+            self.laminar.connection_state.record_send();
         }
 
         //Send to UDP socket.
@@ -814,6 +864,10 @@ impl Session {
             }
         }
 
+        if !processed_send.is_empty() {
+            self.laminar.connection_state.record_send();
+        }
+
         //Send to UDP socket.
         match self.push_channel.send(processed_send) { 
             Ok(()) => {},
@@ -827,6 +881,16 @@ impl Session {
             _ => Err(SessionLayerError::ErrorBatch(errors))
         }
     }
+
+    /// Network connection CPR.
+    pub async fn force_heartbeat(&mut self) -> Result<(), laminar::error::ErrorKind> { 
+        let addr = self.peer_address;
+        let packets = self.laminar.connection_state.process_outgoing(laminar::packet::PacketInfo::heartbeat_packet(&[]), None, Instant::now())?;
+        for packet in packets { 
+            self.laminar.messenger.send_packet(&self.peer_address, &packet.contents());
+        }
+        Ok(())
+    } 
 }
 
 /// Meant to be run inside a Tokio runtime - this will loop infinitely.
@@ -839,12 +903,18 @@ impl Session {
 ///
 pub async fn handle_session(mut session_manager: Session,
                         mut incoming_packets: mpsc::UnboundedReceiver<Vec<OuterEnvelope>>,
-                        mut send_channel: mpsc::UnboundedReceiver<Vec<laminar::Packet>>,
-                        session_tick: Duration) { 
+                        mut send_channel: mpsc::UnboundedReceiver<Vec<PacketIntermediary>>,
+                        session_tick: Duration,
+                        kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
+                        mut kill_from_outside: tokio::sync::oneshot::Receiver<()>) { 
     let mut ticker = tokio::time::interval(session_tick);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
     info!("Handling session for peer {}...", session_manager.peer_identity.to_base64());
-    loop {
+
+    let peer_address = session_manager.peer_address.clone();
+    let mut keep_running = true;
+    let mut error_state = false;
+    while keep_running {
         tokio::select!{
             // Inbound packets
             // Per tokio documentation - "This method is cancel safe. If recv is used as the event in a tokio::select! statement and some other branch completes first, it is guaranteed that no messages were received on this channel."
@@ -854,43 +924,77 @@ pub async fn handle_session(mut session_manager: Session,
                         let ingest_results = session_manager.ingest_packets(inbound_packets, Instant::now()).await;
                         if !ingest_results.is_empty() { 
                             let mut built_string = String::default();
-                            for errorout in ingest_results { 
+                            for errorout in ingest_results.iter() { 
                                 let to_append = format!("* {:?} \n", errorout);
                                 built_string.push_str(to_append.as_str());
                             }
                             error!("Errors encountered parsing inbound packets in a session with {}: \n {}", session_manager.peer_identity.to_base64(), built_string);
+                            kill_from_inside.send((session_manager.get_session_name() ,  ingest_results)).unwrap();
+                            keep_running = false;
+                            error_state = true;
+                            break;
                         }
                     }, 
                     None => { 
                         info!("Connection closed for {}, dropping session state.", session_manager.peer_identity.to_base64());
+                        kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+                        keep_running = false;
+                        error_state = true;
                         break;
                     }
+                }
+                if session_manager.disconnect_deliberate { 
+                    kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+                    keep_running = false;
+                    break;
                 }
             },
             send_packets_maybe = (&mut send_channel).recv() => {
                 match send_packets_maybe {
-                    Some(send_packets) => { 
-                        let serialize_results = session_manager.process_outbound(send_packets, Instant::now()).await;
+                    Some(send_packets) => {
+                        session_manager.laminar.connection_state.record_send();
+                        let serialize_results = session_manager.process_outbound(send_packets.into_iter().map(|intermediary| intermediary.make_full_packet(peer_address)), Instant::now()).await;
                         if let Err(e) = serialize_results {
                             error!("Error encountered attempting to send a packet to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
+                            kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
+                            keep_running = false;
+                            error_state = true;
+                            break;
                         }
                     }, 
                     None => { 
                         info!("Connection closed for {}, dropping session state.", session_manager.peer_identity.to_base64());
+                        kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+                        keep_running = false;
+                        error_state = true;
                         break;
                     }
                 }
+                if session_manager.disconnect_deliberate { 
+                    kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+                    keep_running = false;
+                    break;
+                }
             },
-            _ = (&mut ticker).tick() => { 
+            _ = (&mut ticker).tick() => {
                 let update_results = session_manager.process_update(Instant::now()).await;
                 if let Err(e) = update_results {
-                    info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now())); 
+                    info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now()), session_manager.laminar.connection_state.is_established()); 
                     error!("Error encountered while ticking network connection to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
+                    kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
+                    keep_running = false;
+                    error_state = true;
+                    break;
                 }
+            }
+            kill_maybe = (&mut kill_from_outside) => { 
+                info!("Shutting down session with user {}", session_manager.peer_identity.to_base64() );
+                keep_running = false;
+                break;
             }
         }
     }
-    error!("A session manager for a session between {} (us) and {} (peer) has stopped looping.", session_manager.local_identity.public.to_base64(), session_manager.peer_identity.to_base64());
+    //error!("A session manager for a session between {} (us) and {} (peer) has stopped looping.", session_manager.local_identity.public.to_base64(), session_manager.peer_identity.to_base64());
 }
 
 // Each packet on the wire:
@@ -936,18 +1040,18 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
             local_identity: IdentityKeyPair, 
             received_message_channels: HashMap<NetMsgId, NetMsgSender>,
             laminar_config: LaminarConfig,
-            session_tick_interval: Duration,) {
+            session_tick_interval: Duration,
+            mut quit_handler: tokio::sync::oneshot::Receiver<()>) {
     
     info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), role, address);
     let socket = if role == NetworkRole::Client {
-        let mut socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
+        let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
         socket.connect(address).await.unwrap();
         socket
     }
     else {
         UdpSocket::bind(address).await.unwrap()
     };
-    println!("shoogly");
     info!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), role);
 
     const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
@@ -964,16 +1068,25 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
     let (push_sender, mut push_receiver): (PushSender, PushReceiver) = mpsc::unbounded_channel(); 
     // Per-session channels for routing incoming UDP packets to sessions.
     let mut inbound_channels: HashMap<FullSessionName, mpsc::UnboundedSender<Vec<OuterEnvelope>> > = HashMap::new();
+
+    // Sessions' way of letting us know its their time to go.
+    let (kill_from_inside_sender, mut kill_from_inside_receiver) = mpsc::unbounded_channel::<(FullSessionName, Vec<SessionLayerError>)>();
+    // This is how we shoot the other task in the head.
+    let mut session_kill_from_outside: HashMap<FullSessionName, tokio::sync::oneshot::Sender<()>> = HashMap::new();
+
+    let mut session_to_identity: HashMap<FullSessionName, NodeIdentity> = HashMap::new();
     
     info!("Network system initialized. Our role is {:?}, our address is {:?}, and our identity is {}", &role, &socket.local_addr(), local_identity.public.to_base64());
+    let mut join_handles = Vec::new(); 
 
-    loop {
+    let mut continue_running = true;
+    while continue_running {
         tokio::select!{
             // A packet has been received. 
             received_maybe = (&socket).recv_from(&mut recv_buf) => {
                 // TODO: Better error handling later.
-                match received_maybe { 
-                    Ok((len_read, peer_address)) => { 
+                match received_maybe {
+                    Ok((len_read, peer_address)) => {
                         assert!(len_read >= SESSION_ID_LEN + COUNTER_LEN + 1);
                         let mut session_id = [0u8; SESSION_ID_LEN];
                         let mut counter_bytes = [0u8; COUNTER_LEN];
@@ -1010,6 +1123,9 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                         ciphertext,
                                     }]).unwrap()
                                 }
+                                else { 
+                                    warn!("Zero-length message on session {:?}", &session_name);
+                                }
                             },
                             None => {
                                 if role == NetworkRole::Server {
@@ -1019,19 +1135,29 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                     };
                                     match anticipated_clients.remove(&partial_session_name) {
                                         Some(connection) => {
+                                            info!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
                                             //Communication with the rest of the engine.
                                             let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
                                             match net_channel::register_channel(connection.peer_identity.clone(), game_to_session_sender) { 
                                                 Ok(()) => {
                                                     info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
-                                                    let session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
+                                                    let mut session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
+                                                    session.laminar.connection_state.record_recv();
                                                     //Make a channel 
                                                     let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
-                                    
                                                     inbound_channels.insert(session_name, from_net_sender);
-                                                    tokio::spawn(
-                                                        handle_session(session, from_net_receiver, game_to_session_receiver, session_tick_interval.clone())
-                                                    );
+
+                                                    let (kill_from_outside_sender, kill_from_outside_receiver) = tokio::sync::oneshot::channel::<()>();
+                                                    session_kill_from_outside.insert(session.get_session_name(), kill_from_outside_sender);
+                                    
+                                                    let killer_clone = kill_from_inside_sender.clone();
+                                                    session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
+                                                    let jh = tokio::spawn( async move {
+                                                        session.force_heartbeat().await.unwrap();
+                                                        handle_session(session, from_net_receiver, game_to_session_receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
+                                                    });
+
+                                                    join_handles.push(jh);
 
                                                     if message_length > 0 {
                                                         let ciphertext = (&recv_buf[cursor..cursor+message_length as usize]).to_vec();
@@ -1042,6 +1168,16 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                                             },
                                                             counter,
                                                             ciphertext,
+                                                        }]).unwrap()
+                                                    }
+                                                    else { 
+                                                        inbound_channels.get(&session_name).unwrap().send(vec![OuterEnvelope {
+                                                            session_id: FullSessionName { 
+                                                                session_id, 
+                                                                peer_address,
+                                                            },
+                                                            counter,
+                                                            ciphertext: Vec::new(),
                                                         }]).unwrap()
                                                     }
                                                 },
@@ -1064,8 +1200,15 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                         }
                     }
                     Err(e) => { 
-                        error!("Error while polling for UDP packets: {:?}", e); 
-                        panic!();
+                        if e.raw_os_error() == Some(10054) { 
+                            //An existing connection was forcibly closed by the remote host.
+                            //ignore - timeout will catch it.
+                            warn!("Bad disconnect, an existing connection was forcibly closed by the remote host.");
+                        }
+                        else { 
+                            error!("Error while polling for UDP packets: {:?}", e); 
+                            panic!();
+                        }
                     }
                 }
             }
@@ -1102,6 +1245,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                 //Todo: Senders.
 
                 if role == NetworkRole::Server {
+                    info!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
                     anticipated_clients.insert( PartialSessionName{
                         session_id: connection.session_id.clone(), 
                         peer_address: connection.peer_address.ip(),
@@ -1113,14 +1257,23 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                     match net_channel::register_channel(connection.peer_identity.clone(), game_to_session_sender) { 
                         Ok(()) => { 
                             info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
-                            let session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
+                            let mut session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
+                            session.laminar.connection_state.record_recv();
                             //Make a channel 
                             let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
-            
                             inbound_channels.insert(session_name, from_net_sender);
-                            tokio::spawn(
-                                handle_session(session, from_net_receiver, game_to_session_receiver, session_tick_interval.clone())
-                            );
+
+                            let (kill_from_outside_sender, kill_from_outside_receiver) = tokio::sync::oneshot::channel::<()>();
+                            session_kill_from_outside.insert(session.get_session_name(), kill_from_outside_sender);
+                                                
+                            let killer_clone = kill_from_inside_sender.clone();
+                            session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
+                            let jh = tokio::spawn( async move {
+                                session.force_heartbeat().await.unwrap();
+                                handle_session(session, from_net_receiver, game_to_session_receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
+                            });
+
+                            join_handles.push(jh);
                         }, 
                         Err(e) => { 
                             error!("Error initializing new session: {:?}", e);
@@ -1128,6 +1281,54 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                         }
                     }
                 }
+            }
+            // Has one of our sessions failed or disconnected? 
+            kill_maybe = (&mut kill_from_inside_receiver).recv() => { 
+                if let Some((session_kill, errors)) = kill_maybe { 
+                    if errors.is_empty() { 
+                        info!("Closing connection for a session with {:?}.", session_kill.peer_address); 
+                    }
+                    else { 
+                        info!("Closing connection for a session with {:?}, due to errors: {:?}", session_kill.peer_address, errors); 
+                    }
+                    let session = session_to_identity.get(&session_kill).unwrap(); 
+                    net_channel::drop_channel(session).unwrap();
+                    inbound_channels.remove(&session_kill); 
+                    session_kill_from_outside.remove(&session_kill);
+                }
+            }
+            quit_maybe = (&mut quit_handler) => {
+                if quit_maybe.is_ok() { 
+                    info!("Shutting down network system.");
+                    // Notify sessions we're done.
+                    for (peer_address, _) in inbound_channels.iter() { 
+                        let peer_ident = session_to_identity.get(&peer_address).unwrap();
+                        net_channel::send_to(&DisconnectMsg{}, &peer_ident).unwrap();
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await; 
+                    // Clear out remaining messages.
+                    while let Ok(messages) = (&mut push_receiver).try_recv() {
+                        for message in messages {
+                            let encoded_len = encode_outer_envelope(&message, &mut send_buf);
+
+                            //Push
+                            match role {
+                                NetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
+                                _ => socket.send_to(&send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
+                            };
+                        }
+                    }
+                    // Notify sessions we're done.
+                    for (session, channel) in session_kill_from_outside { 
+                        info!("Terminating session {:?}", session);
+                        channel.send(()).unwrap();
+                    }
+                    for jh in join_handles { 
+                        jh.abort();
+                    }
+                    continue_running = false; 
+                    break;
+                } 
             }
         }
     }
@@ -1179,6 +1380,8 @@ mod tests {
         let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender.clone())]);
         let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender.clone())]);
         
+        let (_quit_server_s, quit_server_r) = tokio::sync::oneshot::channel();
+        let (_quit_client_s, quit_client_r) = tokio::sync::oneshot::channel();
         //Launch server
         tokio::spawn(
             run_network_system(NetworkRole::Server,
@@ -1187,7 +1390,8 @@ mod tests {
                 server_key_pair.clone(), 
                 server_channels,
                 LaminarConfig::default(),
-                Duration::from_millis(50))
+                Duration::from_millis(50),
+                quit_server_r)
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
         tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
@@ -1200,7 +1404,8 @@ mod tests {
                 client_key_pair.clone(),
                 client_channels,
                 LaminarConfig::default(),
-                Duration::from_millis(50))
+                Duration::from_millis(50),
+                quit_client_r)
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
         let client_completed_connection = preprotocol_connect_to_server(client_key_pair.clone(),

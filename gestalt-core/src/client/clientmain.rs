@@ -266,43 +266,7 @@ pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], 
     todo!()
 }
 
-pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendChannel<VoxelChangeRequest>, voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, server_identity: Option<NodeIdentity>) {
-    let event_loop = winit::event_loop::EventLoop::new();
-    // Open config
-    let mut open_options = std::fs::OpenOptions::new();
-    open_options.read(true).append(true).create(true);
-
-    let config_maybe: Result<ClientConfig, StartClientError> = open_options
-        .open(CLIENT_CONFIG_FILENAME)
-        .map_err(StartClientError::from)
-        .and_then(|file| {
-            let mut buf_reader = BufReader::new(file);
-            let mut contents = String::new();
-            buf_reader
-                .read_to_string(&mut contents)
-                .map_err(StartClientError::from)?;
-            Ok(contents)
-        })
-        .and_then(|e| ron::from_str(e.as_str()).map_err(StartClientError::from));
-    //If that didn't load, just use built-in defaults.
-    let config: ClientConfig = match config_maybe {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(
-                "Couldn't open client config, using defaults. Error was: {:?}",
-                e
-            );
-            ClientConfig::default()
-        }
-    };
-
-    // Let the server know we're joining if they're there. 
-    if let Some(server) = server_identity.as_ref() {
-        let join_msg = JoinDefaultEntry {
-            display_name: config.your_display_name.clone(),
-        };
-        net_channel::send_to(&join_msg, server).unwrap(); 
-    }
+pub fn get_lobby_world_id(pubkey: &NodeIdentity) -> WorldId { 
 
     // Figure out lobby world ID
     let world_defaults_path = path_local_worlds().join("world_defaults.ron");
@@ -357,10 +321,79 @@ pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendCha
             world_uuid
         },
     };
-    let world_id = WorldId { 
+    WorldId { 
         uuid: lobby_world_id,
-        host: identity_keys.public,
+        host: pubkey.clone(),
+    }
+}
+
+pub fn load_or_generate_dev_world(world: &mut TileSpace, world_id: &WorldId, chunk_range: VoxelRange<i32>, mut terrain_notify: Option<&mut TerrainRenderer>) -> Result<(), Box<dyn Error>> { 
+    let worldgen_start = Instant::now();
+    // Build chunks and then immediately let the mesher know they're new. 
+    for chunk_position in chunk_range {
+        let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
+        let chunk = if chunk_file_path.exists() {
+            fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position)?
+        }
+        else {
+            gen_test_chunk(chunk_position)
+        };
+        world.ingest_loaded_chunk(chunk_position, chunk)?;
+        if let Some(terrain_renderer) = terrain_notify.as_mut() {
+            terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
+        }
+    }
+    let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
+    info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+    Ok(())
+}
+
+// Never returns. Unfortunately the event loop's exit functionality does not just destroy the event loop, it closes the program.
+pub fn run_client(identity_keys: IdentityKeyPair, 
+        voxel_event_sender: NetSendChannel<VoxelChangeRequest>, 
+        mut voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, 
+        server_identity: Option<NodeIdentity>, 
+        async_runtime: tokio::runtime::Runtime,
+        quit_sender: tokio::sync::mpsc::UnboundedSender<()>,
+        mut quit_ready_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,) {
+    let event_loop = winit::event_loop::EventLoop::new();
+    // Open config
+    let mut open_options = std::fs::OpenOptions::new();
+    open_options.read(true).append(true).create(true);
+
+    let config_maybe: Result<ClientConfig, StartClientError> = open_options
+        .open(CLIENT_CONFIG_FILENAME)
+        .map_err(StartClientError::from)
+        .and_then(|file| {
+            let mut buf_reader = BufReader::new(file);
+            let mut contents = String::new();
+            buf_reader
+                .read_to_string(&mut contents)
+                .map_err(StartClientError::from)?;
+            Ok(contents)
+        })
+        .and_then(|e| ron::from_str(e.as_str()).map_err(StartClientError::from));
+    //If that didn't load, just use built-in defaults.
+    let config: ClientConfig = match config_maybe {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                "Couldn't open client config, using defaults. Error was: {:?}",
+                e
+            );
+            ClientConfig::default()
+        }
     };
+
+    // Let the server know we're joining if they're there. 
+    if let Some(server) = server_identity.as_ref() {
+        let join_msg = JoinDefaultEntry {
+            display_name: config.your_display_name.clone(),
+        };
+        net_channel::send_to(&join_msg, server).unwrap(); 
+    }
+
+    let world_id = get_lobby_world_id(&identity_keys.public);
 
     // Set up window and event loop.
     let window_builder = config.display_properties.to_window_builder();
@@ -469,21 +502,7 @@ pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendCha
     // Set up our voxel mesher.
     let mut terrain_renderer = TerrainRenderer::new(64);
 
-    let worldgen_start = Instant::now();
-    // Build chunks and then immediately let the mesher know they're new. 
-    for chunk_position in test_world_range {
-        //let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
-        //let chunk = if chunk_file_path.exists() {
-        //    fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
-        //}
-        //else {
-        let chunk = gen_test_chunk(chunk_position);
-        //};
-        world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
-        terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
-    }
-    let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
-    info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+    load_or_generate_dev_world(&mut world_space, &world_id, test_world_range, Some(&mut terrain_renderer)).unwrap();
 
     //Remesh
     let meshing_start = Instant::now();
@@ -546,6 +565,15 @@ pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendCha
 
     event_loop.run(move |event, _, control| {
         let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
+        if let Ok(events) = voxel_event_receiver.try_recv() { 
+            for (_ident, announce) in events { 
+                let old_value = world_space.get(announce.pos).unwrap();
+                if announce.new_tile != *old_value { 
+                    world_space.set(announce.pos, announce.new_tile).unwrap(); 
+                    terrain_renderer.notify_changed(&announce.pos);
+                }
+            }
+        }
         match event {
             //WindowEvent::MouseInput is more useful for GUI input 
             winit::event::Event::WindowEvent {
@@ -615,7 +643,7 @@ pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendCha
                                     pos: result_position.clone(),
                                     new_tile: air_id,
                                 };
-                                net_channel::send_to(&voxel_msg, &server).unwrap();
+                                voxel_event_sender.send(&voxel_msg).unwrap();
                             }
 
                             terrain_renderer.notify_changed(&result_position);
@@ -661,7 +689,7 @@ pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendCha
                                             pos: result_position.clone(),
                                             new_tile: stone_id,
                                         };
-                                        net_channel::send_to(&voxel_msg, &server).unwrap();
+                                        voxel_event_sender.send(&voxel_msg).unwrap();
                                     }
 
                                     terrain_renderer.notify_changed(&placement_position);
@@ -718,6 +746,12 @@ pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendCha
                     }
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = false; 
+                    }
+                    else if input.virtual_keycode == Some(VirtualKeyCode::Escape) { 
+                        //Quit
+                        quit_sender.send(()).unwrap();
+                        async_runtime.block_on(quit_ready_receiver.recv());
+                        *control = ControlFlow::Exit;
                     }
                     let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);
                     if let Some(dir) = dir_maybe { 

@@ -34,7 +34,7 @@ use hashbrown::{HashSet, HashMap};
 use mlua::LuaOptions;
 use tokio::sync::mpsc;
 
-use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server, NetworkRole}, GESTALT_PORT, run_network_system, LaminarConfig, TypedNetMsgReceiver, net_channel::{NetSendChannel, self}, NetMsg}, common::{identity::generate_local_keys, voxelmath::{VoxelRange, VoxelPos}}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, client::clientmain::gen_test_chunk, world::{tilespace::TileSpace, VoxelStorage}};
+use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server, NetworkRole}, GESTALT_PORT, run_network_system, LaminarConfig, TypedNetMsgReceiver, net_channel::{NetSendChannel, self}, NetMsg, DisconnectMsg}, common::{identity::generate_local_keys, voxelmath::{VoxelRange, VoxelPos}}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, client::clientmain::{gen_test_chunk, get_lobby_world_id, load_or_generate_dev_world}, world::{tilespace::TileSpace, VoxelStorage}};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -194,6 +194,7 @@ fn main() {
     program_args.add_arg(vec!["--join", "-j"], true);
     program_args.add_arg(vec!["--server", "-s"], true);
     program_args.add_arg(vec!["--verbose", "-v"], false);
+    program_args.add_arg(vec!["--nosave", "-n"], false);
 
     let matches = program_args.get_matches(arg_list);
     
@@ -310,15 +311,17 @@ fn main() {
         info!("Spawning preprotocol listener task.");
         async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender ));
 
+        let (quit_send, quit_receive) = tokio::sync::oneshot::channel();
         info!("Spawning network system task.");
-        async_runtime.spawn(
+        let net_system_join_handle = async_runtime.spawn(
             run_network_system(NetworkRole::Server,
                 udp_address, 
                 connect_receiver,
                 keys.clone(), 
                 HashMap::from([(VoxelChangeRequest::net_msg_id(), server_voxel_sender_from_client), (JoinDefaultEntry::net_msg_id(), server_join_sender_from_client)]),
                 laminar_config,
-                Duration::from_millis(250))
+                Duration::from_millis(250),
+                quit_receive)
         );
 
         //let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(3,3,3), lower: vpos!(-2,-2,-2) };
@@ -327,6 +330,13 @@ fn main() {
         //    let chunk = gen_test_chunk(chunk_position);
         //    world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
         //}
+        
+        // Set up our test world a bit 
+        //let mut world_space = TileSpace::new();
+        //let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(3,3,3), lower: vpos!(-2,-2,-2) };
+
+        //let world_id = get_lobby_world_id(&keys.public);
+        //load_or_generate_dev_world(&mut world_space, &world_id, test_world_range, None).unwrap();
         
         info!("Launching server mainloop.");
         let mut total_changes: Vec<VoxelChangeAnnounce> = Vec::new();
@@ -361,6 +371,8 @@ fn main() {
                 }
             }
         });
+        quit_send.send(());
+        async_runtime.block_on(net_system_join_handle);
     }
     else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") {
         let address: SocketAddr = if raw_addr.contains(':') { 
@@ -370,14 +382,16 @@ fn main() {
             SocketAddr::new(ip_addr, PREPROTCOL_PORT)
         };
 
+        let (net_quit_send, net_quit_receive) = tokio::sync::oneshot::channel();
         let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
-        async_runtime.spawn(
+        let net_system_join_handle = async_runtime.spawn(
             run_network_system( NetworkRole::Client,  address, 
                 connect_receiver,
                 keys.clone(), 
                 HashMap::from([(VoxelChangeAnnounce::net_msg_id(), client_voxel_sender_from_server), (JoinAnnounce::net_msg_id(), client_join_sender_from_server)]),
                 laminar_config,
-                Duration::from_millis(250))
+                Duration::from_millis(250),
+                net_quit_receive)
         );
         let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
                 Duration::new(5, 0))).unwrap();
@@ -390,14 +404,37 @@ fn main() {
         
         async_runtime.spawn( async move { 
             loop { 
-                let join_msgs = client_join_receiver_from_server.recv().await.unwrap();
-                for (_server_ident, JoinAnnounce{identity, display_name }) in join_msgs { 
-                    info!("Peer {} joined with display name {}", identity.to_base64(), &display_name);
+                match client_join_receiver_from_server.recv().await { 
+                    Ok(join_msgs) => {
+                        for (_server_ident, JoinAnnounce{identity, display_name }) in join_msgs { 
+                            info!("Peer {} joined with display name {}", identity.to_base64(), &display_name);
+                        }
+                    }
+                    Err(_e) => { 
+                        info!("New join handler closed.");
+                        break;
+                    }
                 }
             }
         });
 
-        client::clientmain::run_client(keys, voxel_event_sender, client_voxel_receiver_from_server, Some(server_identity));
+        let (quit_sender, mut quit_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (quit_ready_sender, quit_ready_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        async_runtime.spawn( async move {
+            quit_receiver.recv().await;
+            net_quit_send.send(()).unwrap();
+            net_system_join_handle.await;
+            quit_ready_sender.send(()).unwrap();
+        });
+        client::clientmain::run_client(keys, 
+                voxel_event_sender, 
+                client_voxel_receiver_from_server, 
+                Some(server_identity),
+                async_runtime,
+                quit_sender,
+                quit_ready_receiver,
+            );
     }
     else {
         let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::mpsc::unbounded_channel(); 
@@ -406,13 +443,27 @@ fn main() {
         async_runtime.spawn( async move { 
             loop { 
                 //redirect to /dev/null
-                let msgs = voxel_event_receiver.recv().await.unwrap();
-                drop(msgs);
+                if let Some(msgs) = voxel_event_receiver.recv().await { 
+                    drop(msgs);
+                }
             }
         });
 
-        client::clientmain::run_client(keys, voxel_event_sender, client_voxel_receiver_from_server, None);
-    }
+        let (quit_sender, mut quit_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (quit_ready_sender, quit_ready_receiver) = tokio::sync::mpsc::unbounded_channel();
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
+        async_runtime.spawn( async move {
+            quit_receiver.recv().await;
+            quit_ready_sender.send(()).unwrap();
+        });
+
+        client::clientmain::run_client(keys, 
+            voxel_event_sender, 
+            client_voxel_receiver_from_server, 
+            None,
+            async_runtime,
+            quit_sender,
+            quit_ready_receiver,
+            );
+    }
 }

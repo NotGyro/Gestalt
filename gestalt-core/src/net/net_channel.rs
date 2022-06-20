@@ -7,7 +7,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use hashbrown::HashMap;
 use lazy_static::lazy_static;
 
-use super::NetMsg;
+use super::{NetMsg, PacketIntermediary};
 
 #[derive(thiserror::Error, Debug)]
 pub enum NetSendError {
@@ -20,13 +20,13 @@ pub enum NetSendError {
 }
 
 pub struct NetSendChannel<T> where T: Send + NetMsg { 
-    pub(in crate::net::net_channel) inner: UnboundedSender<Vec<laminar::Packet>>,
+    pub(in crate::net::net_channel) inner: UnboundedSender<Vec<PacketIntermediary>>,
     //pub(in crate::net::net_channel) peer_addr: SocketAddr,
     _t: PhantomData<T>,
 }
 
 impl<T> NetSendChannel<T>  where T: Send + NetMsg {
-    pub fn new(sender: UnboundedSender<Vec<laminar::Packet>>) -> Self { 
+    pub fn new(sender: UnboundedSender<Vec<PacketIntermediary>>) -> Self { 
         NetSendChannel{ 
             inner: sender,
             //peer_addr,
@@ -43,7 +43,7 @@ impl<T> NetSendChannel<T>  where T: Send + NetMsg {
         Ok(())
     }
     pub fn send_multi(&self, messages: Vec<&T>) -> Result<(), NetSendError> {
-        let mut packets: Vec<laminar::Packet> = Vec::default();
+        let mut packets: Vec<PacketIntermediary> = Vec::default();
 
         for message in messages {
             let packet = message.construct_packet()
@@ -60,7 +60,7 @@ impl<T> NetSendChannel<T>  where T: Send + NetMsg {
 
 
 pub struct NetMsgSystem {
-    pub sender_channels: HashMap<NodeIdentity, UnboundedSender<Vec<laminar::Packet>>>
+    pub sender_channels: HashMap<NodeIdentity, UnboundedSender<Vec<PacketIntermediary>>>
 }
 
 lazy_static!{
@@ -79,7 +79,7 @@ pub enum NetMsgSubscribeError {
     RegisterAlreadyRegistered(String),
 }
 
-pub fn register_channel(peer: NodeIdentity, sender: UnboundedSender<Vec<laminar::Packet>>) -> Result<(), NetMsgSubscribeError>{ 
+pub fn register_channel(peer: NodeIdentity, sender: UnboundedSender<Vec<PacketIntermediary>>) -> Result<(), NetMsgSubscribeError>{ 
     let arc = NET_MSG_SYSTEM.clone();
     let mut system_reference = arc.lock();
     if system_reference.sender_channels.get(&peer).is_some() {
@@ -89,6 +89,12 @@ pub fn register_channel(peer: NodeIdentity, sender: UnboundedSender<Vec<laminar:
         system_reference.sender_channels.insert(peer, sender);
         Ok(())
     }
+}
+pub fn drop_channel(peer: &NodeIdentity) -> Result<(), NetMsgSubscribeError>{ 
+    let arc = NET_MSG_SYSTEM.clone();
+    let mut system_reference = arc.lock();
+    system_reference.sender_channels.remove(&peer);
+    Ok(())
 }
 
 pub fn subscribe_typed<T: NetMsg + Send>(peer: &NodeIdentity) -> Result<NetSendChannel<T>, NetMsgSubscribeError>{ 
@@ -101,7 +107,7 @@ pub fn subscribe_typed<T: NetMsg + Send>(peer: &NodeIdentity) -> Result<NetSendC
         None => Err(NetMsgSubscribeError::NoChannel(peer.to_base64())),
     }
 }
-pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<UnboundedSender<Vec<laminar::Packet>>, NetMsgSubscribeError> {
+pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<UnboundedSender<Vec<PacketIntermediary>>, NetMsgSubscribeError> {
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {
@@ -162,7 +168,7 @@ pub fn send_multi_to_all<T: NetMsg + Send>(messages: &Vec<T>) -> Result<(), NetS
 
     for (_peer, channel ) in system_reference.sender_channels.iter() {
         
-        let mut packets: Vec<laminar::Packet> = Vec::default();
+        let mut packets: Vec<PacketIntermediary> = Vec::default();
 
         for message in messages.iter() {
             let packet = message.construct_packet()
@@ -181,7 +187,7 @@ pub fn send_multi_to<T: NetMsg + Send>(messages: &Vec<T>, peer: &NodeIdentity) -
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {
         Some(sender) => {
-            let mut packets: Vec<laminar::Packet> = Vec::default();
+            let mut packets: Vec<PacketIntermediary> = Vec::default();
 
             for message in messages.iter() {
                 let packet = message.construct_packet()

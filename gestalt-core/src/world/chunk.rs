@@ -650,7 +650,7 @@ pub fn deserialize_small_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -
 pub fn deserialize_large_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -> Result<[u16; CHUNK_SIZE_CUBED], ChunkIoError> {
     let output = unsafe {
         // Avoid writing CHUNK_SIZE_CUBED zeroes - we will need to tell Rust to do things it considers evil. 
-        let mut buffer =  MaybeUninit::<[u16; CHUNK_SIZE_CUBED]>::uninit();
+        let mut buffer = Box::new(MaybeUninit::<[u16; CHUNK_SIZE_CUBED]>::uninit());
         let ptr = { &mut *buffer.as_mut_ptr() };
         // Read these things individually to ensure endianness isn't mangled. TODO: find a way to optimize this that doesn't break with endianness stuff.
         for i in 0..CHUNK_SIZE_CUBED { 
