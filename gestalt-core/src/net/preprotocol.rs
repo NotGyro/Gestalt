@@ -647,6 +647,9 @@ pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server
 
 #[tokio::test(flavor = "multi_thread")]
 async fn preprotocol_connect_to_localhost() {
+    use crate::net::tests::NET_TEST_MUTEX;    
+    let _guard = NET_TEST_MUTEX.lock();
+    
     let server_key_pair = IdentityKeyPair::generate_for_tests();
     let client_key_pair = IdentityKeyPair::generate_for_tests();
     let (serv_completed_sender, mut serv_completed_receiver) = mpsc::unbounded_channel();

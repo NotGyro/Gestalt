@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channel::NetSendChannel, NetMsgReceiver, TypedNetMsgReceiver}, message_types::voxel::{VoxelChangeRequest, VoxelChangeAnnounce}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -264,6 +264,8 @@ pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], 
     todo!()
 }
 
+//, voxel_event_sender: NetSendChannel<VoxelChangeRequest>, voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>)
+
 pub fn run_client(identity_keys: IdentityKeyPair) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
@@ -405,7 +407,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
     )
     .unwrap();
 
-    println!(
+    info!(
         "Launching with rendering device: {:?}",
         &renderer.adapter_info
     );
@@ -455,20 +457,20 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     // Set up our test world a bit 
     let mut world_space = TileSpace::new();
-    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(4,4,4), lower: vpos!(-3,-3,-3) };
+    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(3,3,3), lower: vpos!(-2,-2,-2) };
     // Set up our voxel mesher.
     let mut terrain_renderer = TerrainRenderer::new(64);
 
     let worldgen_start = Instant::now();
     // Build chunks and then immediately let the mesher know they're new. 
     for chunk_position in test_world_range {
-        let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
-        let chunk = if chunk_file_path.exists() {
-            fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
-        }
-        else {
-            gen_test_chunk(chunk_position)
-        };
+        //let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
+        //let chunk = if chunk_file_path.exists() {
+        //    fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
+        //}
+        //else {
+        let chunk = gen_test_chunk(chunk_position);
+        //};
         world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
         terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
     }

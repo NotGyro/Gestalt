@@ -59,7 +59,7 @@ use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;*/
 
 pub mod handshake;
-pub mod net_channels;
+pub mod net_channel;
 pub mod preprotocol;
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -951,7 +951,7 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
     let socket = if role == NetworkRole::Client { 
         UdpSocket::bind(SocketAddr::from((our_address.ip(), 0u16)) ).await.unwrap()
     }
-    else { 
+    else {
         UdpSocket::bind(our_address).await.unwrap()
     };
 
@@ -1026,7 +1026,7 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
                                         Some(connection) => {
                                             //Communication with the rest of the engine.
                                             let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
-                                            match net_channels::register_channel(connection.peer_identity.clone(), connection.peer_address.clone(), game_to_session_sender) { 
+                                            match net_channel::register_channel(connection.peer_identity.clone(), connection.peer_address.clone(), game_to_session_sender) { 
                                                 Ok(()) => {
                                                     info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                                                     let session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
@@ -1131,7 +1131,7 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
                 else {
                     //Communication with the rest of the engine. 
                     let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
-                    match net_channels::register_channel(connection.peer_identity.clone(), connection.peer_address.clone(), game_to_session_sender) { 
+                    match net_channel::register_channel(connection.peer_identity.clone(), connection.peer_address.clone(), game_to_session_sender) { 
                         Ok(()) => { 
                             info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                             let session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
@@ -1159,13 +1159,18 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use super::*;
+    use parking_lot::Mutex;
     use serde::Serialize;
-    use log::LevelFilter;
     use serde::Deserialize;
-    use simplelog::TermLogger;
-    use super::net_channels::NetSendChannel;
+    use super::net_channel::NetSendChannel;
     use super::preprotocol::launch_preprotocol_listener;
     use super::preprotocol::preprotocol_connect_to_server;
+    use lazy_static::lazy_static;
+
+    lazy_static! {
+        /// Used to keep tests which use real network i/o from clobbering eachother. 
+        pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());
+    }
  
     #[derive(Clone, Serialize, Deserialize, Debug)]
     struct TestNetMsg {
@@ -1175,7 +1180,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn session_with_localhost() {
-        let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
+        let _guard = NET_TEST_MUTEX.lock();
+        //let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
 
         let server_key_pair = IdentityKeyPair::generate_for_tests();
         let client_key_pair = IdentityKeyPair::generate_for_tests();
@@ -1225,7 +1231,7 @@ mod tests {
         let test = TestNetMsg { 
             message: String::from("Beep!"), 
         };
-        let message_sender: NetSendChannel<TestNetMsg> = net_channels::subscribe_typed(&server_key_pair.public).unwrap();
+        let message_sender: NetSendChannel<TestNetMsg> = net_channel::subscribe_typed(&server_key_pair.public).unwrap();
         info!("Attempting to send a message to {}", server_key_pair.public.to_base64());
         message_sender.send(&test).unwrap();
 
@@ -1245,7 +1251,7 @@ mod tests {
         let test_reply = TestNetMsg { 
             message: String::from("Boop!"), 
         };
-        let server_to_client_sender: NetSendChannel<TestNetMsg> = net_channels::subscribe_typed(&client_key_pair.public).unwrap();
+        let server_to_client_sender: NetSendChannel<TestNetMsg> = net_channel::subscribe_typed(&client_key_pair.public).unwrap();
         server_to_client_sender.send(&test_reply).unwrap();
         info!("Attempting to send a message to {}", client_key_pair.public.to_base64());
         let mut client_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(client_message_inbound_receiver);

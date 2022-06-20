@@ -20,13 +20,13 @@ pub enum NetSendError {
 }
 
 pub struct NetSendChannel<T> where T: Send + NetMsg { 
-    pub(in crate::net::net_channels) inner: UnboundedSender<Vec<laminar::Packet>>,
-    pub(in crate::net::net_channels) peer_addr: SocketAddr,
+    pub(in crate::net::net_channel) inner: UnboundedSender<Vec<laminar::Packet>>,
+    pub(in crate::net::net_channel) peer_addr: SocketAddr,
     _t: PhantomData<T>,
 }
 
 impl<T> NetSendChannel<T>  where T: Send + NetMsg {
-    pub(in crate::net::net_channels) fn new(peer_addr: SocketAddr, sender: UnboundedSender<Vec<laminar::Packet>>) -> Self { 
+    pub(in crate::net::net_channel) fn new(peer_addr: SocketAddr, sender: UnboundedSender<Vec<laminar::Packet>>) -> Self { 
         NetSendChannel{ 
             inner: sender,
             peer_addr,
@@ -101,7 +101,7 @@ pub fn subscribe_typed<T: NetMsg + Send>(peer: &NodeIdentity) -> Result<NetSendC
         None => Err(NetMsgSubscribeError::NoChannel(peer.to_base64())),
     }
 }
-pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<(SocketAddr, UnboundedSender<Vec<laminar::Packet>>), NetMsgSubscribeError>{ 
+pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<(SocketAddr, UnboundedSender<Vec<laminar::Packet>>), NetMsgSubscribeError> {
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {

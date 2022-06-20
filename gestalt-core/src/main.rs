@@ -10,12 +10,16 @@
 
 #[macro_use]
 pub mod common;
+
+#[macro_use]
+pub mod net;
+
 #[macro_use]
 pub mod resource;
 
 pub mod client;
 pub mod entity;
-pub mod net;
+pub mod message_types;
 pub mod script;
 pub mod server;
 pub mod world;
@@ -266,7 +270,6 @@ fn main() {
         | mlua::StdLib::JIT
         | mlua::StdLib::PACKAGE;
     let _vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
-
 
     let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
 

@@ -1,0 +1,28 @@
+So here's what I actually need from the message-passing system. 
+
+Creating channels declaratively, and controlling which types (must be multiple! even just an enum) the message bus can carry. 
+
+It doesn't actually need much real type dynamism, but what it does need is *a lack of boilerplate.* So the naive strongly-typed way of it is out. 
+
+Net messages come in a few different flavors which can be defined declaratively - Some go straight on the engine's message bus, 
+some need an extra intermediary callback, some are sent over other channels to go elsewhere.
+
+Even though which channel a message goes on is controlled declaratively by the message-type, there should be message "Scopes" which are determined 
+by the contents of the message, to reduce the spam of messages to endpoints that are not interested in them.
+
+For scripts' sake it would be nice to have a way to subscribe to channels that only sees message-type-IDs and the actual bytes of the message.
+
+for "reducing spam to uninterested parties" reasons it would be nice to have a way to subscribe to some subset of types on a message bus that takes multiple types.
+
+
+...Taken all together: 
+This either means it's very dynamic / very run-time-y, or it means we're going to need a hell of a lot of macros.
+Honestly the result of using macros for this would be much better than the alternative. It would be good for my
+peace of mind, and it would have better performance most likely since a lot of the routing would be implicit.
+But... that's a lot of effort, good lord.
+Wait, this would be waaaayyy easier without the enums. There are definitely going to be compile-time ways of defining a subset of supported message types, too, if it's just a const [MessageTypeId]
+combined with like, 
+
+trait ChannelAccepts<T>
+
+yeahhhh good shit

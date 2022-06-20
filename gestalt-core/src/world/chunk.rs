@@ -832,7 +832,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
     let mut header_bytes = vec![0; pre_header.header_length as usize];
     reader.read_exact(&mut header_bytes)?;
 
-    let header: ChunkFileHeader = rmp_serde::decode::from_read_ref(&header_bytes)?;
+    let header: ChunkFileHeader = rmp_serde::decode::from_slice(&header_bytes)?;
     drop(header_bytes);
 
     header.validate()?;
