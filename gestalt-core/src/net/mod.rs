@@ -282,7 +282,10 @@ impl LaminarConnectionManager {
         
         match self.connection_state.should_drop(messenger, time) {
             false => Ok(()),
-            true => Err(LaminarWrapperError::Disconnect(self.peer_address))
+            true => {
+                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(time));  
+                Err(LaminarWrapperError::Disconnect(self.peer_address))
+            }
         }
     }
     /// Adds Laminar connection logic to messages that we are sending. 
@@ -301,7 +304,10 @@ impl LaminarConnectionManager {
         // Check again!
         match self.connection_state.should_drop(&mut self.messenger, time) { 
             false => Ok(()),
-            true => Err(LaminarWrapperError::Disconnect(self.peer_address))
+            true => {
+                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(time)); 
+                Err(LaminarWrapperError::Disconnect(self.peer_address))
+            }
         }
     }
     // Take all of the messages to send - used by the network system to poll this object for messages to send. 
@@ -642,22 +648,7 @@ impl Session {
 
     /// Called inside process_inbound()
     fn decrypt_outer_envelope(&mut self, envelope: OuterEnvelope) -> Result<Vec<u8>, SessionLayerError> { 
-        let OuterEnvelope{ session_id, counter, ciphertext } = envelope;
-
-        #[cfg(debug_assertions)]
-        {
-            let full_session_name = FullSessionName { 
-                session_id: self.session_id, 
-                peer_address: self.peer_address 
-            };
-            // Only check this in debug, because this should never happen unless the layer below this one is bugged.
-            if full_session_name.get_partial() != session_id.get_partial() {
-                return Err(SessionLayerError::WrongChannel(
-                    base64::encode(&self.session_id),
-                    base64::encode(&session_id.session_id),
-                ));
-            }
-        }
+        let OuterEnvelope{ session_id: _session_id, counter, ciphertext } = envelope;
 
         let mut buf = vec![0u8; (ciphertext.len() * 3)/2];
         let len_read = self.transport_cryptography.read_message(counter as u64, &ciphertext, &mut buf)?;
