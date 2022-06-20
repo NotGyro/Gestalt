@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channel::NetSendChannel, NetMsgReceiver, TypedNetMsgReceiver}, message_types::voxel::{VoxelChangeRequest, VoxelChangeAnnounce}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channel::{NetSendChannel, self}, NetMsgReceiver, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -120,6 +120,7 @@ impl DisplayConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClientConfig {
+    pub your_display_name: String, 
     pub display_properties: DisplayConfig,
     pub mouse_sensitivity_x: f32,
     pub mouse_sensitivity_y: f32,
@@ -128,6 +129,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
+            your_display_name: String::from("player"),
             display_properties: Default::default(),
             mouse_sensitivity_x: 64.0,
             mouse_sensitivity_y: 64.0,
@@ -264,9 +266,7 @@ pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], 
     todo!()
 }
 
-//, voxel_event_sender: NetSendChannel<VoxelChangeRequest>, voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>)
-
-pub fn run_client(identity_keys: IdentityKeyPair) {
+pub fn run_client(identity_keys: IdentityKeyPair, voxel_event_sender: NetSendChannel<VoxelChangeRequest>, voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, server_identity: Option<NodeIdentity>) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
     let mut open_options = std::fs::OpenOptions::new();
@@ -295,6 +295,14 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             ClientConfig::default()
         }
     };
+
+    // Let the server know we're joining if they're there. 
+    if let Some(server) = server_identity.as_ref() {
+        let join_msg = JoinDefaultEntry {
+            display_name: config.your_display_name.clone(),
+        };
+        net_channel::send_to(&join_msg, server).unwrap(); 
+    }
 
     // Figure out lobby world ID
     let world_defaults_path = path_local_worlds().join("world_defaults.ron");
@@ -457,7 +465,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     // Set up our test world a bit 
     let mut world_space = TileSpace::new();
-    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(3,3,3), lower: vpos!(-2,-2,-2) };
+    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
     // Set up our voxel mesher.
     let mut terrain_renderer = TerrainRenderer::new(64);
 
@@ -601,6 +609,15 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 if let Some((result_position, _result_id)) = hit {    
                     match world_space.set(result_position, air_id) {
                         Ok(()) => {
+
+                            if let Some(server) = server_identity.as_ref() { 
+                                let voxel_msg = VoxelChangeRequest {
+                                    pos: result_position.clone(),
+                                    new_tile: air_id,
+                                };
+                                net_channel::send_to(&voxel_msg, &server).unwrap();
+                            }
+
                             terrain_renderer.notify_changed(&result_position);
                         },
                         Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
@@ -638,6 +655,15 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         if *placement_id != stone_id {
                             match world_space.set(placement_position, stone_id) {
                                 Ok(()) => {
+                                    
+                                    if let Some(server) = server_identity.as_ref() { 
+                                        let voxel_msg = VoxelChangeRequest {
+                                            pos: result_position.clone(),
+                                            new_tile: stone_id,
+                                        };
+                                        net_channel::send_to(&voxel_msg, &server).unwrap();
+                                    }
+
                                     terrain_renderer.notify_changed(&placement_position);
                                 },
                                 Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),

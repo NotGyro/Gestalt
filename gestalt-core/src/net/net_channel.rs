@@ -21,20 +21,20 @@ pub enum NetSendError {
 
 pub struct NetSendChannel<T> where T: Send + NetMsg { 
     pub(in crate::net::net_channel) inner: UnboundedSender<Vec<laminar::Packet>>,
-    pub(in crate::net::net_channel) peer_addr: SocketAddr,
+    //pub(in crate::net::net_channel) peer_addr: SocketAddr,
     _t: PhantomData<T>,
 }
 
 impl<T> NetSendChannel<T>  where T: Send + NetMsg {
-    pub(in crate::net::net_channel) fn new(peer_addr: SocketAddr, sender: UnboundedSender<Vec<laminar::Packet>>) -> Self { 
+    pub fn new(sender: UnboundedSender<Vec<laminar::Packet>>) -> Self { 
         NetSendChannel{ 
             inner: sender,
-            peer_addr,
+            //peer_addr,
             _t: PhantomData::default(),
         }
     }
     pub fn send(&self, message: &T) -> Result<(), NetSendError> {
-        let packet = message.construct_packet(self.peer_addr)
+        let packet = message.construct_packet()
             .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
         
         self.inner.send(vec![packet])
@@ -46,7 +46,7 @@ impl<T> NetSendChannel<T>  where T: Send + NetMsg {
         let mut packets: Vec<laminar::Packet> = Vec::default();
 
         for message in messages {
-            let packet = message.construct_packet(self.peer_addr)
+            let packet = message.construct_packet()
                 .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
             packets.push(packet);
         }
@@ -60,7 +60,7 @@ impl<T> NetSendChannel<T>  where T: Send + NetMsg {
 
 
 pub struct NetMsgSystem {
-    pub sender_channels: HashMap<NodeIdentity, (SocketAddr, UnboundedSender<Vec<laminar::Packet>>)>
+    pub sender_channels: HashMap<NodeIdentity, UnboundedSender<Vec<laminar::Packet>>>
 }
 
 lazy_static!{
@@ -86,7 +86,7 @@ pub fn register_channel(peer: NodeIdentity, peer_addr: SocketAddr, sender: Unbou
         Err(NetMsgSubscribeError::RegisterAlreadyRegistered(peer.to_base64()))
     }
     else { 
-        system_reference.sender_channels.insert(peer, (peer_addr, sender));
+        system_reference.sender_channels.insert(peer, sender);
         Ok(())
     }
 }
@@ -95,18 +95,18 @@ pub fn subscribe_typed<T: NetMsg + Send>(peer: &NodeIdentity) -> Result<NetSendC
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {
-        Some((peer_addr, sender)) => {
-            Ok(NetSendChannel::new(peer_addr.clone(), sender.clone()))
+        Some(sender) => {
+            Ok(NetSendChannel::new(sender.clone()))
         },
         None => Err(NetMsgSubscribeError::NoChannel(peer.to_base64())),
     }
 }
-pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<(SocketAddr, UnboundedSender<Vec<laminar::Packet>>), NetMsgSubscribeError> {
+pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<UnboundedSender<Vec<laminar::Packet>>, NetMsgSubscribeError> {
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {
-        Some((peer_addr, sender)) => {
-            Ok((peer_addr.clone(), sender.clone()))
+        Some(sender) => {
+            Ok(sender.clone())
         },
         None => Err(NetMsgSubscribeError::NoChannel(peer.to_base64())),
     }
@@ -114,8 +114,8 @@ pub fn subscribe_untyped(peer: &NodeIdentity) -> Result<(SocketAddr, UnboundedSe
 pub fn send_to_all<T: NetMsg + Send>(message: &T) -> Result<(), NetSendError>{ 
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
-    for (_peer, (ip, channel) ) in system_reference.sender_channels.iter() {
-        let packet = message.construct_packet(*ip)
+    for (_peer, channel ) in system_reference.sender_channels.iter() {
+        let packet = message.construct_packet()
             .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
         
         channel.send(vec![packet])
@@ -123,12 +123,29 @@ pub fn send_to_all<T: NetMsg + Send>(message: &T) -> Result<(), NetSendError>{
     }
     Ok(())
 }
+/// Send to all peers except the one passed in
+/// Used to, for example, avoid telling a client exactly what it just told us. 
+pub fn send_to_all_except<T: NetMsg + Send>(message: &T, excluded_peer: &NodeIdentity) -> Result<(), NetSendError> {
+    let arc = NET_MSG_SYSTEM.clone();
+    let system_reference = arc.lock();
+    for (peer, channel ) in system_reference.sender_channels.iter() {
+        if peer != excluded_peer {
+            let packet = message.construct_packet()
+                .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
+            
+            channel.send(vec![packet])
+                .map_err(|e| NetSendError::SendOnChannel(T::net_msg_name(), format!("{:?}", e)))?;
+        }
+    }
+    Ok(())
+}
+
 pub fn send_to<T: NetMsg + Send>(message: &T, peer: &NodeIdentity) -> Result<(), NetSendError>{ 
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {
-        Some((peer_addr, sender)) => {
-            let packet = message.construct_packet(*peer_addr)
+        Some(sender) => {
+            let packet = message.construct_packet()
                 .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
             
             sender.send(vec![packet])
@@ -143,12 +160,12 @@ pub fn send_multi_to_all<T: NetMsg + Send>(messages: &Vec<T>) -> Result<(), NetS
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
 
-    for (_peer, (peer_addr, channel) ) in system_reference.sender_channels.iter() {
+    for (_peer, channel ) in system_reference.sender_channels.iter() {
         
         let mut packets: Vec<laminar::Packet> = Vec::default();
 
         for message in messages.iter() {
-            let packet = message.construct_packet(*peer_addr)
+            let packet = message.construct_packet()
                 .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
             packets.push(packet);
         }
@@ -163,11 +180,11 @@ pub fn send_multi_to<T: NetMsg + Send>(messages: &Vec<T>, peer: &NodeIdentity) -
     let arc = NET_MSG_SYSTEM.clone();
     let system_reference = arc.lock();
     match system_reference.sender_channels.get(peer) {
-        Some((peer_addr, sender)) => {
+        Some(sender) => {
             let mut packets: Vec<laminar::Packet> = Vec::default();
 
             for message in messages.iter() {
-                let packet = message.construct_packet(*peer_addr)
+                let packet = message.construct_packet()
                     .map_err(|e| NetSendError::ConstructPacket(T::net_msg_name(), format!("{:?}", e)))?;
                 packets.push(packet);
             }

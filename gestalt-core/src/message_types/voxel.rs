@@ -20,3 +20,13 @@ pub struct VoxelChangeAnnounce {
 
 impl_netmsg!(VoxelChangeRequest, 40, ReliableOrdered);
 impl_netmsg!(VoxelChangeAnnounce, 41, ReliableOrdered);
+
+
+impl Into<VoxelChangeAnnounce> for VoxelChangeRequest {
+    fn into(self) -> VoxelChangeAnnounce {
+        VoxelChangeAnnounce { 
+            pos: self.pos,
+            new_tile: self.new_tile,
+        }
+    }
+}

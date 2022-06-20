@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::marker::PhantomData;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -28,7 +29,7 @@ use crate::common::identity::NodeIdentity;
 use self::preprotocol::NetworkRole;
 
 pub const PREPROTCOL_PORT: u16 = 54134;
-pub const GESTALT_PORT: u16 = 54135;
+pub const GESTALT_PORT: u16 = 54134;
 //use tokio::sync::mpsc::error::TryRecvError; 
 
 //use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
@@ -239,9 +240,10 @@ pub struct LaminarConnectionManager {
 impl LaminarConnectionManager {
 
     pub fn new(peer_address: SocketAddr, laminar_config: &LaminarConfig, time: Instant) -> Self { 
+        let send_to = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 54444);
         LaminarConnectionManager {
             peer_address,
-            connection_state: VirtualConnection::new(peer_address, laminar_config, time),
+            connection_state: VirtualConnection::new(send_to, laminar_config, time),
             messenger: TransportWrapper {
                 laminar_config: laminar_config.clone(),
                 outbox: VecDeque::default(),
@@ -455,8 +457,11 @@ pub trait NetMsg: Serialize + DeserializeOwned + Clone {
         }
     }
     
-    fn construct_packet(&self, send_to: SocketAddr) -> Result<laminar::Packet, Box<dyn std::error::Error>> {
+    fn construct_packet(&self) -> Result<laminar::Packet, Box<dyn std::error::Error>> {
         use laminar::Packet;
+
+        // Laminar instances are separated and are not actually responsible for sending the packets. 
+        let send_to = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 54444);
 
         // Start by writing our tag.
         let encode_start: Vec<u8> = vu64::encode(Self::net_msg_id() as u64).as_ref().to_vec();
@@ -938,7 +943,7 @@ pub async fn handle_session(mut session_manager: Session,
 // [- 1-9 bytes vu64 bytes encoding ciphertext size, n -]
 // [- n bytes ciphertext -------------------------------]
 
-const MAX_MESSAGE_SIZE: usize = 65535;
+const MAX_MESSAGE_SIZE: usize = 8192;
 
 pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr, 
             mut new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
@@ -947,19 +952,21 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
             laminar_config: LaminarConfig,
             session_tick_interval: Duration) {
     
-    info!("Initializing network subsystem for {:?}, which is a {:?} ", local_identity.public.to_base64(), role);
+    info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), role, our_address);
     let socket = if role == NetworkRole::Client { 
-        UdpSocket::bind(SocketAddr::from((our_address.ip(), 0u16)) ).await.unwrap()
+        UdpSocket::bind(SocketAddr::new(our_address.ip(), 0u16) ).await.unwrap()
     }
     else {
         UdpSocket::bind(our_address).await.unwrap()
     };
+    println!("shoogly");
+    info!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), role);
 
     const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
     const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
 
-    let mut recv_buf = [0u8; MAX_MESSAGE_SIZE];
-    let mut send_buf = [0u8; MAX_MESSAGE_SIZE];
+    let mut recv_buf = vec![0u8; MAX_MESSAGE_SIZE];
+    let mut send_buf = vec![0u8; MAX_MESSAGE_SIZE];
 
     // Used by servers to hold on to client info until we can ascertain their new port number (the TCP port number from preprotocol/handshake got dropped) 
     let mut anticipated_clients: HashMap<PartialSessionName, SuccessfulConnect> = HashMap::new();
@@ -1100,9 +1107,10 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
 
                     //Header done, now write the data.
                     send_buf[cursor..cursor+message_len].copy_from_slice(&message.ciphertext);
-                    cursor += message_len;
+
+                    println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), message_len, &message.session_id.peer_address);
                     //Push
-                    socket.send_to(&send_buf[..cursor], message.session_id.peer_address).await.unwrap(); //TODO: Error handling here.
+                    socket.send_to(&send_buf[0..cursor+message_len], message.session_id.peer_address).await.unwrap(); //TODO: Error handling here.
                 }
             }
             new_connection_maybe = (&mut new_connections).recv() => {
@@ -1159,9 +1167,11 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use super::*;
+    use log::LevelFilter;
     use parking_lot::Mutex;
     use serde::Serialize;
     use serde::Deserialize;
+    use simplelog::TermLogger;
     use super::net_channel::NetSendChannel;
     use super::preprotocol::launch_preprotocol_listener;
     use super::preprotocol::preprotocol_connect_to_server;
@@ -1181,7 +1191,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn session_with_localhost() {
         let _guard = NET_TEST_MUTEX.lock();
-        //let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
+        let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
 
         let server_key_pair = IdentityKeyPair::generate_for_tests();
         let client_key_pair = IdentityKeyPair::generate_for_tests();

@@ -34,7 +34,7 @@ use hashbrown::{HashSet, HashMap};
 use mlua::LuaOptions;
 use tokio::sync::mpsc;
 
-use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server, NetworkRole}, GESTALT_PORT, run_network_system, LaminarConfig}, common::identity::generate_local_keys};
+use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server, NetworkRole}, GESTALT_PORT, run_network_system, LaminarConfig, TypedNetMsgReceiver, net_channel::{NetSendChannel, self}, NetMsg}, common::{identity::generate_local_keys, voxelmath::{VoxelRange, VoxelPos}}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, client::clientmain::gen_test_chunk, world::{tilespace::TileSpace, VoxelStorage}};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -261,17 +261,9 @@ fn main() {
 
     info!("Identity keys loaded! Initializing engine...");
 
-    // This doesn't do anything yet. 
-    let lua_stdlibs = mlua::StdLib::BIT
-        | mlua::StdLib::STRING
-        | mlua::StdLib::TABLE
-        | mlua::StdLib::IO
-        | mlua::StdLib::OS
-        | mlua::StdLib::JIT
-        | mlua::StdLib::PACKAGE;
-    let _vm = mlua::Lua::new_with(lua_stdlibs, LuaOptions::default()).unwrap();
-
+    info!("Setting up async runtime.");
     let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+    runtime_builder.enable_all();
 
     let async_runtime = match runtime_builder.build() { 
         Ok(rt) => rt, 
@@ -281,32 +273,97 @@ fn main() {
         }
     };
 
-    if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) } ) = matches.get("--server") { 
+    info!("Setting up channels.");
+    
+    let (client_voxel_sender_from_server, client_voxel_receiver_from_server) = tokio::sync::broadcast::channel(4096);
+    let client_voxel_receiver_from_server: TypedNetMsgReceiver<VoxelChangeAnnounce> = TypedNetMsgReceiver::new(client_voxel_receiver_from_server);
+
+    let (server_voxel_sender_from_client, server_voxel_receiver_from_client) = tokio::sync::broadcast::channel(4096);
+    let mut server_voxel_receiver_from_client: TypedNetMsgReceiver<VoxelChangeRequest> = TypedNetMsgReceiver::new(server_voxel_receiver_from_client);
+
+
+    let (client_join_sender_from_server, client_join_receiver_from_server) = tokio::sync::broadcast::channel(4096);
+    let mut client_join_receiver_from_server: TypedNetMsgReceiver<JoinAnnounce> = TypedNetMsgReceiver::new(client_join_receiver_from_server);
+
+    let (server_join_sender_from_client, server_join_receiver_from_client) = tokio::sync::broadcast::channel(4096);
+    let mut server_join_receiver_from_client: TypedNetMsgReceiver<JoinDefaultEntry> = TypedNetMsgReceiver::new(server_join_receiver_from_client);
+    
+
+    if let Some( ArgumentMatch{ aliases: _, parameter: addr } ) = matches.get("--server") { 
+        info!("Launching as server - parsing address.");
         let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
 
-        let udp_address: SocketAddr = if raw_addr.contains(':') { 
-            raw_addr.parse().unwrap()
-        } else { 
-            let ip_addr: IpAddr = raw_addr.parse().unwrap();
-            SocketAddr::new(ip_addr, GESTALT_PORT)
+        let udp_address = if let Some(raw_addr) = addr { 
+            if raw_addr.contains(':') { 
+                raw_addr.parse().unwrap()
+            } else { 
+                let ip_addr: IpAddr = raw_addr.parse().unwrap();
+                SocketAddr::new(ip_addr, GESTALT_PORT)
+            }
+        }
+        else { 
+            SocketAddr::from((Ipv6Addr::LOCALHOST, GESTALT_PORT))
         };
 
+        info!("Spawning preprotocol listener task.");
         async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender ));
 
+        info!("Spawning network system task.");
         async_runtime.spawn(
             run_network_system(NetworkRole::Server,
                 udp_address, 
                 connect_receiver,
                 keys.clone(), 
-                HashMap::new(),
+                HashMap::from([(VoxelChangeRequest::net_msg_id(), server_voxel_sender_from_client), (JoinDefaultEntry::net_msg_id(), server_join_sender_from_client)]),
                 LaminarConfig::default(),
                 Duration::from_millis(250))
         );
+
+        //let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(3,3,3), lower: vpos!(-2,-2,-2) };
+        //let mut world_space = TileSpace::new();
+        //for chunk_position in test_world_range {
+        //    let chunk = gen_test_chunk(chunk_position);
+        //    world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
+        //}
+        
+        info!("Launching server mainloop.");
+        let mut total_changes: Vec<VoxelChangeAnnounce> = Vec::new();
+        async_runtime.block_on(async move { 
+            loop {
+                tokio::select! { 
+                    voxel_events_maybe = server_voxel_receiver_from_client.recv() => { 
+                        if let Ok(voxel_events) = voxel_events_maybe { 
+                            for (ident, event) in voxel_events { 
+                                //world_space.set(event.pos, event.new_tile).unwrap();
+                                info!("Received {:?} from {}", &event, ident.to_base64());
+                                let announce: VoxelChangeAnnounce = event.into();
+                                net_channel::send_to_all_except(&announce, &ident).unwrap();
+                                total_changes.push(announce);
+                            }
+                        }
+                    }
+                    join_event_maybe = server_join_receiver_from_client.recv() => { 
+                        if let Ok(events) = join_event_maybe { 
+                            for (ident, event) in events {
+                                info!("User {} has joined with display name {}", ident.to_base64(), &event.display_name);
+                                let announce = JoinAnnounce {
+                                    display_name: event.display_name, 
+                                    identity: ident,
+                                };
+                                net_channel::send_to_all_except(&announce, &ident).unwrap();
+                                info!("Sending all previous changes to the newly-joined user.");
+                                net_channel::send_multi_to(&total_changes, &ident).unwrap();
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
-    else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") { 
+    else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") {
         let address: SocketAddr = if raw_addr.contains(':') { 
             raw_addr.parse().unwrap()
-        } else { 
+        } else {
             let ip_addr: IpAddr = raw_addr.parse().unwrap();
             SocketAddr::new(ip_addr, PREPROTCOL_PORT)
         };
@@ -316,16 +373,43 @@ fn main() {
             run_network_system( NetworkRole::Client,  SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, GESTALT_PORT, 0, 0)), 
                 connect_receiver,
                 keys.clone(), 
-                HashMap::new(),
+                HashMap::from([(VoxelChangeAnnounce::net_msg_id(), client_voxel_sender_from_server), (JoinAnnounce::net_msg_id(), client_join_sender_from_server)]),
                 LaminarConfig::default(),
                 Duration::from_millis(250))
         );
         let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
                 Duration::new(5, 0))).unwrap();
+        let server_identity = completed.peer_identity.clone();
         connect_sender.send(completed).unwrap();
+
+        std::thread::sleep(Duration::from_millis(50));
+                
+        let voxel_event_sender = net_channel::subscribe_typed(&server_identity).unwrap();
+        
+        async_runtime.spawn( async move { 
+            loop { 
+                let join_msgs = client_join_receiver_from_server.recv().await.unwrap();
+                for (_server_ident, JoinAnnounce{identity, display_name }) in join_msgs { 
+                    info!("Peer {} joined with display name {}", identity.to_base64(), &display_name);
+                }
+            }
+        });
+
+        client::clientmain::run_client(keys, voxel_event_sender, client_voxel_receiver_from_server, Some(server_identity));
     }
     else {
-        client::clientmain::run_client(keys);
+        let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::mpsc::unbounded_channel(); 
+        let voxel_event_sender = NetSendChannel::new(voxel_event_sender); 
+
+        async_runtime.spawn( async move { 
+            loop { 
+                //redirect to /dev/null
+                let msgs = voxel_event_receiver.recv().await.unwrap();
+                drop(msgs);
+            }
+        });
+
+        client::clientmain::run_client(keys, voxel_event_sender, client_voxel_receiver_from_server, None);
     }
 
     std::thread::sleep(std::time::Duration::from_millis(100));
