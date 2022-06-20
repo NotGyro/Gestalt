@@ -1298,37 +1298,35 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                 }
             }
             quit_maybe = (&mut quit_handler) => {
-                if quit_maybe.is_ok() { 
-                    info!("Shutting down network system.");
-                    // Notify sessions we're done.
-                    for (peer_address, _) in inbound_channels.iter() { 
-                        let peer_ident = session_to_identity.get(&peer_address).unwrap();
-                        net_channel::send_to(&DisconnectMsg{}, &peer_ident).unwrap();
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await; 
-                    // Clear out remaining messages.
-                    while let Ok(messages) = (&mut push_receiver).try_recv() {
-                        for message in messages {
-                            let encoded_len = encode_outer_envelope(&message, &mut send_buf);
+                info!("Shutting down network system.");
+                // Notify sessions we're done.
+                for (peer_address, _) in inbound_channels.iter() { 
+                    let peer_ident = session_to_identity.get(&peer_address).unwrap();
+                    net_channel::send_to(&DisconnectMsg{}, &peer_ident).unwrap();
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await; 
+                // Clear out remaining messages.
+                while let Ok(messages) = (&mut push_receiver).try_recv() {
+                    for message in messages {
+                        let encoded_len = encode_outer_envelope(&message, &mut send_buf);
 
-                            //Push
-                            match role {
-                                NetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
-                                _ => socket.send_to(&send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
-                            };
-                        }
+                        //Push
+                        match role {
+                            NetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
+                            _ => socket.send_to(&send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
+                        };
                     }
-                    // Notify sessions we're done.
-                    for (session, channel) in session_kill_from_outside { 
-                        info!("Terminating session {:?}", session);
-                        channel.send(()).unwrap();
-                    }
-                    for jh in join_handles { 
-                        jh.abort();
-                    }
-                    continue_running = false; 
-                    break;
-                } 
+                }
+                // Notify sessions we're done.
+                for (session, channel) in session_kill_from_outside { 
+                    info!("Terminating session {:?}", session);
+                    channel.send(()).unwrap();
+                }
+                for jh in join_handles { 
+                    jh.abort();
+                }
+                continue_running = false; 
+                break;
             }
         }
     }
@@ -1362,7 +1360,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn session_with_localhost() {
-        let _guard = NET_TEST_MUTEX.lock();
+        let mutex_guard = NET_TEST_MUTEX.lock();
         let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
 
         let server_key_pair = IdentityKeyPair::generate_for_tests();
@@ -1370,9 +1368,9 @@ mod tests {
         let (serv_completed_sender, serv_completed_receiver) = mpsc::unbounded_channel();
         let (client_completed_sender, client_completed_receiver) = mpsc::unbounded_channel();
 
-        let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
-        let client_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
         let (serv_message_inbound_sender, serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
         let (client_message_inbound_sender, client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
@@ -1380,10 +1378,10 @@ mod tests {
         let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender.clone())]);
         let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender.clone())]);
         
-        let (_quit_server_s, quit_server_r) = tokio::sync::oneshot::channel();
-        let (_quit_client_s, quit_client_r) = tokio::sync::oneshot::channel();
+        let (quit_server_s, quit_server_r) = tokio::sync::oneshot::channel();
+        let (quit_client_s, quit_client_r) = tokio::sync::oneshot::channel();
         //Launch server
-        tokio::spawn(
+        let join_handle_s = tokio::spawn(
             run_network_system(NetworkRole::Server,
                 server_socket_addr,
                 serv_completed_receiver,
@@ -1394,11 +1392,11 @@ mod tests {
                 quit_server_r)
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
-        tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
+        let join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         //Launch client
-        tokio::spawn(
+        let join_handle_c = tokio::spawn(
             run_network_system( NetworkRole::Client,  server_socket_addr, 
             client_completed_receiver,
                 client_key_pair.clone(),
@@ -1450,6 +1448,12 @@ mod tests {
 
             assert_eq!(out.message, test_reply.message);
         }
-        
+        quit_client_s.send(()).unwrap();
+        let _ = join_handle_c.await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        quit_server_s.send(()).unwrap();
+        let _ = join_handle_s.await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(mutex_guard);
     }
 }

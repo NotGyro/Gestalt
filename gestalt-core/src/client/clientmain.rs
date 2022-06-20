@@ -565,7 +565,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
 
     event_loop.run(move |event, _, control| {
         let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
-        while let Ok(events) = voxel_event_receiver.try_recv() { 
+        if let Ok(events) = voxel_event_receiver.try_recv() { 
             for (_ident, announce) in events { 
                 let old_value = world_space.get(announce.pos).unwrap();
                 if announce.new_tile != *old_value { 

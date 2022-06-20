@@ -210,7 +210,13 @@ fn main() {
     log_config_builder.add_filter_ignore_str("wgpu_core::device");
     let log_config = log_config_builder.build();
 
-    let log_file_path = PathBuf::from("logs/").join("latest.log");
+    let log_dir = PathBuf::from("logs/"); 
+    let log_file_path = log_dir.join("latest.log");
+
+    if !log_dir.exists() { 
+        std::fs::create_dir(log_dir);
+    }
+
     CombinedLogger::init(vec![
         TermLogger::new(
             level_filter,
