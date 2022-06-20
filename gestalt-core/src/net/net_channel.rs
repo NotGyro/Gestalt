@@ -79,13 +79,13 @@ pub enum NetMsgSubscribeError {
     RegisterAlreadyRegistered(String),
 }
 
-pub fn register_channel(peer: NodeIdentity, peer_addr: SocketAddr, sender: UnboundedSender<Vec<laminar::Packet>>) -> Result<(), NetMsgSubscribeError>{ 
+pub fn register_channel(peer: NodeIdentity, sender: UnboundedSender<Vec<laminar::Packet>>) -> Result<(), NetMsgSubscribeError>{ 
     let arc = NET_MSG_SYSTEM.clone();
     let mut system_reference = arc.lock();
     if system_reference.sender_channels.get(&peer).is_some() {
         Err(NetMsgSubscribeError::RegisterAlreadyRegistered(peer.to_base64()))
     }
-    else { 
+    else {
         system_reference.sender_channels.insert(peer, sender);
         Ok(())
     }

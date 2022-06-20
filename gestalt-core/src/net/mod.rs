@@ -2,12 +2,14 @@ use std::collections::VecDeque;
 use std::fs;
 use std::marker::PhantomData;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures::FutureExt;
 use hashbrown::HashMap;
 use laminar::Connection;
 use laminar::VirtualConnection;
@@ -268,7 +270,10 @@ impl LaminarConnectionManager {
         
         match self.connection_state.should_drop(messenger, time) { 
             false => Ok(()),
-            true => Err(LaminarWrapperError::Disconnect(self.peer_address))
+            true => {
+                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(time)); 
+                Err(LaminarWrapperError::Disconnect(self.peer_address))
+            }
         }
     }
     pub fn process_update(&mut self, time: Instant) -> Result<(), LaminarWrapperError> {
@@ -742,27 +747,10 @@ impl Session {
 
         let mut processed_reply_buf: Vec<OuterEnvelope> = Vec::with_capacity(reply_packets.len());
 
-        for (ip, packet) in reply_packets { 
-            #[cfg(debug_assertions)]
-            {
-                if ip.ip() == self.peer_address.ip() {
-                    //IP matches, no mistakes were made.
-                    match self.encrypt_packet(&packet) {
-                        Ok(envelope) => processed_reply_buf.push(envelope),
-                        Err(e) => errors.push(e),
-                    }
-                }
-                else {
-                    //What is Laminar doing?
-                    errors.push(SessionLayerError::WrongIpSend(ip, self.peer_address))
-                }
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                match self.encrypt_packet(&packet) {
-                    Ok(envelope) => processed_reply_buf.push(envelope),
-                    Err(e) => errors.push(e),
-                }
+        for (_, packet) in reply_packets {
+            match self.encrypt_packet(&packet) {
+                Ok(envelope) => processed_reply_buf.push(envelope),
+                Err(e) => errors.push(e),
             }
         }
 
@@ -834,27 +822,11 @@ impl Session {
         let to_send: Vec<(SocketAddr, Vec<u8>)> = self.laminar.empty_outbox();
         let mut processed_send: Vec<OuterEnvelope> = Vec::with_capacity(to_send.len());
         
-        for (ip, packet) in to_send {
-            #[cfg(debug_assertions)]
-            {
-                if ip.ip() == self.peer_address.ip() {
-                    //IP matches, no mistakes were made.
-                    match self.encrypt_packet(&packet) {
-                        Ok(envelope) => processed_send.push(envelope),
-                        Err(e) => errors.push(e),
-                    }
-                }
-                else {
-                    //What is Laminar doing?
-                    errors.push(SessionLayerError::WrongIpSend(ip, self.peer_address))
-                }
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                match self.encrypt_packet(&packet) {
-                    Ok(envelope) => processed_send.push(envelope),
-                    Err(e) => errors.push(e),
-                }
+        for (_, packet) in to_send {
+
+            match self.encrypt_packet(&packet) {
+                Ok(envelope) => processed_send.push(envelope),
+                Err(e) => errors.push(e),
             }
         }
 
@@ -945,19 +917,21 @@ pub async fn handle_session(mut session_manager: Session,
 
 const MAX_MESSAGE_SIZE: usize = 8192;
 
-pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr, 
+pub async fn run_network_system(role: NetworkRole, address: SocketAddr, 
             mut new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
             local_identity: IdentityKeyPair, 
             received_message_channels: HashMap<NetMsgId, NetMsgSender>,
             laminar_config: LaminarConfig,
-            session_tick_interval: Duration) {
+            session_tick_interval: Duration,) {
     
-    info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), role, our_address);
-    let socket = if role == NetworkRole::Client { 
-        UdpSocket::bind(SocketAddr::new(our_address.ip(), 0u16) ).await.unwrap()
+    info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), role, address);
+    let socket = if role == NetworkRole::Client {
+        let mut socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
+        socket.connect(address).await.unwrap();
+        socket
     }
     else {
-        UdpSocket::bind(our_address).await.unwrap()
+        UdpSocket::bind(address).await.unwrap()
     };
     println!("shoogly");
     info!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), role);
@@ -1033,7 +1007,7 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
                                         Some(connection) => {
                                             //Communication with the rest of the engine.
                                             let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
-                                            match net_channel::register_channel(connection.peer_identity.clone(), connection.peer_address.clone(), game_to_session_sender) { 
+                                            match net_channel::register_channel(connection.peer_identity.clone(), game_to_session_sender) { 
                                                 Ok(()) => {
                                                     info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                                                     let session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
@@ -1108,16 +1082,20 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
                     //Header done, now write the data.
                     send_buf[cursor..cursor+message_len].copy_from_slice(&message.ciphertext);
 
-                    println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), message_len, &message.session_id.peer_address);
+                    println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), cursor+message_len, &message.session_id.peer_address);
                     //Push
-                    socket.send_to(&send_buf[0..cursor+message_len], message.session_id.peer_address).await.unwrap(); //TODO: Error handling here.
+                    match role {
+                        NetworkRole::Client => socket.send(&send_buf[0..cursor+message_len]).await.unwrap(),
+                        _ => socket.send_to(&send_buf[0..cursor+message_len], message.session_id.peer_address).await.unwrap()
+                    };
+                     //TODO: Error handling here.
                 }
             }
             new_connection_maybe = (&mut new_connections).recv() => {
                 let connection = match new_connection_maybe { 
                     Some(conn) => conn, 
                     None => {
-                        warn!("Channel for new connections closed (we are a {:?} and our address is {:?}) - most likely this means the engine is shutting down, which is fine.", role, our_address);
+                        warn!("Channel for new connections closed (we are a {:?} and our address is {:?}) - most likely this means the engine is shutting down, which is fine.", role, address);
                         break; // Return to loop head i.e. try a new tokio::select.
                     }, 
                 };
@@ -1139,7 +1117,7 @@ pub async fn run_network_system(role: NetworkRole, our_address: SocketAddr,
                 else {
                     //Communication with the rest of the engine. 
                     let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
-                    match net_channel::register_channel(connection.peer_identity.clone(), connection.peer_address.clone(), game_to_session_sender) { 
+                    match net_channel::register_channel(connection.peer_identity.clone(), game_to_session_sender) { 
                         Ok(()) => { 
                             info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                             let session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
@@ -1224,7 +1202,7 @@ mod tests {
 
         //Launch client
         tokio::spawn(
-            run_network_system( NetworkRole::Client,  SocketAddr::new(client_addr, GESTALT_PORT), 
+            run_network_system( NetworkRole::Client,  server_socket_addr, 
             client_completed_receiver,
                 client_key_pair.clone(),
                 client_channels,

@@ -36,7 +36,7 @@ vu64 = "0.1.5"
 
 # Network
 laminar = "0.5.0" 
-tokio = { version = "1.19.2", features = ["sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
+tokio = { version = "1.18", features = ["full", "sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
 
 # Scripting
 mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "serialize"] }

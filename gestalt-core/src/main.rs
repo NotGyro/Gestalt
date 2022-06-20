@@ -288,6 +288,8 @@ fn main() {
     let (server_join_sender_from_client, server_join_receiver_from_client) = tokio::sync::broadcast::channel(4096);
     let mut server_join_receiver_from_client: TypedNetMsgReceiver<JoinDefaultEntry> = TypedNetMsgReceiver::new(server_join_receiver_from_client);
     
+    let mut laminar_config = LaminarConfig::default();
+    laminar_config.heartbeat_interval = Some(Duration::from_secs(1));
 
     if let Some( ArgumentMatch{ aliases: _, parameter: addr } ) = matches.get("--server") { 
         info!("Launching as server - parsing address.");
@@ -315,7 +317,7 @@ fn main() {
                 connect_receiver,
                 keys.clone(), 
                 HashMap::from([(VoxelChangeRequest::net_msg_id(), server_voxel_sender_from_client), (JoinDefaultEntry::net_msg_id(), server_join_sender_from_client)]),
-                LaminarConfig::default(),
+                laminar_config,
                 Duration::from_millis(250))
         );
 
@@ -370,11 +372,11 @@ fn main() {
 
         let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
         async_runtime.spawn(
-            run_network_system( NetworkRole::Client,  SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, GESTALT_PORT, 0, 0)), 
+            run_network_system( NetworkRole::Client,  address, 
                 connect_receiver,
                 keys.clone(), 
                 HashMap::from([(VoxelChangeAnnounce::net_msg_id(), client_voxel_sender_from_server), (JoinAnnounce::net_msg_id(), client_join_sender_from_server)]),
-                LaminarConfig::default(),
+                laminar_config,
                 Duration::from_millis(250))
         );
         let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
