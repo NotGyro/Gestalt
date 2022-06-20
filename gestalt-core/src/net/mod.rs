@@ -763,27 +763,10 @@ impl Session {
         let to_send: Vec<(SocketAddr, Vec<u8>)> = self.laminar.empty_outbox();
         let mut processed_send: Vec<OuterEnvelope> = Vec::with_capacity(to_send.len());
         
-        for (ip, packet) in to_send { 
-            #[cfg(debug_assertions)]
-            {
-                if ip.ip() == self.peer_address.ip() {
-                    //IP matches, no mistakes were made.
-                    match self.encrypt_packet(&packet) {
-                        Ok(envelope) => processed_send.push(envelope),
-                        Err(e) => errors.push(e),
-                    }
-                }
-                else {
-                    //What is Laminar doing?
-                    errors.push(SessionLayerError::WrongIpSend(ip, self.peer_address))
-                }
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                match self.encrypt_packet(&packet) {
-                    Ok(envelope) => processed_send.push(envelope),
-                    Err(e) => errors.push(e),
-                }
+        for (_ip, packet) in to_send { 
+            match self.encrypt_packet(&packet) {
+                Ok(envelope) => processed_send.push(envelope),
+                Err(e) => errors.push(e),
             }
         }
 
@@ -891,6 +874,7 @@ pub async fn handle_session(mut session_manager: Session,
             _ = (&mut ticker).tick() => { 
                 let update_results = session_manager.process_update(Instant::now()).await;
                 if let Err(e) = update_results {
+                    info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now())); 
                     error!("Error encountered while ticking network connection to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
                 }
             }
@@ -899,7 +883,6 @@ pub async fn handle_session(mut session_manager: Session,
     error!("A session manager for a session between {} (us) and {} (peer) has stopped looping.", session_manager.local_identity.public.to_base64(), session_manager.peer_identity.to_base64());
 }
 
-
 // Each packet on the wire:
 // [- 4 bytes session ID -------------------------------]  
 // [- 4 bytes message counter --------------------------]
@@ -907,6 +890,36 @@ pub async fn handle_session(mut session_manager: Session,
 // [- n bytes ciphertext -------------------------------]
 
 const MAX_MESSAGE_SIZE: usize = 8192;
+
+pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> usize {
+    const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
+    const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
+    let message_len = message.ciphertext.len();
+    let encoded_len = vu64::encode(message_len as u64);
+
+    let len_tag_bytes: &[u8] = encoded_len.as_ref();
+    
+    //let header_len = SESSION_ID_LEN + COUNTER_LEN + len_tag_bytes.len();
+
+    let mut cursor = 0;
+    //pub session_id: FullSessionName,
+    let session_id = message.session_id.session_id.clone();
+    //pub counter: MessageCounter,
+    send_buf[cursor..cursor+SESSION_ID_LEN].copy_from_slice(&session_id);
+    cursor += SESSION_ID_LEN;
+    
+    //pub counter: MessageCounter,
+    send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&message.counter.to_le_bytes());
+    cursor += COUNTER_LEN;
+    
+    send_buf[cursor..cursor+len_tag_bytes.len()].copy_from_slice(len_tag_bytes);
+    cursor += len_tag_bytes.len();
+
+    //Header done, now write the data.
+    send_buf[cursor..cursor+message_len].copy_from_slice(&message.ciphertext);
+    cursor += message_len;
+    cursor
+}
 
 pub async fn run_network_system(role: NetworkRole, address: SocketAddr, 
             mut new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
@@ -1049,35 +1062,14 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
             send_maybe = (&mut push_receiver).recv() => {
                 let to_send = send_maybe.unwrap();
                 for message in to_send {
-                    let message_len = message.ciphertext.len();
-                    let encoded_len = vu64::encode(message_len as u64);
 
-                    let len_tag_bytes: &[u8] = encoded_len.as_ref();
-                    
-                    //let header_len = SESSION_ID_LEN + COUNTER_LEN + len_tag_bytes.len();
+                    let encoded_len = encode_outer_envelope(&message, &mut send_buf);
 
-                    let mut cursor = 0;
-                    //pub session_id: FullSessionName,
-                    let session_id = message.session_id.session_id.clone();
-                    //pub counter: MessageCounter,
-                    send_buf[cursor..cursor+SESSION_ID_LEN].copy_from_slice(&session_id);
-                    cursor += SESSION_ID_LEN;
-                    
-                    //pub counter: MessageCounter,
-                    send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&message.counter.to_le_bytes());
-                    cursor += COUNTER_LEN;
-                    
-                    send_buf[cursor..cursor+len_tag_bytes.len()].copy_from_slice(len_tag_bytes);
-                    cursor += len_tag_bytes.len();
-
-                    //Header done, now write the data.
-                    send_buf[cursor..cursor+message_len].copy_from_slice(&message.ciphertext);
-
-                    println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), cursor+message_len, &message.session_id.peer_address);
+                    //println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), cursor+message_len, &message.session_id.peer_address);
                     //Push
                     match role {
-                        NetworkRole::Client => socket.send(&send_buf[0..cursor+message_len]).await.unwrap(),
-                        _ => socket.send_to(&send_buf[0..cursor+message_len], message.session_id.peer_address).await.unwrap()
+                        NetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
+                        _ => socket.send_to(&send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
                     };
                      //TODO: Error handling here.
                 }
