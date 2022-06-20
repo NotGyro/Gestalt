@@ -59,6 +59,12 @@ impl TileSpace {
     }
 }
 
+impl Default for TileSpace {
+    fn default() -> Self {
+        TileSpace::new()
+    }
+}
+
 /// Separate into chunk-local offset and the selecterd chunk cell. Returns offset from chunk, chunk cell from world.
 #[inline(always)]
 fn world_to_chunk_local_coord(coord: TileCoord) -> (usize, ChunkCoord) {

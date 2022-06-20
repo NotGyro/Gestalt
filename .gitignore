@@ -31,7 +31,15 @@ client.ron
 /target/keys/
 /temp/
 /logs/
+/protocol/
 /worlds/
+#Running tests form inside of VSCodium does this sometimes. 
+/gestalt-core/protocol/
+/gestalt-core/keys/
+/gestalt-core/logs/
+/gestalt-core/worlds/
+/gestalt-core/temp/
+/gestalt-core/cache/
 
 # Logs
 log.csv
@@ -54,3 +62,7 @@ Cargo.lock
 
 # Informal notes (I should use Github tasks soon)
 todo.md
+
+# Generated code
+
+/gestalt-names/src/generated/

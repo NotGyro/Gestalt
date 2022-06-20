@@ -131,13 +131,13 @@ impl TerrainRenderer {
             self.pending_remesh.remove(chunk_position);
         }
         if self.meshed_chunks.contains_key(chunk_position) {
-            self.meshed_chunks.remove(&chunk_position);
+            self.meshed_chunks.remove(chunk_position);
         }
         if self.built_chunks.contains_key(chunk_position) {
-            self.built_chunks.remove(&chunk_position);
+            self.built_chunks.remove(chunk_position);
         }
         if self.texture_for_chunk.contains_key(chunk_position) {
-            self.texture_for_chunk.remove(&chunk_position);
+            self.texture_for_chunk.remove(chunk_position);
         }
     }
     fn make_new_atlas(&mut self) -> ChunkTextureBinding { 
@@ -152,7 +152,7 @@ impl TerrainRenderer {
     }
     fn find_available_texture_atlas(&mut self) -> ChunkTextureBinding {
         if self.texture_layouts.is_empty() {
-            return self.make_new_atlas();
+            self.make_new_atlas()
         }
         else {
             for (atlas_id, layout) in self.texture_layouts.iter() { 
@@ -164,7 +164,7 @@ impl TerrainRenderer {
                     };
                 }
             }
-            return self.make_new_atlas();
+            self.make_new_atlas()
         }
     }
     /// Rebuild any meshes which have been flagged as changed. 
@@ -191,20 +191,20 @@ impl TerrainRenderer {
                 //TODO: Handle case where texture atlas goes over max
                 let mesher_state = MesherState::prepare_to_mesh(chunk, tiles_to_art, self.texture_layouts.get_mut(&texture_binding.texture_id).unwrap())
                     .map_err(|e| { 
-                        TerrainRendererError::PrepareMeshingError(chunk_position.clone(), format!("{:?}",e))
+                        TerrainRendererError::PrepareMeshingError(*chunk_position, format!("{:?}",e))
                     })?;
 
                 //Make sure not to waste bookkeeping pushing all-air chunks through the pipeline. 
                 if mesher_state.needs_draw() { 
                     let mesh = mesher_state.build_mesh()
                         .map_err(|e| {
-                            TerrainRendererError::MeshingError(chunk_position.clone(), format!("{:?}",e))
+                            TerrainRendererError::MeshingError(*chunk_position, format!("{:?}",e))
                         })?;
                         
-                    if mesh.verticies.len() > 0 {
+                    if !mesh.verticies.is_empty() {
                         did_mesh = true;
-                        self.texture_for_chunk.insert(chunk_position.clone(), texture_binding);
-                        self.meshed_chunks.insert(chunk_position.clone(), mesh);
+                        self.texture_for_chunk.insert(*chunk_position, texture_binding);
+                        self.meshed_chunks.insert(*chunk_position, mesh);
                     }
                 }
             }
@@ -249,7 +249,7 @@ impl TerrainRenderer {
                 ..rend3_routine::pbr::PbrMaterial::default()
             };
             let material_handle = renderer.add_material(material);
-            self.built_textures.insert(texture_id.clone(), BuiltTexture{
+            self.built_textures.insert(*texture_id, BuiltTexture{
                 last_built_revision: tile_atlas.get_revision(),
                 gpu_handle: texture_handle,
                 material: material_handle,
@@ -312,7 +312,7 @@ where
 pub enum CubeTex {
     Invisible,
     Single(TextureId),
-    AllSides(SidesArray<TextureId>),
+    AllSides(Box<SidesArray<TextureId>>),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CubeArt {
@@ -337,7 +337,7 @@ impl CubeArt {
     }
     pub fn simple_solid_block(texture: &TextureId) -> Self {
         CubeArt {
-            textures: CubeTex::Single(texture.clone()),
+            textures: CubeTex::Single(*texture),
             cull_self: true,
             cull_others: true,
         }
@@ -369,9 +369,9 @@ pub fn generate_engine_texture_image(
         for y in 0..height {
             // The rare logical/boolean XOR.
             if (x >= width / 2) ^ (y >= height / 2) {
-                img_base.put_pixel(x, y, color_foreground.clone());
+                img_base.put_pixel(x, y, *color_foreground);
             } else {
-                img_base.put_pixel(x, y, color_background.clone());
+                img_base.put_pixel(x, y, *color_background);
             }
         }
     }

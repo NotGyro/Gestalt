@@ -12,9 +12,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::entity::EntityId;
 use crate::script::ModuleId;
-use crate::world::{ChunkPos, WorldId};
+use crate::world::WorldId;
 
 /// Runtime type identifier for a type of message.
 pub type MsgTypeId = Uuid;
@@ -39,7 +38,7 @@ pub trait RegisteredMessage: Clone + Debug + Serialize + DeserializeOwned + Send
         if msg.ty != Self::msg_ty() {
             Err(Box::new(MessageError::MessageCastFailure(
                 Self::msg_ty(),
-                msg.ty.clone(),
+                msg.ty,
             )))
         } else {
             Ok(Self::unpack(&msg.data)?)
@@ -54,7 +53,7 @@ pub struct MsgSender(Sender<Message>);
 impl MsgSender {
     #[inline(always)]
     pub fn send<T: RegisteredMessage>(&self, to_send: T) -> Result<(), Box<dyn Error>> {
-        Ok(self.send_raw(to_send.construct_message()?)?)
+        self.send_raw(to_send.construct_message()?)
     }
     #[inline(always)]
     pub fn send_raw(&self, to_send: Message) -> Result<(), Box<dyn Error>> {
@@ -90,12 +89,12 @@ impl MsgQueueThreaded {
     #[inline(always)]
     pub fn poll(&self) -> Option<VecDeque<Message>> {
         if self.is_empty.load(Ordering::Relaxed) {
-            return None;
+            None
         } else if let Some(mut guard) = self.queue.try_lock() {
             self.is_empty.store(true, Ordering::Release);
-            return Some(guard.drain(..).collect());
+            Some(guard.drain(..).collect())
         } else {
-            return None;
+            None
         }
     }
     ///Blockingly sends
@@ -157,8 +156,7 @@ impl MsgReceiver {
     #[inline(always)]
     pub fn poll_to<T: RegisteredMessage>(&mut self) -> Option<T> {
         self.poll_filtered(&MsgTypeFilter::Single(T::msg_ty()))
-            .map(|m| T::unpack(&m.data).ok())
-            .flatten()
+            .and_then(|m| T::unpack(&m.data).ok())
     }
 }
 
@@ -232,10 +230,10 @@ impl MessageBus {
         });
         self.subscribers.push(resl.clone());
 
-        return MsgReceiver {
+        MsgReceiver {
             receiver: resl,
             our_queue: VecDeque::new(),
-        };
+        }
     }
     /// Gives you a recevier that only accepts a single type of message.
     pub fn subscribe_typed<T: RegisteredMessage>(&mut self) -> TypedMsgReceiver<T> {
@@ -253,10 +251,10 @@ impl MessageBus {
             }
         }
 
-        return TypedMsgReceiver {
+        TypedMsgReceiver {
             receiver: resl,
             our_queue: VecDeque::new(),
-        };
+        }
     }
 
     /// If a MsgReceiver has been dropped on the other end, clean up our reference to it.
@@ -264,7 +262,7 @@ impl MessageBus {
     pub fn garbage_collect(&mut self) {
         //Filter out anything where we hold the only reference.
         self.subscribers
-            .drain_filter(|rec| Arc::strong_count(&rec) <= 1)
+            .drain_filter(|rec| Arc::strong_count(rec) <= 1)
             .collect::<Vec<_>>();
     }
 
@@ -291,6 +289,12 @@ impl MessageBus {
     }
 }
 
+impl Default for MessageBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum MessageError {
     #[error("Attempted to access channel: {0:?}, which does not exist")]
@@ -306,7 +310,7 @@ pub enum MessageError {
 pub enum ChannelDomain {
     Global,
     World(WorldId),
-    Entity(WorldId, EntityId),
+    //Entity(WorldId, EntityId),
     Module(ModuleId),
     WorldModule(WorldId, ModuleId),
 }
@@ -479,12 +483,10 @@ lazy_static::lazy_static! {
 
 impl RegisteredMessage for TestMessage {
     fn msg_ty() -> MsgTypeId {
-        TEST_UUID_1.clone()
+        *TEST_UUID_1
     }
     fn unpack(msg: &MsgData) -> Result<Self, Box<dyn Error>> {
-        Ok(TestMessage {
-            0: rmp_serde::from_read_ref(msg.as_slice())?,
-        })
+        Ok(TestMessage(rmp_serde::from_read_ref(msg.as_slice())?))
     }
     fn construct_message(&self) -> Result<Message, Box<dyn Error>> {
         Ok(Message {
@@ -499,12 +501,10 @@ struct TestMessage2(String);
 
 impl RegisteredMessage for TestMessage2 {
     fn msg_ty() -> MsgTypeId {
-        TEST_UUID_2.clone()
+        *TEST_UUID_2
     }
     fn unpack(msg: &MsgData) -> Result<Self, Box<dyn Error>> {
-        Ok(TestMessage2 {
-            0: rmp_serde::from_read_ref(msg.as_slice())?,
-        })
+        Ok(TestMessage2(rmp_serde::from_read_ref(msg.as_slice())?))
     }
     fn construct_message(&self) -> Result<Message, Box<dyn Error>> {
         Ok(Message {
@@ -517,7 +517,7 @@ impl RegisteredMessage for TestMessage2 {
         if msg.ty != Self::msg_ty() {
             Err(Box::new(MessageError::MessageCastFailure(
                 Self::msg_ty(),
-                msg.ty.clone(),
+                msg.ty,
             )))
         } else {
             Ok(Self::unpack(&msg.data)?)
@@ -532,9 +532,7 @@ fn test_send_message() {
 
     let mut receiver = channel.subscribe();
 
-    let msg1 = TestMessage {
-        0: String::from("msg_test"),
-    };
+    let msg1 = TestMessage(String::from("msg_test"));
 
     channel.broadcast(msg1.construct_message().unwrap());
 
@@ -543,15 +541,15 @@ fn test_send_message() {
     while let Some(msg) = receiver.poll() {
         count += 1;
         println!("{}", msg.ty);
-        if msg.ty != TEST_UUID_1.clone() {
+        if msg.ty != *TEST_UUID_1 {
             panic!()
         }
     }
     assert_eq!(count, 1);
     for i in 0..10 {
-        let msg = TestMessage {
-            0: format!("test.{}", i),
-        };
+        let msg = TestMessage (
+            format!("test.{}", i)
+        );
 
         channel.broadcast(msg.construct_message().unwrap());
     }
@@ -573,12 +571,12 @@ fn test_send_message_typed() {
 
     let mut receiver: TypedMsgReceiver<TestMessage> = channel.subscribe_typed();
 
-    let msg1 = TestMessage {
-        0: String::from("msg test"),
-    };
-    let msg2 = TestMessage2 {
-        0: String::from("second test"),
-    };
+    let msg1 = TestMessage (
+        String::from("msg test"),
+    );
+    let msg2 = TestMessage2 (
+        String::from("second test"),
+    );
 
     channel.broadcast(msg1.construct_message().unwrap());
     channel.broadcast(msg2.construct_message().unwrap());
@@ -593,9 +591,9 @@ fn test_send_message_typed() {
     assert_eq!(count, 1);
 
     for i in 0..10 {
-        let msg = TestMessage {
-            0: format!("test.{}", i),
-        };
+        let msg = TestMessage (
+            format!("test.{}", i)
+        );
 
         channel.broadcast(msg.construct_message().unwrap());
         channel.broadcast(msg2.construct_message().unwrap());

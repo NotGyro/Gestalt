@@ -2,7 +2,7 @@ use crate::resource::image::{
     ImageProvider, InternalImage, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE,
 };
 use crate::resource::ResourceId;
-use gestalt_logger::error;
+use log::error;
 use glam::Vec2;
 use hashbrown::HashMap;
 use image::{GenericImage, ImageError};
@@ -81,10 +81,10 @@ impl TileAtlasLayout {
         let mut reverse_index = HashMap::with_capacity(initial_cells as usize);
 
         // Make sure we've got the missing texture and any other builtins.
-        tiles.push(ID_MISSING_TEXTURE.clone()); //0
-        tiles.push(ID_PENDING_TEXTURE.clone()); //1
+        tiles.push(ID_MISSING_TEXTURE); //0
+        tiles.push(ID_PENDING_TEXTURE); //1
         for (i, elem) in tiles.iter().enumerate() {
-            reverse_index.insert(elem.clone(), i);
+            reverse_index.insert(*elem, i);
         }
 
         //Many sanity checks
@@ -123,7 +123,7 @@ impl TileAtlasLayout {
     }
 
     pub fn get_index_for_texture(&self, resource: &ResourceId) -> Option<usize> {
-        self.reverse_index.get(resource).map(|elem| *elem)
+        self.reverse_index.get(resource).copied()
     }
 
     pub fn get_or_make_index_for_texture(
@@ -143,9 +143,9 @@ impl TileAtlasLayout {
                     ));
                 }
                 //Insert this into the tiles.
-                self.tiles.push(resource.clone());
+                self.tiles.push(*resource);
                 //Make sure we can look it up the other way, too.
-                self.reverse_index.insert(resource.clone(), idx);
+                self.reverse_index.insert(*resource, idx);
 
                 //Make sure current_height goes up if we made a new row.
                 let (_x, y) = idx_to_xy(idx, self.atlas_width);
@@ -264,5 +264,5 @@ pub fn build_tile_atlas<TextureSource: ImageProvider>(
         sub_image.copy_from(texture_to_use, 0, 0)?;
     }
 
-    return Ok(atlas);
+    Ok(atlas)
 }

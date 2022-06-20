@@ -2,7 +2,7 @@
 // ! I stole your apes lmao 
 use std::{path::PathBuf, fs::OpenOptions, io::{BufReader, BufWriter}};
 
-use gestalt_logger::trace;
+use log::trace;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ pub enum StoredWorldRole {
 }
 
 pub fn path_local_worlds() -> PathBuf {
-    const WORLD_DIR: &'static str = "worlds/";
+    const WORLD_DIR: &str = "worlds/";
     let world_root = PathBuf::from(WORLD_DIR);
     if !world_root.exists() { 
         std::fs::create_dir(&world_root).unwrap();
@@ -34,7 +34,7 @@ pub fn path_for_world(world_id: &WorldId, role: StoredWorldRole) -> PathBuf {
     match role {
         StoredWorldRole::Local => {
             let world_root = path_local_worlds();
-            let result = world_root.join(format!("{}/", world_id.uuid.to_string() ) );
+            let result = world_root.join(format!("{}/", world_id.uuid ) );
             if !result.exists() {
                 std::fs::create_dir(&result).unwrap();
             }

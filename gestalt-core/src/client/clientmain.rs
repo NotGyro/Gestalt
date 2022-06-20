@@ -8,7 +8,7 @@ use std::{
 use glam::Vec4;
 use hashbrown::{HashMap, HashSet};
 use image::RgbaImage;
-use gestalt_logger::{warn, error, info, trace};
+use log::{warn, error, info, trace};
 use rend3::types::{Handedness};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -19,10 +19,9 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::IdentityKeyPair}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TileCoord, TilePos}, client::render::TerrainRenderer};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channel::{NetSendChannel, self}, NetMsgReceiver, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}};
 use crate::{
     client::render::CubeArt,
-    common::identity::NodeIdentity,
     resource::{
         image::{ImageProvider, InternalImage, RetrieveImageError},
         update_global_resource_metadata, ResourceInfo, ResourceId, ResourceStatus,
@@ -35,8 +34,8 @@ use crate::{
 
 use super::camera::{self, Camera};
 
-pub const WINDOW_TITLE: &'static str = "Gestalt";
-pub const CLIENT_CONFIG_FILENAME: &'static str = "client_config.ron";
+pub const WINDOW_TITLE: &str = "Gestalt";
+pub const CLIENT_CONFIG_FILENAME: &str = "client_config.ron";
 
 // Core / main part of the game client. Windowing and event dispatching lives here.
 // Input events come in through here.
@@ -121,6 +120,7 @@ impl DisplayConfig {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClientConfig {
+    pub your_display_name: String, 
     pub display_properties: DisplayConfig,
     pub mouse_sensitivity_x: f32,
     pub mouse_sensitivity_y: f32,
@@ -129,6 +129,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
+            your_display_name: String::from("player"),
             display_properties: Default::default(),
             mouse_sensitivity_x: 64.0,
             mouse_sensitivity_y: 64.0,
@@ -138,9 +139,9 @@ impl Default for ClientConfig {
 
 #[derive(thiserror::Error, Debug)]
 pub enum StartClientError {
-    #[error("could not read client config file, i/o error: {0:?}")]
+    #[error("Could not read client config file, i/o error: {0:?}")]
     CouldntOpenConfig(#[from] std::io::Error),
-    #[error("Attempted to create channel {0}, which exists already.")]
+    #[error("Could not parse server config file due to: {0}")]
     CouldntParseConfig(#[from] ron::Error),
     #[error("Could not initialize display: {0:?}")]
     CreateWindowError(#[from] winit::error::OsError),
@@ -194,23 +195,28 @@ impl DevImageLoader {
         rid.verify(buf.as_slice())?;
 
         let metadata = ResourceInfo {
-            id: rid.clone(),
+            id: rid,
             filename: filename.to_string(),
             path: None,
-            creator: creator_identity.public.clone(),
+            creator: creator_identity.public,
             resource_type: "image/png".to_string(),
             authors: "Gyro".to_string(),
-            description: None,
+            description: Some("Image for early testing purposes.".to_string()),
             kind: ResourceKind::PlainOldData,
             signature: creator_identity.sign(&buf)?,
         };
 
         update_global_resource_metadata(&rid, metadata.clone());
 
-        self.images.insert(rid.clone(), image.into_rgba8());
+        self.images.insert(rid, image.into_rgba8());
         self.metadata.insert(rid, metadata);
 
         Ok(rid)
+    }
+}
+impl Default for DevImageLoader {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -221,31 +227,34 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
     const DIRT_ID: TileId = 2; 
     const GRASS_ID: TileId = 3; 
 
-    if chunk_position.y > 0 { 
-        Chunk {
+    match chunk_position.y { 
+        value if value > 0 => Chunk {
             revision: 0,
             inner: ChunkInner::Uniform(AIR_ID),
-        }
-    } else if chunk_position.y == 0 {
-        let mut chunk = Chunk::new(STONE_ID);
-        for pos in chunk.get_bounds() { 
-            if pos.y == (CHUNK_SIZE as u16 - 1) {
-                chunk.set(pos, GRASS_ID).unwrap();
-            } else if pos.y > (CHUNK_SIZE as u16 - 4) { 
-                chunk.set(pos, DIRT_ID).unwrap();
+        }, 
+        0 => {
+            let mut chunk = Chunk::new(STONE_ID);
+            for pos in chunk.get_bounds() { 
+                if pos.y == (CHUNK_SIZE as u16 - 1) {
+                    chunk.set(pos, GRASS_ID).unwrap();
+                } else if pos.y > (CHUNK_SIZE as u16 - 4) { 
+                    chunk.set(pos, DIRT_ID).unwrap();
+                }
+                //Otherwise it stays stone. 
             }
-            //Otherwise it stays stone. 
-        }
-        chunk
-    } else /* chunk_position.y is less than zero */ { 
-        Chunk {
-            revision: 0,
-            inner: ChunkInner::Uniform(STONE_ID),
+            chunk
+        },
+        _ => { 
+            /* chunk_position.y is less than zero */
+            Chunk {
+                revision: 0,
+                inner: ChunkInner::Uniform(STONE_ID),
+            }
         }
     }
 }
 
-pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &Vec<TileId>, max_steps: u32) -> Result<(TilePos, TileId, VoxelSide), TileSpaceError> {
+pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], max_steps: u32) -> Result<(TilePos, TileId, VoxelSide), TileSpaceError> {
     let mut raycast = VoxelRaycast::new(*camera.get_position(), *camera.get_front());
     for _i in 0..max_steps {
         let resl = world_space.get(raycast.pos)?;
@@ -257,35 +266,7 @@ pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &Vec<TileId
     todo!()
 }
 
-pub fn run_client(identity_keys: IdentityKeyPair) {
-    let event_loop = winit::event_loop::EventLoop::new();
-    // Open config
-    let mut open_options = std::fs::OpenOptions::new();
-    open_options.read(true).append(true).create(true);
-
-    let config_maybe: Result<ClientConfig, StartClientError> = open_options
-        .open(CLIENT_CONFIG_FILENAME)
-        .map_err(|e| StartClientError::from(e))
-        .and_then(|file| {
-            let mut buf_reader = BufReader::new(file);
-            let mut contents = String::new();
-            buf_reader
-                .read_to_string(&mut contents)
-                .map_err(|e| StartClientError::from(e))?;
-            Ok(contents)
-        })
-        .and_then(|e| Ok(ron::from_str(e.as_str()).map_err(|e| StartClientError::from(e))?));
-    //If that didn't load, just use built-in defaults.
-    let config: ClientConfig = match config_maybe {
-        Ok(c) => c,
-        Err(e) => {
-            warn!(
-                "Couldn't open client config, using defaults. Error was: {:?}",
-                e
-            );
-            ClientConfig::default()
-        }
-    };
+pub fn get_lobby_world_id(pubkey: &NodeIdentity) -> WorldId { 
 
     // Figure out lobby world ID
     let world_defaults_path = path_local_worlds().join("world_defaults.ron");
@@ -304,7 +285,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             drop(buf_reader);
             drop(defaults_file);
             drop(contents);
-            match world_defaults.lobby_world_id.clone() {
+            match world_defaults.lobby_world_id {
                 Some(uuid) => uuid,
                 None => {
                     let uuid = Uuid::new_v4();
@@ -340,10 +321,79 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
             world_uuid
         },
     };
-    let world_id = WorldId { 
+    WorldId { 
         uuid: lobby_world_id,
-        host: identity_keys.public.clone(),
+        host: pubkey.clone(),
+    }
+}
+
+pub fn load_or_generate_dev_world(world: &mut TileSpace, world_id: &WorldId, chunk_range: VoxelRange<i32>, mut terrain_notify: Option<&mut TerrainRenderer>) -> Result<(), Box<dyn Error>> { 
+    let worldgen_start = Instant::now();
+    // Build chunks and then immediately let the mesher know they're new. 
+    for chunk_position in chunk_range {
+        let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
+        let chunk = if chunk_file_path.exists() {
+            fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position)?
+        }
+        else {
+            gen_test_chunk(chunk_position)
+        };
+        world.ingest_loaded_chunk(chunk_position, chunk)?;
+        if let Some(terrain_renderer) = terrain_notify.as_mut() {
+            terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
+        }
+    }
+    let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
+    info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+    Ok(())
+}
+
+// Never returns. Unfortunately the event loop's exit functionality does not just destroy the event loop, it closes the program.
+pub fn run_client(identity_keys: IdentityKeyPair, 
+        voxel_event_sender: NetSendChannel<VoxelChangeRequest>, 
+        mut voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, 
+        server_identity: Option<NodeIdentity>, 
+        async_runtime: tokio::runtime::Runtime,
+        quit_sender: tokio::sync::mpsc::UnboundedSender<()>,
+        mut quit_ready_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,) {
+    let event_loop = winit::event_loop::EventLoop::new();
+    // Open config
+    let mut open_options = std::fs::OpenOptions::new();
+    open_options.read(true).append(true).create(true);
+
+    let config_maybe: Result<ClientConfig, StartClientError> = open_options
+        .open(CLIENT_CONFIG_FILENAME)
+        .map_err(StartClientError::from)
+        .and_then(|file| {
+            let mut buf_reader = BufReader::new(file);
+            let mut contents = String::new();
+            buf_reader
+                .read_to_string(&mut contents)
+                .map_err(StartClientError::from)?;
+            Ok(contents)
+        })
+        .and_then(|e| ron::from_str(e.as_str()).map_err(StartClientError::from));
+    //If that didn't load, just use built-in defaults.
+    let config: ClientConfig = match config_maybe {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                "Couldn't open client config, using defaults. Error was: {:?}",
+                e
+            );
+            ClientConfig::default()
+        }
     };
+
+    // Let the server know we're joining if they're there. 
+    if let Some(server) = server_identity.as_ref() {
+        let join_msg = JoinDefaultEntry {
+            display_name: config.your_display_name.clone(),
+        };
+        net_channel::send_to(&join_msg, server).unwrap(); 
+    }
+
+    let world_id = get_lobby_world_id(&identity_keys.public);
 
     // Set up window and event loop.
     let window_builder = config.display_properties.to_window_builder();
@@ -398,7 +448,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
     )
     .unwrap();
 
-    println!(
+    info!(
         "Launching with rendering device: {:?}",
         &renderer.adapter_info
     );
@@ -430,10 +480,10 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     let mut image_loader = DevImageLoader::new();
 
-    let test_dome_thing_image_id = image_loader.preload_image_file("test.png", identity_keys.clone()).unwrap();
-    let test_grass_image_id = image_loader.preload_image_file("testgrass.png", identity_keys.clone()).unwrap();
-    let test_stone_image_id = image_loader.preload_image_file("teststone.png", identity_keys.clone()).unwrap();
-    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png", identity_keys.clone()).unwrap();
+    let test_dome_thing_image_id = image_loader.preload_image_file("test.png", identity_keys).unwrap();
+    let test_grass_image_id = image_loader.preload_image_file("testgrass.png", identity_keys).unwrap();
+    let test_stone_image_id = image_loader.preload_image_file("teststone.png", identity_keys).unwrap();
+    let test_dirt_image_id = image_loader.preload_image_file("testdirt.png", identity_keys).unwrap();
 
     let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
@@ -448,25 +498,11 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     // Set up our test world a bit 
     let mut world_space = TileSpace::new();
-    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(4,4,4), lower: vpos!(-3,-3,-3) };
+    let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
     // Set up our voxel mesher.
     let mut terrain_renderer = TerrainRenderer::new(64);
 
-    let worldgen_start = Instant::now();
-    // Build chunks and then immediately let the mesher know they're new. 
-    for chunk_position in test_world_range {
-        let chunk_file_path = fsworldstorage::path_for_chunk(&world_id, StoredWorldRole::Local, &chunk_position);
-        let chunk = if chunk_file_path.exists() {
-            fsworldstorage::load_chunk(&world_id, StoredWorldRole::Local, &chunk_position).unwrap()
-        }
-        else {
-            gen_test_chunk(chunk_position)
-        };
-        world_space.ingest_loaded_chunk(chunk_position, chunk).unwrap();
-        terrain_renderer.notify_chunk_remesh_needed(&chunk_position);
-    }
-    let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
-    info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
+    load_or_generate_dev_world(&mut world_space, &world_id, test_world_range, Some(&mut terrain_renderer)).unwrap();
 
     //Remesh
     let meshing_start = Instant::now();
@@ -506,14 +542,8 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     let mut current_down = HashSet::new();
 
-    //let mut prev_frame_time = Instant::now();
-
-    //let first_frame_time = Instant::now();
-
     let game_start_time = Instant::now();
     let mut prev_frame_time = Instant::now();
-
-    //let mut previous_mouse_position: Option<PhysicalPosition<f64>> = None;
 
     let ambient_light = Vec4::new(0.0, 0.4, 0.1, 0.0);
 
@@ -535,6 +565,15 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
 
     event_loop.run(move |event, _, control| {
         let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
+        if let Ok(events) = voxel_event_receiver.try_recv() { 
+            for (_ident, announce) in events { 
+                let old_value = world_space.get(announce.pos).unwrap();
+                if announce.new_tile != *old_value { 
+                    world_space.set(announce.pos, announce.new_tile).unwrap(); 
+                    terrain_renderer.notify_changed(&announce.pos);
+                }
+            }
+        }
         match event {
             //WindowEvent::MouseInput is more useful for GUI input 
             winit::event::Event::WindowEvent {
@@ -595,9 +634,18 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         None
                     },
                 };
-                if let Some((result_position, result_id)) = hit {    
+                if let Some((result_position, _result_id)) = hit {    
                     match world_space.set(result_position, air_id) {
                         Ok(()) => {
+
+                            if let Some(server) = server_identity.as_ref() { 
+                                let voxel_msg = VoxelChangeRequest {
+                                    pos: result_position.clone(),
+                                    new_tile: air_id,
+                                };
+                                voxel_event_sender.send(&voxel_msg).unwrap();
+                            }
+
                             terrain_renderer.notify_changed(&result_position);
                         },
                         Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
@@ -623,7 +671,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     },
                     Err(e) => {
                         panic!("Tile access error: {:?}", e);
-                        None
+                        //None
                     },
                 };
                 if let Some((result_position, _result_id, hit_side)) = hit {
@@ -635,6 +683,15 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                         if *placement_id != stone_id {
                             match world_space.set(placement_position, stone_id) {
                                 Ok(()) => {
+                                    
+                                    if let Some(server) = server_identity.as_ref() { 
+                                        let voxel_msg = VoxelChangeRequest {
+                                            pos: result_position.clone(),
+                                            new_tile: stone_id,
+                                        };
+                                        voxel_event_sender.send(&voxel_msg).unwrap();
+                                    }
+
                                     terrain_renderer.notify_changed(&placement_position);
                                 },
                                 Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
@@ -670,7 +727,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = true; 
                     }
-                    let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
+                    let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);
                     if let Some(dir) = dir_maybe { 
                         current_down.insert(dir);
                     }
@@ -690,7 +747,13 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = false; 
                     }
-                    let dir_maybe = input.virtual_keycode.map(|k| camera::Directions::from_key(k)).flatten();
+                    else if input.virtual_keycode == Some(VirtualKeyCode::Escape) { 
+                        //Quit
+                        quit_sender.send(()).unwrap();
+                        async_runtime.block_on(quit_ready_receiver.recv());
+                        *control = ControlFlow::Exit;
+                    }
+                    let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);
                     if let Some(dir) = dir_maybe { 
                         current_down.remove(&dir);
                     }
@@ -736,7 +799,7 @@ pub fn run_client(identity_keys: IdentityKeyPair) {
                 if has_focus { 
                     //Move camera
                     for dir in current_down.iter() {
-                        camera.key_interact(*dir, elapsed_time.clone());
+                        camera.key_interact(*dir, elapsed_time);
                     }
                     //Update camera
                     renderer.set_camera_data(rend3::types::Camera {

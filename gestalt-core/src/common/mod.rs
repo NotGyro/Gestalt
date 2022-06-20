@@ -1,9 +1,10 @@
+pub mod growable_buffer;
 pub mod identity;
 pub mod message;
 #[macro_use]
 pub mod voxelmath;
 
-use std::{fmt::Display, future::Future, pin::Pin, time::{SystemTime, UNIX_EPOCH}};
+use std::{fmt::Display, future::Future, pin::Pin};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,10 +12,13 @@ pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
 macro_rules! version {
     ($major:expr,$minor:expr,$patch:expr,$build:expr) => {
-        Version::new($major as u32, $minor as u32, $patch as u32, $build as u32)
+        crate::common::Version::new($major as u32, $minor as u32, $patch as u32, $build as u32)
     };
     ($major:expr,$minor:expr,$patch:expr) => {
-        Version::new($major as u32, $minor as u32, $patch as u32, 0u32)
+        crate::common::Version::new($major as u32, $minor as u32, $patch as u32, 0u32)
+    };
+    ($major:expr,$minor:expr) => {
+        crate::common::Version::new($major as u32, $minor as u32, 0u32, 0u32)
     };
 }
 
@@ -93,7 +97,7 @@ impl Version {
         in_progress.remove_matches("version");
 
         //Make sure it contains at least one separator character.
-        if !(in_progress.contains(".") || in_progress.contains(":") || in_progress.contains("-")) {
+        if !(in_progress.contains('.') || in_progress.contains(':') || in_progress.contains('-')) {
             return Err(ParseVersionError::NoSeparators(value.to_string()));
         }
         let split = in_progress.split(|c| {
@@ -114,7 +118,7 @@ impl Version {
             field: &str,
             original_string: String,
         ) -> Result<u32, ParseVersionError> {
-            let big_number = u128::from_str_radix(field, 10).map_err(|_e| {
+            let big_number = field.parse::<u128>().map_err(|_e| {
                 ParseVersionError::NotNumber(field.to_string(), original_string.clone())
             })?;
             if big_number > (u32::MAX as u128) {
@@ -169,61 +173,8 @@ impl Display for Version {
 }
 impl std::fmt::Debug for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Version({})", self.to_string())
+        write!(f, "Version({})", self)
     }
-}
-
-#[test]
-fn version_order_correct() {
-    let ver_new = Version::new(20, 2, 3, 64);
-    let ver_old = Version::new(1, 1, 1, 20000);
-
-    assert!(ver_new > ver_old);
-}
-
-#[test]
-fn version_macro() {
-    let a = version!(2, 10, 1);
-    assert_eq!(a.major(), 2);
-    assert_eq!(a.minor(), 10);
-    assert_eq!(a.patch(), 1);
-}
-
-#[test]
-fn version_to_string() {
-    let ver = version!(20, 1, 2);
-    let stringified = ver.to_string();
-    assert_eq!(stringified.as_str(), "20.1.2");
-
-    let ver2 = version!(13, 13, 2, 242);
-    let stringified2 = ver2.to_string();
-    assert_eq!(stringified2.as_str(), "13.13.2-build242");
-}
-
-#[test]
-fn test_parse_version() {
-    let stringy = "v0.1.12";
-    let ver = Version::parse(stringy).unwrap();
-    assert_eq!(ver.major(), 0);
-    assert_eq!(ver.minor(), 1);
-    assert_eq!(ver.patch(), 12);
-    drop(stringy);
-
-    let stringy_with_build = "v7.20.1-build18";
-    let ver_with_build = Version::parse(stringy_with_build).unwrap();
-
-    assert_eq!(ver_with_build.major(), 7);
-    assert_eq!(ver_with_build.minor(), 20);
-    assert_eq!(ver_with_build.patch(), 1);
-    assert_eq!(ver_with_build.build(), 18);
-
-    //Gracefully interpret weird version numbers
-    let terrible_version_string = "v20 - 19 - 19 :: BUILD(01)";
-    let ver_cleaned = Version::parse(terrible_version_string).unwrap();
-    assert_eq!(ver_cleaned.major(), 20);
-    assert_eq!(ver_cleaned.minor(), 19);
-    assert_eq!(ver_cleaned.patch(), 19);
-    assert_eq!(ver_cleaned.build(), 1);
 }
 
 // Used for serializing and deserializing for Serde
@@ -268,4 +219,56 @@ pub mod version_string {
     {
         deserializer.deserialize_string(VersionVisitor {})
     }
+}
+
+#[test]
+fn version_order_correct() {
+    let ver_new = Version::new(20, 2, 3, 64);
+    let ver_old = Version::new(1, 1, 1, 20000);
+
+    assert!(ver_new > ver_old);
+}
+
+#[test]
+fn version_macro() {
+    let a = version!(2, 10, 1);
+    assert_eq!(a.major(), 2);
+    assert_eq!(a.minor(), 10);
+    assert_eq!(a.patch(), 1);
+}
+
+#[test]
+fn version_to_string() {
+    let ver = version!(20, 1, 2);
+    let stringified = ver.to_string();
+    assert_eq!(stringified.as_str(), "20.1.2");
+
+    let ver2 = version!(13, 13, 2, 242);
+    let stringified2 = ver2.to_string();
+    assert_eq!(stringified2.as_str(), "13.13.2-build242");
+}
+
+#[test]
+fn test_parse_version() {
+    let stringy = "v0.1.12";
+    let ver = Version::parse(stringy).unwrap();
+    assert_eq!(ver.major(), 0);
+    assert_eq!(ver.minor(), 1);
+    assert_eq!(ver.patch(), 12);
+
+    let stringy_with_build = "v7.20.1-build18";
+    let ver_with_build = Version::parse(stringy_with_build).unwrap();
+
+    assert_eq!(ver_with_build.major(), 7);
+    assert_eq!(ver_with_build.minor(), 20);
+    assert_eq!(ver_with_build.patch(), 1);
+    assert_eq!(ver_with_build.build(), 18);
+
+    //Gracefully interpret weird version numbers
+    let terrible_version_string = "v20 - 19 - 19 :: BUILD(01)";
+    let ver_cleaned = Version::parse(terrible_version_string).unwrap();
+    assert_eq!(ver_cleaned.major(), 20);
+    assert_eq!(ver_cleaned.minor(), 19);
+    assert_eq!(ver_cleaned.patch(), 19);
+    assert_eq!(ver_cleaned.build(), 1);
 }

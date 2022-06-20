@@ -106,7 +106,7 @@ impl Camera {
     }
 
     pub fn mouse_interact(&mut self, dx: f32, dy: f32) {
-        self.yaw = self.yaw - dx;
+        self.yaw -= dx;
         self.pitch = (self.pitch - dy).max(-89.0).min(89.0);
 
         self.front = Camera::calc_front(self.yaw, self.pitch);

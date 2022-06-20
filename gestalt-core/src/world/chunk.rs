@@ -1,7 +1,7 @@
 use std::{mem::MaybeUninit, io::{Seek, SeekFrom, Write}};
 
 use hashbrown::HashMap;
-use gestalt_logger::warn;
+use log::warn;
 use serde::{Serialize, Deserialize};
 
 use crate::common::{voxelmath::*, Version};
@@ -13,7 +13,7 @@ use super::{
 
 pub const CHUNK_FILE_VERSION: Version = version!(0,0,1);
 
-pub const CHUNK_EXP : usize = 4;
+pub const CHUNK_EXP : usize = 5;
 pub const CHUNK_SIZE: usize = 2_usize.pow(CHUNK_EXP as u32);
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
@@ -42,7 +42,7 @@ pub enum ChunkError {
 pub struct ChunkSmall<T: Voxel> {
     //Attempting to use the constant causes Rust to freak out for some reason
     //so I simply type 16
-    pub inner: VoxelArrayStatic<u8, 16>,
+    pub inner: VoxelArrayStatic<u8, 32>,
     pub palette: [T; 256],
     pub reverse_palette: HashMap<T, u8>,
     pub highest_idx: u8,
@@ -71,7 +71,7 @@ impl<T: Voxel> ChunkSmall<T> {
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: T) -> Option<u8> {
-        self.reverse_palette.get(&tile).map(|v| *v)
+        self.reverse_palette.get(&tile).copied()
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<&T> {
@@ -120,8 +120,8 @@ impl<T: Voxel> ChunkSmall<T> {
             None => {
                 self.palette_dirty = true;
                 //We have run out of space.
-                if self.highest_idx >= 255 {
-                    return None;
+                if self.highest_idx == 255 {
+                    None
                 } else {
                     self.highest_idx += 1;
                     let idx = self.highest_idx;
@@ -138,7 +138,7 @@ impl<T: Voxel> ChunkSmall<T> {
 pub struct ChunkLarge<T: Voxel> {
     //Attempting to use the constant causes Rust to freak out for some reason
     //so I simply type 16
-    pub inner: VoxelArrayStatic<u16, 16>,
+    pub inner: VoxelArrayStatic<u16, 32>,
     pub palette: HashMap<u16, T>,
     pub reverse_palette: HashMap<T, u16>,
     pub palette_dirty: bool,
@@ -151,7 +151,7 @@ impl<T: Voxel> ChunkLarge<T> {
     }
     #[inline(always)]
     pub fn get(&self, coord: VoxelPos<u16>) -> &T {
-        &self.palette.get(&self.inner.get_raw(coord)).unwrap()
+        self.palette.get(self.inner.get_raw(coord)).unwrap()
     }
     #[inline(always)]
     pub fn get_raw_i(&self, i: usize) -> &u16 {
@@ -164,7 +164,7 @@ impl<T: Voxel> ChunkLarge<T> {
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: T) -> Option<u16> {
-        self.reverse_palette.get(&tile).map(|v| *v)
+        self.reverse_palette.get(&tile).copied()
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<&T> {
@@ -311,8 +311,8 @@ impl<T: Voxel> Chunk<T> {
                     reverse_palette.insert(tile, 1);
                     self.inner = ChunkInner::Small(Box::new(ChunkSmall {
                         inner: structure,
-                        palette: palette,
-                        reverse_palette: reverse_palette,
+                        palette,
+                        reverse_palette,
                         highest_idx: 1,
                         palette_dirty: false,
                     }));
@@ -369,7 +369,7 @@ impl Chunk<TileId> {
                 let entry = SmallPaletteEntry {
                     to_tile: *value,
                 };
-                let entry_bytes = entry.to_le_bytes();
+                let entry_bytes = entry.as_le_bytes();
                 writer.write_all(&entry_bytes)?;
                 entry_bytes.len()
             },
@@ -379,9 +379,9 @@ impl Chunk<TileId> {
                     let entry = SmallPaletteEntry {
                         to_tile: value,
                     };
-                    let entry_bytes = entry.to_le_bytes();
+                    let entry_bytes = entry.as_le_bytes();
                     writer.write_all(&entry_bytes)?;
-                    total = total + entry_bytes.len();
+                    total += entry_bytes.len();
                 }
                 total
             },
@@ -392,9 +392,9 @@ impl Chunk<TileId> {
                         from_index: *idx,
                         to_tile: *tile,
                     };
-                    let entry_bytes = entry.to_le_bytes();
+                    let entry_bytes = entry.as_le_bytes();
                     writer.write_all(&entry_bytes)?;
-                    total = total + entry_bytes.len();
+                    total += entry_bytes.len();
                 }
                 total
             },
@@ -424,7 +424,6 @@ impl Chunk<TileId> {
 
     pub fn write_chunk<W: Write + Seek>(&self, writer: &mut W) -> Result<(), ChunkIoError> {
         let mut header = ChunkFileHeader {
-            revision: self.revision,
             variant: match &self.inner {
                 ChunkInner::Uniform(_) => ChunkFileVariant::Uniform,
                 ChunkInner::Small(smallchunk) => ChunkFileVariant::Small{highest_idx: smallchunk.highest_idx},
@@ -445,7 +444,8 @@ impl Chunk<TileId> {
         assert!(new_header_vec.len() <= header_len);
 
         let pre_header = ChunkFilePreHeader {
-            version: CHUNK_FILE_VERSION.clone(),
+            version: CHUNK_FILE_VERSION,
+            revision: self.revision,
             header_length: new_header_vec.len() as u32,
         };
         let pre_header_bytes = pre_header.to_le_bytes();
@@ -510,7 +510,7 @@ impl SmallPaletteEntry {
     pub const fn serialized_length() -> usize {
         std::mem::size_of::<TileId>()
     }
-    fn to_le_bytes(&self) -> [u8; 4] {
+    fn as_le_bytes(&self) -> [u8; 4] {
         #[cfg(debug_assertions)]
         {
             assert_eq!(Self::serialized_length(), 4)
@@ -544,7 +544,7 @@ impl LargePaletteEntry {
         std::mem::size_of::<u16>()
         + std::mem::size_of::<TileId>()
     }
-    fn to_le_bytes(&self) -> [u8; 6] { 
+    fn as_le_bytes(&self) -> [u8; 6] { 
         #[cfg(debug_assertions)]
         {
             assert_eq!(Self::serialized_length(), 6)
@@ -640,17 +640,17 @@ pub fn deserialize_small_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -
         let mut buffer =  MaybeUninit::<[u8; CHUNK_SIZE_CUBED]>::uninit();
         let ptr = { &mut *buffer.as_mut_ptr() };
         reader.read_exact(ptr)?;
-        drop(ptr);
         buffer.assume_init()
     };
 
     Ok(output)
 }
 
+#[allow(clippy::needless_range_loop)]
 pub fn deserialize_large_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -> Result<[u16; CHUNK_SIZE_CUBED], ChunkIoError> {
     let output = unsafe {
         // Avoid writing CHUNK_SIZE_CUBED zeroes - we will need to tell Rust to do things it considers evil. 
-        let mut buffer =  MaybeUninit::<[u16; CHUNK_SIZE_CUBED]>::uninit();
+        let mut buffer = Box::new(MaybeUninit::<[u16; CHUNK_SIZE_CUBED]>::uninit());
         let ptr = { &mut *buffer.as_mut_ptr() };
         // Read these things individually to ensure endianness isn't mangled. TODO: find a way to optimize this that doesn't break with endianness stuff.
         for i in 0..CHUNK_SIZE_CUBED { 
@@ -696,38 +696,49 @@ pub enum ChunkIoError {
 ///"Plain old bytes" descriptive information before the messagepack header.
 pub struct ChunkFilePreHeader { 
     version: Version,
+    /// How many changes have been made to this chunk? 0 implies the chunk is exactly as it was spit out of the world generator. 
+    revision: u64,
     /// Length of the "ChunkFileHeader" that comes after this PreHeader. 
     header_length: u32,
 }
 
 impl ChunkFilePreHeader { 
-    pub fn new(header_length: usize) -> Self { 
+    pub fn new(header_length: usize, revision: u64) -> Self { 
         Self {
-            version: CHUNK_FILE_VERSION.clone(),
+            version: CHUNK_FILE_VERSION,
             header_length: header_length as u32,
+            revision
         }
     }
     pub const fn serialized_length() -> usize { 
-        std::mem::size_of::<u128>() + std::mem::size_of::<u32>()
+        std::mem::size_of::<u128>() + std::mem::size_of::<u64>() + std::mem::size_of::<u32>()
     }
-    pub fn to_le_bytes(&self) -> [u8; std::mem::size_of::<u128>() + std::mem::size_of::<u32>()] { 
-        let mut out_buffer = [0; std::mem::size_of::<u128>() + std::mem::size_of::<u32>()];
+    pub fn to_le_bytes(&self) -> [u8; Self::serialized_length()] { 
+        let mut out_buffer = [0; Self::serialized_length()];
         let version_bytes = self.version.as_bytes();
         out_buffer[0..std::mem::size_of::<u128>()].copy_from_slice(&version_bytes);
+
+        let revision_bytes = self.revision.to_le_bytes();
+        out_buffer[std::mem::size_of::<u128>()..std::mem::size_of::<u128>()+std::mem::size_of::<u64>()].copy_from_slice(&revision_bytes);
+        
         let header_len_bytes = self.header_length.to_le_bytes();
-        out_buffer[std::mem::size_of::<u128>()..std::mem::size_of::<u128>()+std::mem::size_of::<u32>()].copy_from_slice(&header_len_bytes);
+        out_buffer[std::mem::size_of::<u128>()+std::mem::size_of::<u64>()..std::mem::size_of::<u128>()+std::mem::size_of::<u64>()+std::mem::size_of::<u32>()].copy_from_slice(&header_len_bytes);
         out_buffer
     }
-    pub fn from_le_bytes(bytes: &[u8; std::mem::size_of::<u128>() + std::mem::size_of::<u32>()]) -> Self { 
+    pub fn from_le_bytes(bytes: &[u8; Self::serialized_length()]) -> Self { 
         let mut version_buffer = [0;std::mem::size_of::<u128>()];
         version_buffer.copy_from_slice(&bytes[0..std::mem::size_of::<u128>()]);
+        let mut revision_buffer = [0;std::mem::size_of::<u64>()];
+        revision_buffer.copy_from_slice(&bytes[std::mem::size_of::<u128>() .. std::mem::size_of::<u128>() + std::mem::size_of::<u64>()]);
         let mut header_len_buffer = [0;std::mem::size_of::<u32>()];
-        header_len_buffer.copy_from_slice(&bytes[std::mem::size_of::<u128>() .. std::mem::size_of::<u128>() + std::mem::size_of::<u32>()]);
+        header_len_buffer.copy_from_slice(&bytes[std::mem::size_of::<u128>() + std::mem::size_of::<u64>() .. std::mem::size_of::<u128>() + std::mem::size_of::<u64>() + std::mem::size_of::<u32>()]);
 
         let version = Version::from_bytes(&version_buffer);
+        let revision = u64::from_le_bytes(revision_buffer);
         let header_length = u32::from_le_bytes(header_len_buffer);
         Self { 
             version, 
+            revision,
             header_length
         }
     }
@@ -736,7 +747,6 @@ impl ChunkFilePreHeader {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub struct ChunkFileHeader {
-    revision: u64,
     variant: ChunkFileVariant,
     header_end_data_start: u32,
     data_end_palette_start: u32,
@@ -822,7 +832,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
     let mut header_bytes = vec![0; pre_header.header_length as usize];
     reader.read_exact(&mut header_bytes)?;
 
-    let header: ChunkFileHeader = rmp_serde::decode::from_read_ref(&header_bytes)?;
+    let header: ChunkFileHeader = rmp_serde::decode::from_slice(&header_bytes)?;
     drop(header_bytes);
 
     header.validate()?;
@@ -842,7 +852,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
             let value = palette[0];
             Ok(Chunk{ 
                 inner: ChunkInner::Uniform(value),
-                revision: header.revision,
+                revision: pre_header.revision,
             })
         },
         ChunkFileVariant::Small { highest_idx } => {
@@ -856,7 +866,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
 
             let mut reverse_palette = HashMap::new();
             for (i, elem) in palette.iter().enumerate() { 
-                reverse_palette.insert(elem.clone(), i as u8);
+                reverse_palette.insert(*elem, i as u8);
             }
 
             Ok(Chunk{ 
@@ -871,7 +881,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
                         }
                     )
                 ),
-                revision: header.revision,
+                revision: pre_header.revision,
             })
         },
         ChunkFileVariant::Large => {
@@ -885,7 +895,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
 
             let mut reverse_palette = HashMap::new();
             for (i, elem) in palette.iter() { 
-                reverse_palette.insert(elem.clone(), i.clone());
+                reverse_palette.insert(*elem, *i);
             }
 
             Ok(Chunk{ 
@@ -899,7 +909,7 @@ pub fn deserialize_chunk<R: std::io::BufRead + Seek>(reader: &mut R) -> Result<C
                         }
                     )
                 ),
-                revision: header.revision,
+                revision: pre_header.revision,
             })
         },
     }
@@ -1061,8 +1071,8 @@ fn assignemnts_to_chunk() {
 fn chunk_serialize_deserialize() {
     use std::io::{BufWriter, Cursor};
 
-    let air_block = 0; 
-    let stone_block = 37; 
+    let air_block = 0;
+    let stone_block = 37;
 
     let starting_chunk: Chunk<TileId> = Chunk {
         revision: 1337,
@@ -1122,7 +1132,7 @@ fn chunk_serialize_deserialize() {
     
     // Let's modify the chunk a bit, getting a Large variant chunk
     for pos in chunk.get_bounds() {
-        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileId;
+        let value = (((((pos.x % 16) as usize) * (pos.y % 16) as usize) * (pos.z % 16) as usize) % 4096) as TileId;
         chunk.set(pos, value).unwrap();
     }
 
@@ -1142,7 +1152,7 @@ fn chunk_serialize_deserialize() {
     drop(buffer);
 
     for pos in chunk.get_bounds() { 
-        let value = (((pos.x as usize) * (pos.y as usize) * (pos.z as usize)) % 4096) as TileId;
+        let value = ((((pos.x % 16) as usize) * ((pos.y % 16) as usize) * ((pos.z % 16) as usize)) % 4096) as TileId;
         assert_eq!(*chunk.get(pos).unwrap(), value);
     }
 }
