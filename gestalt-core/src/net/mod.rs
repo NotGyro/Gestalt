@@ -256,14 +256,19 @@ impl LaminarConnectionManager {
 
     /// Ingests a batch of packets coming off the wire.
     pub fn process_inbound<T: IntoIterator< Item: AsRef<[u8]> >>(&mut self, inbound_messages: T, time: Instant) -> Result<(), LaminarWrapperError> {
+        let mut at_least_one = false; 
         let messenger = &mut self.messenger;
-        for payload in inbound_messages.into_iter() { 
+        for payload in inbound_messages.into_iter() {
+            at_least_one = true;  
             let was_est = self.connection_state.is_established();
             //Processing inbound
             self.connection_state.process_packet(messenger, payload.as_ref(), time);
             if !was_est && self.connection_state.is_established() {
                 info!("Connection established with {:?}", self.peer_address);
             }
+        }
+        if at_least_one { 
+            self.connection_state.last_heard = time.clone(); 
         }
 
         self.connection_state.update(messenger, time);
@@ -667,6 +672,11 @@ impl Session {
                 Err(e) => errors.push(e),
             }
         }
+
+        if batch.len() > 0 { 
+            self.laminar.connection_state.last_heard = time;
+        }
+
         match self.laminar.process_inbound(batch, time) {
             Ok(_) => {},
             Err(e) => errors.push(e.into()),
@@ -674,6 +684,7 @@ impl Session {
 
         //Packets to send to the rest of the Gestalt application, having been decoded.
         let mut processed_packets: Vec<laminar::SocketEvent> = self.laminar.empty_inbox();
+
         //Are any of these types of Laminar packets which should close the channel? 
         let drop_packets: Vec<laminar::SocketEvent> = processed_packets.drain_filter(|packet| { 
             match packet {
@@ -797,7 +808,6 @@ impl Session {
         let mut processed_send: Vec<OuterEnvelope> = Vec::with_capacity(to_send.len());
         
         for (_, packet) in to_send {
-
             match self.encrypt_packet(&packet) {
                 Ok(envelope) => processed_send.push(envelope),
                 Err(e) => errors.push(e),
