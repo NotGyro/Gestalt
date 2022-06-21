@@ -10,8 +10,8 @@ fn main() {
         std::fs::create_dir_all(generated_path).unwrap();
     }
 
-    string_cache_codegen::AtomType::new("msgtype::MsgType", "msg_type!")
+    string_cache_codegen::AtomType::new("gestalt_atom::GestaltAtom", "gestalt_atom!")
         .atoms(&["foo", "bar"])
-        .write_to_file(&generated_path.join("msg_type.rs"))
+        .write_to_file(&generated_path.join("gestalt_atom.rs"))
         .unwrap()
 }

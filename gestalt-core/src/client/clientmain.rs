@@ -415,7 +415,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     
     // Create the Instance, Adapter, and Device. We can specify preferred backend,
     // device name, or rendering mode. In this case we let rend3 choose for us.
-    let iad = pollster::block_on(rend3::create_iad(
+    let iad = async_runtime.block_on(rend3::create_iad(
         Some(Backend::Vulkan),
         config
             .display_properties
