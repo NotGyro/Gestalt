@@ -660,6 +660,8 @@ pub fn deserialize_large_chunk_voxel_data<R: std::io::BufRead>(reader: &mut R) -
             //Write to our buffer. (...indirectly.)
             ptr[i] = v; 
         }
+        //It's already the standard library's method so I'm not sure what this warning is about.
+        #[allow(unstable_name_collisions)]
         buffer.assume_init()
     };
 
