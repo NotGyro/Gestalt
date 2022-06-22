@@ -17,7 +17,7 @@
 
 use lazy_static::lazy_static;
 
-use hashbrown::HashSet;
+use std::collections::HashSet;
 use log::{error, info, warn, debug};
 use parking_lot::Mutex;
 use serde::__private::de::IdentifierDeserializer;

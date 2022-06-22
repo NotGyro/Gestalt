@@ -4,7 +4,7 @@ use crate::resource::image::{
 use crate::resource::ResourceId;
 use log::error;
 use glam::Vec2;
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use image::{GenericImage, ImageError};
 
 use super::{generate_missing_texture_image, generate_pending_texture_image};

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use glam::{Vec3, Quat};
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use image::{Rgba, RgbaImage};
 use rend3::types::{MeshBuilder, Handedness};
 

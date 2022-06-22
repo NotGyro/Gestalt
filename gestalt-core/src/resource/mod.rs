@@ -1,7 +1,7 @@
 use crate::common::identity::NodeIdentity;
 
 use ed25519::Signature;
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};

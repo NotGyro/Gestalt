@@ -4,7 +4,7 @@ use crate::common::identity::NodeIdentity;
 
 use parking_lot::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use lazy_static::lazy_static;
 
 use super::{NetMsg, PacketIntermediary};

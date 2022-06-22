@@ -30,7 +30,7 @@ use log::{LevelFilter, info, error};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
 use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version};
-use hashbrown::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap};
 use mlua::LuaOptions;
 use tokio::sync::mpsc;
 

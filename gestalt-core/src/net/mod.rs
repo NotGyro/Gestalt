@@ -10,7 +10,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use futures::FutureExt;
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use laminar::Connection;
 use laminar::ConnectionMessenger;
 use laminar::VirtualConnection;
@@ -45,7 +45,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::result::Result;
 use std::thread;
 
-use hashbrown::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap};
 use log::error;
 use log::info;
 use log::warn;

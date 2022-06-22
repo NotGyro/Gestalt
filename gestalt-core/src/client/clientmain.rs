@@ -6,7 +6,7 @@ use std::{
 };
 
 use glam::Vec4;
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use image::RgbaImage;
 use log::{warn, error, info, trace};
 use rend3::types::{Handedness};

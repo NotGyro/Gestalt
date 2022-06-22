@@ -1,6 +1,6 @@
 use std::{mem::MaybeUninit, io::{Seek, SeekFrom, Write}};
 
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use log::warn;
 use serde::{Serialize, Deserialize};
 

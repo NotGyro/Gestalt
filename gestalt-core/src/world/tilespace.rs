@@ -2,7 +2,7 @@
 use crate::common::voxelmath::*;
 use crate::world::chunk::{CHUNK_SIZE, CHUNK_EXP};
 
-use hashbrown::HashMap;
+use std::collections::HashMap;
 
 use std::result::Result;
 
