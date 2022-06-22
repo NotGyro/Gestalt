@@ -3,13 +3,11 @@ use std::fs;
 use std::marker::PhantomData;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
-use futures::FutureExt;
 use std::collections::HashMap;
 use laminar::Connection;
 use laminar::ConnectionMessenger;
@@ -261,7 +259,6 @@ impl LaminarConnectionManager {
 
     /// Ingests a batch of packets coming off the wire.
     pub fn process_inbound<T: IntoIterator< Item: AsRef<[u8]> >>(&mut self, inbound_messages: T, time: Instant) -> Result<(), LaminarWrapperError> {
-        info!("Processing inbound packets.");
         let mut at_least_one = false; 
         let messenger = &mut self.messenger;
         for payload in inbound_messages.into_iter() {
@@ -1334,8 +1331,6 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
-
     use super::*;
     use log::LevelFilter;
     use parking_lot::Mutex;
@@ -1347,16 +1342,16 @@ mod tests {
     use super::preprotocol::preprotocol_connect_to_server;
     use lazy_static::lazy_static;
 
-    lazy_static! {
-        /// Used to keep tests which use real network i/o from clobbering eachother. 
-        pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());
-    }
  
     #[derive(Clone, Serialize, Deserialize, Debug)]
     struct TestNetMsg {
         pub message: String, 
     }
     impl_netmsg!(TestNetMsg, 0, ReliableOrdered);
+    lazy_static! {
+        /// Used to keep tests which use real network i/o from clobbering eachother. 
+        pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn session_with_localhost() {
@@ -1370,7 +1365,7 @@ mod tests {
 
         let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
-        let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        //let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
         let (serv_message_inbound_sender, serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
         let (client_message_inbound_sender, client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
@@ -1392,7 +1387,7 @@ mod tests {
                 quit_server_r)
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
-        let join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
+        let _join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         //Launch client

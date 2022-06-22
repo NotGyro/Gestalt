@@ -10,6 +10,7 @@
 
 #[macro_use]
 pub mod common;
+pub use common::message as message;
 
 #[macro_use]
 pub mod net;
@@ -326,7 +327,7 @@ fn main() {
                 keys.clone(), 
                 HashMap::from([(VoxelChangeRequest::net_msg_id(), server_voxel_sender_from_client), (JoinDefaultEntry::net_msg_id(), server_join_sender_from_client)]),
                 laminar_config,
-                Duration::from_millis(250),
+                Duration::from_millis(25),
                 quit_receive)
         );
 
@@ -396,7 +397,7 @@ fn main() {
                 keys.clone(), 
                 HashMap::from([(VoxelChangeAnnounce::net_msg_id(), client_voxel_sender_from_server), (JoinAnnounce::net_msg_id(), client_join_sender_from_server)]),
                 laminar_config,
-                Duration::from_millis(250),
+                Duration::from_millis(25),
                 net_quit_receive)
         );
         let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
