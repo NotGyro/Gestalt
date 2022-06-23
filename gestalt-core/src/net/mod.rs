@@ -1360,13 +1360,13 @@ mod tests {
         let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
         //let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-        let (serv_message_inbound_sender, mut serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
-        let (client_message_inbound_sender, mut client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
+        let (serv_message_inbound_sender, serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
+        let (client_message_inbound_sender, client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
         let (join_msg_sender, _join_msg_receiver) = tokio::sync::broadcast::channel(4096);
         let (join_msg_sender1, _join_msg_receiver1) = tokio::sync::broadcast::channel(4096);
 
-        let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender), (JoinDefaultEntry::net_msg_id(), join_msg_sender)]);
-        let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender), (JoinDefaultEntry::net_msg_id(), join_msg_sender1)]);
+        let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender.clone()), (JoinDefaultEntry::net_msg_id(), join_msg_sender)]);
+        let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender.clone()), (JoinDefaultEntry::net_msg_id(), join_msg_sender1)]);
 
         //Launch server
         let join_handle_s = tokio::spawn(
@@ -1406,14 +1406,16 @@ mod tests {
         let client_to_server_sender: NetSendChannel<TestNetMsg> = net_msg_channel::subscribe_sender(&server_key_pair.public).unwrap();
         client_to_server_sender.send_one(test.clone()).unwrap();
         info!("Attempting to send a message to {}", client_key_pair.public.to_base64());
-        //let mut client_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(client_message_inbound_receiver);
-        
-        let out = tokio::time::timeout(Duration::from_secs(5), client_message_inbound_receiver.recv()).await.unwrap().unwrap();
-        let out = out.first().unwrap().clone();
+        let mut server_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(serv_message_inbound_receiver);
 
-        info!("Got {:?}", out);
+        {
+            let out = tokio::time::timeout(Duration::from_secs(5), server_receiver.recv()).await.unwrap().unwrap();
+            let (peer_ident, out) = out.first().unwrap().clone();
 
-        //assert_eq!(out.message, test.message);
+            info!("Got {:?} from {}", out, peer_ident.to_base64());
+
+            assert_eq!(out.message, test.message);
+        }
 
         let test_reply = TestNetMsg { 
             message: String::from("Beep!"), 
@@ -1424,15 +1426,16 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        //let mut test_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(serv_message_inbound_receiver);
+        let mut client_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(client_message_inbound_receiver);
 
-        let out = tokio::time::timeout(Duration::from_secs(5), serv_message_inbound_receiver.recv()).await.unwrap().unwrap();
-        let out = out.first().unwrap().clone();
+        {
+            let out = tokio::time::timeout(Duration::from_secs(5), client_receiver.recv()).await.unwrap().unwrap();
+            let (peer_ident, out) = out.first().unwrap().clone();
 
-        info!("Got {:?}", out);
+            info!("Got {:?} from {}", out, peer_ident.to_base64());
 
-        //assert_eq!(out, test_reply.message);
-        
+            assert_eq!(out.message, test_reply.message);
+        }
 
         message::send_one((), &message::START_SHUTDOWN).unwrap(); 
         tokio::time::sleep(Duration::from_millis(100)).await;
