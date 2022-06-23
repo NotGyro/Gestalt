@@ -1,5 +1,6 @@
 pub mod growable_buffer;
 pub mod identity;
+#[macro_use]
 pub mod message;
 #[macro_use]
 pub mod voxelmath;
@@ -9,6 +10,9 @@ use std::{fmt::Display, future::Future, pin::Pin};
 use serde::{Deserialize, Serialize};
 
 pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
+
+// Any HashMap which does not need to be resistant against HashDos / collision attacks. 
+// pub type FastHash = 
 
 macro_rules! version {
     ($major:expr,$minor:expr,$patch:expr,$build:expr) => {

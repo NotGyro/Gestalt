@@ -1,6 +1,5 @@
 use serde::{Serialize, Deserialize};
 use crate::common::identity::NodeIdentity;
-use crate::{common::voxelmath::VoxelPos, world::TileId};
 use crate::net::{NetMsg, PacketGuarantees, StreamSelector};
 
 pub mod voxel; 

@@ -27,6 +27,9 @@ use crate::common::Version;
 use crate::common::growable_buffer::GrowableBuf;
 use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
+use crate::message;
+use crate::message::MessageReceiver;
+use crate::net::net_channels::net_msg_channel;
 
 use self::preprotocol::NetworkRole;
 
@@ -62,7 +65,7 @@ use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;*/
 
 pub mod handshake;
-pub mod net_channel;
+pub mod net_channels;
 pub mod preprotocol;
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -688,7 +691,7 @@ impl Session {
     }
 
     /// Ingests a batch of packets coming off the wire.
-    pub async fn ingest_packets<T: IntoIterator< Item=OuterEnvelope >>(&mut self, inbound_messages: T, time: Instant) -> Vec<SessionLayerError> {
+    pub fn ingest_packets<T: IntoIterator< Item=OuterEnvelope >>(&mut self, inbound_messages: T, time: Instant) -> Vec<SessionLayerError> {
         let mut errors: Vec<SessionLayerError> = Vec::default();
 
         let mut batch: Vec<Vec<u8>> = Vec::default();
@@ -740,6 +743,7 @@ impl Session {
                     match vu64::decode_with_length(message_type_len, &pkt.payload()[0..message_type_len as usize]) {
                         Ok(message_type_id) => {
                             let message_type_id = message_type_id as NetMsgId;
+                            info!("Decoding a NetMsg from {} with message_type_id {}", self.peer_identity.to_base64(), message_type_id); 
                             let message = InboundNetMsg {
                                 message_type_id,
                                 payload: pkt.payload()[message_type_len as usize..].to_vec(),
@@ -768,7 +772,9 @@ impl Session {
                     if let Some(channel) = self.received_channels.get_mut(&(message_type as NetMsgId)) { 
                         match channel.send(message_buf)
                             .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
-                            Ok(_x) => {},
+                            Ok(_x) => {
+                                info!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
+                            },
                             Err(e) => errors.push(e),
                         }
                     }
@@ -806,7 +812,7 @@ impl Session {
         errors
     }
 
-    pub async fn process_update(&mut self, time: Instant) -> Result<(), SessionLayerError> {
+    pub fn process_update(&mut self, time: Instant) -> Result<(), SessionLayerError> {
         let mut errors: Vec<SessionLayerError> = Vec::default();
         match self.laminar.process_update(time) {
             Ok(()) => {},
@@ -843,7 +849,7 @@ impl Session {
     }
 
     /// Adds Laminar connection logic to messages that we are sending. 
-    pub async fn process_outbound<T: IntoIterator< Item=laminar::Packet >>(&mut self, outbound_messages: T, time: Instant)  -> Result<(), SessionLayerError> {
+    pub fn process_outbound<T: IntoIterator< Item=laminar::Packet >>(&mut self, outbound_messages: T, time: Instant)  -> Result<(), SessionLayerError> {
         let mut errors: Vec<SessionLayerError> = Vec::default();
         match self.laminar.process_outbound(outbound_messages, time) {
             Ok(()) => {},
@@ -880,14 +886,13 @@ impl Session {
     }
 
     /// Network connection CPR.
-    pub async fn force_heartbeat(&mut self) -> Result<(), laminar::error::ErrorKind> { 
-        let addr = self.peer_address;
+    pub fn force_heartbeat(&mut self) -> Result<(), laminar::error::ErrorKind> {
         let packets = self.laminar.connection_state.process_outgoing(laminar::packet::PacketInfo::heartbeat_packet(&[]), None, Instant::now())?;
         for packet in packets { 
             self.laminar.messenger.send_packet(&self.peer_address, &packet.contents());
         }
         Ok(())
-    } 
+    }
 }
 
 /// Meant to be run inside a Tokio runtime - this will loop infinitely.
@@ -896,11 +901,11 @@ impl Session {
 ///
 /// * `incoming_packets` - Packets coming in off the UDP socket, routed to this session 
 /// * `send_channel` - Channel used by the rest of the engine to send messages out to this peer.  
-/// * `session_tick` - Interval between times we examine if we should .  
+/// * `session_tick` - Interval between times we examine if we should send heartbeat packets, resend lost packets, etc.  
 ///
 pub async fn handle_session(mut session_manager: Session,
                         mut incoming_packets: mpsc::UnboundedReceiver<Vec<OuterEnvelope>>,
-                        mut send_channel: mpsc::UnboundedReceiver<Vec<PacketIntermediary>>,
+                        mut from_game: MessageReceiver<PacketIntermediary>,
                         session_tick: Duration,
                         kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
                         mut kill_from_outside: tokio::sync::oneshot::Receiver<()>) { 
@@ -909,16 +914,14 @@ pub async fn handle_session(mut session_manager: Session,
     info!("Handling session for peer {}...", session_manager.peer_identity.to_base64());
 
     let peer_address = session_manager.peer_address.clone();
-    let mut keep_running = true;
-    let mut error_state = false;
-    while keep_running {
+    loop {
         tokio::select!{
             // Inbound packets
             // Per tokio documentation - "This method is cancel safe. If recv is used as the event in a tokio::select! statement and some other branch completes first, it is guaranteed that no messages were received on this channel."
             inbound_packets_maybe = (&mut incoming_packets).recv() => { 
                 match inbound_packets_maybe { 
                     Some(inbound_packets) => { 
-                        let ingest_results = session_manager.ingest_packets(inbound_packets, Instant::now()).await;
+                        let ingest_results = session_manager.ingest_packets(inbound_packets, Instant::now());
                         if !ingest_results.is_empty() { 
                             let mut built_string = String::default();
                             for errorout in ingest_results.iter() { 
@@ -927,66 +930,53 @@ pub async fn handle_session(mut session_manager: Session,
                             }
                             error!("Errors encountered parsing inbound packets in a session with {}: \n {}", session_manager.peer_identity.to_base64(), built_string);
                             kill_from_inside.send((session_manager.get_session_name() ,  ingest_results)).unwrap();
-                            keep_running = false;
-                            error_state = true;
                             break;
                         }
                     }, 
                     None => { 
                         info!("Connection closed for {}, dropping session state.", session_manager.peer_identity.to_base64());
                         kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
-                        keep_running = false;
-                        error_state = true;
                         break;
                     }
                 }
                 if session_manager.disconnect_deliberate { 
                     kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
-                    keep_running = false;
                     break;
                 }
             },
-            send_packets_maybe = (&mut send_channel).recv() => {
+            send_packets_maybe = (&mut from_game).recv_wait() => {
                 match send_packets_maybe {
-                    Some(send_packets) => {
+                    Ok(send_packets) => {
                         session_manager.laminar.connection_state.record_send();
-                        let serialize_results = session_manager.process_outbound(send_packets.into_iter().map(|intermediary| intermediary.make_full_packet(peer_address)), Instant::now()).await;
+                        let serialize_results = session_manager.process_outbound(send_packets.into_iter().map(|intermediary| intermediary.make_full_packet(peer_address)), Instant::now());
                         if let Err(e) = serialize_results {
                             error!("Error encountered attempting to send a packet to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
                             kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
-                            keep_running = false;
-                            error_state = true;
                             break;
                         }
                     }, 
-                    None => { 
-                        info!("Connection closed for {}, dropping session state.", session_manager.peer_identity.to_base64());
+                    Err(e) => { 
+                        info!("Connection closed for {} due to {:?}, dropping session state.", session_manager.peer_identity.to_base64(), e);
                         kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
-                        keep_running = false;
-                        error_state = true;
                         break;
                     }
                 }
                 if session_manager.disconnect_deliberate { 
                     kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
-                    keep_running = false;
                     break;
                 }
             },
             _ = (&mut ticker).tick() => {
-                let update_results = session_manager.process_update(Instant::now()).await;
+                let update_results = session_manager.process_update(Instant::now());
                 if let Err(e) = update_results {
                     info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now()), session_manager.laminar.connection_state.is_established()); 
                     error!("Error encountered while ticking network connection to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
                     kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
-                    keep_running = false;
-                    error_state = true;
                     break;
                 }
             }
-            kill_maybe = (&mut kill_from_outside) => { 
+            _ = (&mut kill_from_outside) => { 
                 info!("Shutting down session with user {}", session_manager.peer_identity.to_base64() );
-                keep_running = false;
                 break;
             }
         }
@@ -1037,8 +1027,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
             local_identity: IdentityKeyPair, 
             received_message_channels: HashMap<NetMsgId, NetMsgSender>,
             laminar_config: LaminarConfig,
-            session_tick_interval: Duration,
-            mut quit_handler: tokio::sync::oneshot::Receiver<()>) {
+            session_tick_interval: Duration) {
     
     info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), role, address);
     let socket = if role == NetworkRole::Client {
@@ -1074,10 +1063,9 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
     let mut session_to_identity: HashMap<FullSessionName, NodeIdentity> = HashMap::new();
     
     info!("Network system initialized. Our role is {:?}, our address is {:?}, and our identity is {}", &role, &socket.local_addr(), local_identity.public.to_base64());
-    let mut join_handles = Vec::new(); 
+    let mut join_handles = Vec::new();
 
-    let mut continue_running = true;
-    while continue_running {
+    loop {
         tokio::select!{
             // A packet has been received. 
             received_maybe = (&socket).recv_from(&mut recv_buf) => {
@@ -1134,9 +1122,9 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                         Some(connection) => {
                                             info!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
                                             //Communication with the rest of the engine.
-                                            let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
-                                            match net_channel::register_channel(connection.peer_identity.clone(), game_to_session_sender) { 
-                                                Ok(()) => {
+                                            net_msg_channel::register_peer(&connection.peer_identity);
+                                            match net_msg_channel::subscribe_receiver(&connection.peer_identity) { 
+                                                Ok(receiver) => {
                                                     info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                                                     let mut session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
                                                     session.laminar.connection_state.record_recv();
@@ -1150,8 +1138,8 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                                     let killer_clone = kill_from_inside_sender.clone();
                                                     session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
                                                     let jh = tokio::spawn( async move {
-                                                        session.force_heartbeat().await.unwrap();
-                                                        handle_session(session, from_net_receiver, game_to_session_receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
+                                                        session.force_heartbeat().unwrap();
+                                                        handle_session(session, from_net_receiver, receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
                                                     });
 
                                                     join_handles.push(jh);
@@ -1243,16 +1231,17 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
                 if role == NetworkRole::Server {
                     info!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
+                    net_msg_channel::register_peer(&connection.peer_identity);
                     anticipated_clients.insert( PartialSessionName{
                         session_id: connection.session_id.clone(), 
                         peer_address: connection.peer_address.ip(),
                     }, connection);
                 }
                 else {
-                    //Communication with the rest of the engine. 
-                    let (game_to_session_sender, game_to_session_receiver) = mpsc::unbounded_channel();
-                    match net_channel::register_channel(connection.peer_identity.clone(), game_to_session_sender) { 
-                        Ok(()) => { 
+                    //Communication with the rest of the engine.
+                    net_msg_channel::register_peer(&connection.peer_identity);
+                    match net_msg_channel::subscribe_receiver(&connection.peer_identity) { 
+                        Ok(receiver) => {
                             info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                             let mut session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
                             session.laminar.connection_state.record_recv();
@@ -1262,16 +1251,16 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
                             let (kill_from_outside_sender, kill_from_outside_receiver) = tokio::sync::oneshot::channel::<()>();
                             session_kill_from_outside.insert(session.get_session_name(), kill_from_outside_sender);
-                                                
+            
                             let killer_clone = kill_from_inside_sender.clone();
                             session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
                             let jh = tokio::spawn( async move {
-                                session.force_heartbeat().await.unwrap();
-                                handle_session(session, from_net_receiver, game_to_session_receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
+                                session.force_heartbeat().unwrap();
+                                handle_session(session, from_net_receiver, receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
                             });
 
                             join_handles.push(jh);
-                        }, 
+                        },
                         Err(e) => { 
                             error!("Error initializing new session: {:?}", e);
                             println!("Game-to-session-sender already registered for {}", connection.peer_identity.to_base64());
@@ -1289,17 +1278,17 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                         info!("Closing connection for a session with {:?}, due to errors: {:?}", session_kill.peer_address, errors); 
                     }
                     let session = session_to_identity.get(&session_kill).unwrap(); 
-                    net_channel::drop_channel(session).unwrap();
                     inbound_channels.remove(&session_kill); 
                     session_kill_from_outside.remove(&session_kill);
+                    net_msg_channel::drop_peer(session);
                 }
             }
-            quit_maybe = (&mut quit_handler) => {
+            _ = message::at_quit() => {
                 info!("Shutting down network system.");
                 // Notify sessions we're done.
                 for (peer_address, _) in inbound_channels.iter() { 
                     let peer_ident = session_to_identity.get(&peer_address).unwrap();
-                    net_channel::send_to(&DisconnectMsg{}, &peer_ident).unwrap();
+                    net_msg_channel::send_to(DisconnectMsg{}, &peer_ident).unwrap();
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await; 
                 // Clear out remaining messages.
@@ -1319,10 +1308,11 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                     info!("Terminating session {:?}", session);
                     channel.send(()).unwrap();
                 }
+                tokio::time::sleep(Duration::from_millis(10)).await; 
                 for jh in join_handles { 
                     jh.abort();
+                    let _ = jh.await;
                 }
-                continue_running = false; 
                 break;
             }
         }
@@ -1331,13 +1321,16 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
 #[cfg(test)]
 mod tests {
+    use crate::message::SenderAccepts;
+    use crate::message_types::JoinDefaultEntry;
+
     use super::*;
     use log::LevelFilter;
     use parking_lot::Mutex;
     use serde::Serialize;
     use serde::Deserialize;
     use simplelog::TermLogger;
-    use super::net_channel::NetSendChannel;
+    use super::net_channels::NetSendChannel;
     use super::preprotocol::launch_preprotocol_listener;
     use super::preprotocol::preprotocol_connect_to_server;
     use lazy_static::lazy_static;
@@ -1347,7 +1340,7 @@ mod tests {
     struct TestNetMsg {
         pub message: String, 
     }
-    impl_netmsg!(TestNetMsg, 0, ReliableOrdered);
+    impl_netmsg!(TestNetMsg, 3, ReliableOrdered);
     lazy_static! {
         /// Used to keep tests which use real network i/o from clobbering eachother. 
         pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -1367,24 +1360,23 @@ mod tests {
         let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
         //let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-        let (serv_message_inbound_sender, serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
-        let (client_message_inbound_sender, client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
+        let (serv_message_inbound_sender, mut serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
+        let (client_message_inbound_sender, mut client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
+        let (join_msg_sender, _join_msg_receiver) = tokio::sync::broadcast::channel(4096);
+        let (join_msg_sender1, _join_msg_receiver1) = tokio::sync::broadcast::channel(4096);
 
-        let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender.clone())]);
-        let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender.clone())]);
-        
-        let (quit_server_s, quit_server_r) = tokio::sync::oneshot::channel();
-        let (quit_client_s, quit_client_r) = tokio::sync::oneshot::channel();
+        let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender), (JoinDefaultEntry::net_msg_id(), join_msg_sender)]);
+        let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender), (JoinDefaultEntry::net_msg_id(), join_msg_sender1)]);
+
         //Launch server
         let join_handle_s = tokio::spawn(
             run_network_system(NetworkRole::Server,
                 server_socket_addr,
                 serv_completed_receiver,
                 server_key_pair.clone(), 
-                server_channels,
+                server_channels.clone(),
                 LaminarConfig::default(),
-                Duration::from_millis(50),
-                quit_server_r)
+                Duration::from_millis(50))
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
         let _join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
@@ -1395,10 +1387,9 @@ mod tests {
             run_network_system( NetworkRole::Client,  server_socket_addr, 
             client_completed_receiver,
                 client_key_pair.clone(),
-                client_channels,
+                client_channels.clone(),
                 LaminarConfig::default(),
-                Duration::from_millis(50),
-                quit_client_r)
+                Duration::from_millis(50))
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
         let client_completed_connection = preprotocol_connect_to_server(client_key_pair.clone(),
@@ -1407,48 +1398,49 @@ mod tests {
         client_completed_sender.send(client_completed_connection).unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
 
+        net_msg_channel::send_to(JoinDefaultEntry{ display_name: "test".to_string()}, &server_key_pair.public ).unwrap();
+
         let test = TestNetMsg { 
+            message: String::from("Boop!"), 
+        };
+        let client_to_server_sender: NetSendChannel<TestNetMsg> = net_msg_channel::subscribe_sender(&server_key_pair.public).unwrap();
+        client_to_server_sender.send_one(test.clone()).unwrap();
+        info!("Attempting to send a message to {}", client_key_pair.public.to_base64());
+        //let mut client_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(client_message_inbound_receiver);
+        
+        let out = tokio::time::timeout(Duration::from_secs(5), client_message_inbound_receiver.recv()).await.unwrap().unwrap();
+        let out = out.first().unwrap().clone();
+
+        info!("Got {:?}", out);
+
+        //assert_eq!(out.message, test.message);
+
+        let test_reply = TestNetMsg { 
             message: String::from("Beep!"), 
         };
-        let message_sender: NetSendChannel<TestNetMsg> = net_channel::subscribe_typed(&server_key_pair.public).unwrap();
+        let message_sender: NetSendChannel<TestNetMsg> = net_msg_channel::subscribe_sender(&client_key_pair.public).unwrap();
         info!("Attempting to send a message to {}", server_key_pair.public.to_base64());
-        message_sender.send(&test).unwrap();
+        message_sender.send_one(test_reply.clone()).unwrap();
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let mut test_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(serv_message_inbound_receiver);
+        //let mut test_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(serv_message_inbound_receiver);
 
-        {
-            let out = test_receiver.recv().await.unwrap();
-            let (peer_ident, out) = out.first().unwrap().clone();
+        let out = tokio::time::timeout(Duration::from_secs(5), serv_message_inbound_receiver.recv()).await.unwrap().unwrap();
+        let out = out.first().unwrap().clone();
 
-            println!("Got {:?} from {}", out, peer_ident.to_base64());
+        info!("Got {:?}", out);
 
-            assert_eq!(out.message, test.message);
-        }
+        //assert_eq!(out, test_reply.message);
+        
 
-        let test_reply = TestNetMsg { 
-            message: String::from("Boop!"), 
-        };
-        let server_to_client_sender: NetSendChannel<TestNetMsg> = net_channel::subscribe_typed(&client_key_pair.public).unwrap();
-        server_to_client_sender.send(&test_reply).unwrap();
-        info!("Attempting to send a message to {}", client_key_pair.public.to_base64());
-        let mut client_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(client_message_inbound_receiver);
-
-        {
-            let out = client_receiver.recv().await.unwrap();
-            let (peer_ident, out) = out.first().unwrap().clone();
-
-            println!("Got {:?} from {}", out, peer_ident.to_base64());
-
-            assert_eq!(out.message, test_reply.message);
-        }
-        quit_client_s.send(()).unwrap();
-        let _ = join_handle_c.await;
+        message::send_one((), &message::START_SHUTDOWN).unwrap(); 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        quit_server_s.send(()).unwrap();
+        let _ = join_handle_s.abort();
+        let _ = join_handle_c.abort();
         let _ = join_handle_s.await;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = join_handle_c.await;
+
         drop(mutex_guard);
     }
 }

@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channel::{NetSendChannel, self}, NetMsgReceiver, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_msg_channel}, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -354,7 +354,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
         mut voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, 
         server_identity: Option<NodeIdentity>, 
         async_runtime: tokio::runtime::Runtime,
-        quit_sender: tokio::sync::mpsc::UnboundedSender<()>,
+        quit_sender: MessageSender<()>,
         mut quit_ready_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
@@ -390,7 +390,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
         let join_msg = JoinDefaultEntry {
             display_name: config.your_display_name.clone(),
         };
-        net_channel::send_to(&join_msg, server).unwrap(); 
+        net_msg_channel::send_to(join_msg, &server).unwrap(); 
     }
 
     let world_id = get_lobby_world_id(&identity_keys.public);
@@ -638,12 +638,12 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     match world_space.set(result_position, air_id) {
                         Ok(()) => {
 
-                            if let Some(server) = server_identity.as_ref() { 
+                            if let Some(_server) = server_identity.as_ref() { 
                                 let voxel_msg = VoxelChangeRequest {
                                     pos: result_position.clone(),
                                     new_tile: air_id,
                                 };
-                                voxel_event_sender.send(&voxel_msg).unwrap();
+                                voxel_event_sender.send_one(voxel_msg).unwrap();
                             }
 
                             terrain_renderer.notify_changed(&result_position);
@@ -684,12 +684,12 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                             match world_space.set(placement_position, stone_id) {
                                 Ok(()) => {
                                     
-                                    if let Some(server) = server_identity.as_ref() { 
+                                    if let Some(_server) = server_identity.as_ref() { 
                                         let voxel_msg = VoxelChangeRequest {
                                             pos: result_position.clone(),
                                             new_tile: stone_id,
                                         };
-                                        voxel_event_sender.send(&voxel_msg).unwrap();
+                                        voxel_event_sender.send_one(voxel_msg).unwrap();
                                     }
 
                                     terrain_renderer.notify_changed(&placement_position);
@@ -749,7 +749,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     }
                     else if input.virtual_keycode == Some(VirtualKeyCode::Escape) { 
                         //Quit
-                        quit_sender.send(()).unwrap();
+                        quit_sender.send_one(()).unwrap();
                         async_runtime.block_on(quit_ready_receiver.recv());
                         *control = ControlFlow::Exit;
                     }

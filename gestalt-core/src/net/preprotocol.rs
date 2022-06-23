@@ -20,7 +20,6 @@ use lazy_static::lazy_static;
 use std::collections::HashSet;
 use log::{error, info, warn, debug};
 use parking_lot::Mutex;
-use serde::__private::de::IdentifierDeserializer;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::sync::mpsc;
@@ -31,15 +30,14 @@ use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::thread;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::io::{Read, Write};
 use tokio::net::{TcpStream, TcpListener};
 
 use super::handshake::HandshakeNext;
 use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, load_noise_local_keys, HandshakeError, HandshakeIntitiator}};
 
-use super::{PREPROTCOL_PORT, MessageCounter, GESTALT_PORT};
+use super::{MessageCounter, GESTALT_PORT};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -644,33 +642,40 @@ pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server
     }
 }
 
-
-#[tokio::test(flavor = "multi_thread")]
-async fn preprotocol_connect_to_localhost() {
-    use crate::net::tests::NET_TEST_MUTEX;    
-    let _guard = NET_TEST_MUTEX.lock();
+#[cfg(test)]
+pub mod tests {
+    use std::{time::Duration, net::Ipv6Addr};
+    use tokio::sync::mpsc;
+    use crate::common::identity::IdentityKeyPair;
+    use super::*;
+ 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn preprotocol_connect_to_localhost() {
+        use crate::net::tests::NET_TEST_MUTEX;    
+        let _guard = NET_TEST_MUTEX.lock();
+        
+        let server_key_pair = IdentityKeyPair::generate_for_tests();
+        let client_key_pair = IdentityKeyPair::generate_for_tests();
+        let (serv_completed_sender, mut serv_completed_receiver) = mpsc::unbounded_channel();
+        let (client_completed_sender, mut client_completed_receiver) = mpsc::unbounded_channel();
+        let connect_timeout = Duration::from_secs(2);
     
-    let server_key_pair = IdentityKeyPair::generate_for_tests();
-    let client_key_pair = IdentityKeyPair::generate_for_tests();
-    let (serv_completed_sender, mut serv_completed_receiver) = mpsc::unbounded_channel();
-    let (client_completed_sender, mut client_completed_receiver) = mpsc::unbounded_channel();
-    let connect_timeout = Duration::from_secs(2);
-
-    let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
-    let server_socket_addr = SocketAddr::new(server_addr.clone(), GESTALT_PORT);
-    //Launch the server
-    tokio::spawn(launch_preprotocol_listener(server_key_pair, Some(server_socket_addr), serv_completed_sender));
-    //Give it a moment
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    //Try to connect
-    let client_connection = preprotocol_connect_to_server(client_key_pair, server_socket_addr, connect_timeout).await.unwrap();
-    client_completed_sender.send(client_connection).unwrap();
-
-    let success_timeout = Duration::from_secs(2);
-    //Make sure it has a little time to complete this.
-    let successful_server_end = tokio::time::timeout(success_timeout, serv_completed_receiver.recv()).await.unwrap().unwrap();
-    let successful_client_end = tokio::time::timeout(success_timeout, client_completed_receiver.recv()).await.unwrap().unwrap();
-    // Check if all is valid
-    assert_eq!(successful_server_end.peer_identity, client_key_pair.public);
-    assert_eq!(successful_client_end.peer_identity, server_key_pair.public);
-}  
+        let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let server_socket_addr = SocketAddr::new(server_addr.clone(), GESTALT_PORT);
+        //Launch the server
+        tokio::spawn(launch_preprotocol_listener(server_key_pair, Some(server_socket_addr), serv_completed_sender));
+        //Give it a moment
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        //Try to connect
+        let client_connection = preprotocol_connect_to_server(client_key_pair, server_socket_addr, connect_timeout).await.unwrap();
+        client_completed_sender.send(client_connection).unwrap();
+    
+        let success_timeout = Duration::from_secs(2);
+        //Make sure it has a little time to complete this.
+        let successful_server_end = tokio::time::timeout(success_timeout, serv_completed_receiver.recv()).await.unwrap().unwrap();
+        let successful_client_end = tokio::time::timeout(success_timeout, client_completed_receiver.recv()).await.unwrap().unwrap();
+        // Check if all is valid
+        assert_eq!(successful_server_end.peer_identity, client_key_pair.public);
+        assert_eq!(successful_client_end.peer_identity, server_key_pair.public);
+    }  
+}
