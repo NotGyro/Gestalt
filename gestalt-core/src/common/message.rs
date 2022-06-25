@@ -1,9 +1,10 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::hash::Hash;
+use std::time::Duration;
 
 use futures::{TryFutureExt};
-use log::error;
+use log::{error, info};
 use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::broadcast;
 
@@ -142,6 +143,14 @@ impl<T> MessageChannel<T> where T: Clone {
         else { 
             self.sender.subscribe()
         }) 
+    }
+    pub fn receiver_count(&self) -> usize {
+        if self.retained_receiver.is_some() { 
+            self.sender.receiver_count()-1
+        }
+        else { 
+            self.sender.receiver_count()
+        }
     }
 }
 
@@ -391,6 +400,14 @@ pub fn receiver_subscribe<T, C>(channel: &C) -> Result<MessageReceiver<T>, Globa
     Ok(result)
 }
 
+pub fn receiver_count<T, C>(channel: &C) -> Result<usize, GlobalChannelError>
+        where T: Clone, C: Deref<Target=crate::message::ChannelMutex<MessageChannel<T>>> { 
+    let channel_guard = channel.deref().lock();
+    let result = channel_guard.receiver_count();
+    drop(channel_guard);
+    Ok(result)
+}
+
 //Manual sends for regular global channels
 pub fn send_multi<T, V, C>(messages: V, channel: &C) -> Result<(), SendError> 
         where V: IntoIterator<Item=T>, T: Clone, C: Deref<Target=crate::message::ChannelMutex<MessageChannel<T>>> { 
@@ -502,14 +519,83 @@ macro_rules! domain_channel {
 
 // A few *very universal* channels can exist in this file. 
 
-channel!(START_SHUTDOWN, (), 1);
+channel!(START_QUIT, (), 1);
+channel!(READY_FOR_QUIT, (), 1024);
 
-/// This async function is cancel-safe and awaits until the end of this session. 
-/// It will not return until something has been sent on START_SHUTDOWN.
-pub async fn at_quit() {
-    let mut receiver = receiver_subscribe(&START_SHUTDOWN).unwrap();
-    let _ = receiver.recv_wait().await;
-    ()
+#[warn(unused_must_use)]
+pub struct QuitReadyNotifier {
+    inner: MessageSender<()>,
+} 
+
+impl QuitReadyNotifier {
+    pub fn notify_ready(self) {
+        let _ = self.inner.send_one(());
+    }
+}
+
+pub struct QuitReceiver {
+    inner: MessageReceiver<()>,
+}
+impl QuitReceiver { 
+    pub fn new() -> QuitReceiver { 
+        let receiver = receiver_subscribe(&START_QUIT).unwrap();
+        QuitReceiver { 
+            inner: receiver,
+        }
+    }
+    /// Future does not complete until the quit process has been initiated.
+    pub async fn wait_for_quit(&mut self) -> QuitReadyNotifier {
+        let _ = self.inner.recv_wait().await;
+        let sender = sender_subscribe(&READY_FOR_QUIT).unwrap();
+        QuitReadyNotifier { 
+            inner: sender,
+        }
+    }
+}
+
+
+/// Causes the engine to quit and then wait for as many READY_FOR_SHUTDOWN responses as there are START_SHUTDOWN receivers
+/// Only errors if the initial message to start a shutdown cannot start.
+pub async fn quit_game(deadline: Duration) -> Result<(), SendError> { 
+    send_one((), &START_QUIT)?;
+    let num_receivers = match receiver_count(&START_QUIT) { 
+        Ok(num) => num, 
+        Err(e) => { 
+            error!("Could not get START_QUIT receiver count, ignoring the requirement for \"READY_FOR_QUIT\" messages and exiting immediately instead. Error was: {:?}", e);
+            return Ok(());
+        }
+    };
+
+    info!("Attempting to shut down. Waiting on responses from {} listeners on the START_QUIT channel.", num_receivers);
+
+    let mut timeout_future = Box::pin(tokio::time::sleep(deadline));
+
+    let mut ready_receiver = match receiver_subscribe(&READY_FOR_QUIT) {
+        Ok(rec) => rec,
+        Err(e) => { 
+            error!("Could not get READY_FOR_QUIT receiver, ignoring the requirement for \"READY_FOR_QUIT\" messages and exiting immediately instead. Error was: {:?}", e);
+            return Ok(());
+        },
+    };
+    for _num_readies_received in 0..num_receivers { 
+        tokio::select!{
+            replies_maybe = ready_receiver.recv_wait() => { 
+                match replies_maybe { 
+                    Ok(_) => { /* A good reply, continue on */ }
+                    Err(e) => {
+                        error!("Error polling for READY_FOR_QUIT messages, exiting immediately. Error was: {:?}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            _ = (&mut timeout_future) => { 
+                error!("Waiting for disparate parts of the engine to be ready for quit took longer than {:?}, exiting immediately.", deadline);
+                return Ok(());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

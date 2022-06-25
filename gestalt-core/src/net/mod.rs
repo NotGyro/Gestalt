@@ -29,9 +29,8 @@ use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
 use crate::message;
 use crate::message::MessageReceiver;
+use crate::message::QuitReceiver;
 use crate::net::net_channels::net_msg_channel;
-
-use self::preprotocol::NetworkRole;
 
 pub const PREPROTCOL_PORT: u16 = 54134;
 pub const GESTALT_PORT: u16 = 54134;
@@ -72,6 +71,94 @@ pub const SESSION_ID_LEN: usize = 4;
 pub type SessionId = [u8; SESSION_ID_LEN];
 
 pub type MessageCounter = u32;
+
+
+pub const UNKNOWN_ROLE: u8 = 0;
+pub const SERVER_ROLE: u8 = 1;
+pub const CLIENT_ROLE: u8 = 2;
+
+#[repr(u8)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
+pub enum NetworkRole { 
+    Unknown = UNKNOWN_ROLE,
+    Server = SERVER_ROLE,
+    Client = CLIENT_ROLE,
+    //Later, roles will be added for things like CDNs, sharding, mirrors, backup-servers, etc.
+}
+
+impl From<u8> for NetworkRole {
+    fn from(value: u8) -> Self {
+        match value { 
+            SERVER_ROLE => NetworkRole::Server,
+            CLIENT_ROLE => NetworkRole::Client,
+            _ => NetworkRole::Unknown,
+        }
+    }
+}
+
+impl From<NetworkRole> for u8 {
+    fn from(role: NetworkRole) -> Self {
+        match role {
+            NetworkRole::Unknown => { 
+                warn!("Serializing a NetworkRole::Unknown. This shouldn't happen - consider this a bug. Unknown Role's value is {}", UNKNOWN_ROLE);
+                UNKNOWN_ROLE
+            },
+            NetworkRole::Server => SERVER_ROLE,
+            NetworkRole::Client => CLIENT_ROLE,
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
+pub enum SelfNetworkRole {
+    Server = SERVER_ROLE,
+    Client = CLIENT_ROLE,
+    //Later, roles will be added for things like CDNs, sharding, mirrors, backup-servers, etc.
+}
+
+impl From<SelfNetworkRole> for u8 {
+    fn from(role: SelfNetworkRole) -> Self {
+        match role {
+            SelfNetworkRole::Server => SERVER_ROLE,
+            SelfNetworkRole::Client => CLIENT_ROLE,
+        }
+    }
+}
+impl From<SelfNetworkRole> for NetworkRole {
+    fn from(role: SelfNetworkRole) -> Self {
+        match role {
+            SelfNetworkRole::Server => NetworkRole::Server,
+            SelfNetworkRole::Client => NetworkRole::Client,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum MessageSidedness { 
+    ClientToServer, 
+    ServerToClient, 
+    Common,
+}
+
+impl SelfNetworkRole { 
+    /// On a node with this role, should we ingest a message with that sidedness?
+    /// This is checked, even in release builds, as an extra security measure. 
+    /// Certain net message IDs are just *not allowed* to be sent to servers.
+    pub fn should_we_ingest(&self, message_sidedness: MessageSidedness) -> bool { 
+        match message_sidedness {
+            MessageSidedness::ClientToServer => match self {
+                SelfNetworkRole::Server => true,
+                SelfNetworkRole::Client => false,
+            },
+            MessageSidedness::ServerToClient => match self {
+                SelfNetworkRole::Server => false,
+                SelfNetworkRole::Client => true,
+            },
+            MessageSidedness::Common => true,
+        }
+    }
+}
 
 /// Represents a client who has completed a handshake in the pre-protocol and will now be moving over to the game protocol proper
 #[derive(Debug)]
@@ -1065,6 +1152,8 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
     info!("Network system initialized. Our role is {:?}, our address is {:?}, and our identity is {}", &role, &socket.local_addr(), local_identity.public.to_base64());
     let mut join_handles = Vec::new();
 
+    let mut quit_reciever = QuitReceiver::new(); 
+
     loop {
         tokio::select!{
             // A packet has been received. 
@@ -1283,7 +1372,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                     net_msg_channel::drop_peer(session);
                 }
             }
-            _ = message::at_quit() => {
+            quit_ready_indicator = quit_reciever.wait_for_quit() => {
                 info!("Shutting down network system.");
                 // Notify sessions we're done.
                 for (peer_address, _) in inbound_channels.iter() { 
@@ -1313,6 +1402,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                     jh.abort();
                     let _ = jh.await;
                 }
+                quit_ready_indicator.notify_ready();
                 break;
             }
         }
@@ -1437,7 +1527,7 @@ mod tests {
             assert_eq!(out.message, test_reply.message);
         }
 
-        message::send_one((), &message::START_SHUTDOWN).unwrap(); 
+        message::send_one((), &message::START_QUIT).unwrap(); 
         tokio::time::sleep(Duration::from_millis(100)).await;
         let _ = join_handle_s.abort();
         let _ = join_handle_c.abort();

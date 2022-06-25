@@ -31,13 +31,12 @@ use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
 use std::sync::Arc;
 use std::time::Duration;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::io::{Read, Write};
 use tokio::net::{TcpStream, TcpListener};
 
 use super::handshake::HandshakeNext;
 use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, load_noise_local_keys, HandshakeError, HandshakeIntitiator}};
 
-use super::{MessageCounter, GESTALT_PORT};
+use super::{MessageCounter, GESTALT_PORT, NetworkRole, SelfNetworkRole};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -59,42 +58,6 @@ pub struct ProtocolDef {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SupportedProtocols {
     pub supported_protocols: HashSet<ProtocolDef>, 
-}
-
-pub const UNKNOWN_ROLE: u8 = 0;
-pub const SERVER_ROLE: u8 = 1;
-pub const CLIENT_ROLE: u8 = 2;
-
-#[repr(u8)]
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
-pub enum NetworkRole { 
-    Unknown = UNKNOWN_ROLE,
-    Server = SERVER_ROLE,
-    Client = CLIENT_ROLE,
-    //Later, roles will be added for things like CDNs, sharding, mirrors, backup-servers, etc.
-}
-
-impl From<u8> for NetworkRole {
-    fn from(value: u8) -> Self {
-        match value { 
-            SERVER_ROLE => NetworkRole::Server,
-            CLIENT_ROLE => NetworkRole::Client,
-            _ => NetworkRole::Unknown,
-        }
-    }
-}
-
-impl From<NetworkRole> for u8 {
-    fn from(role: NetworkRole) -> Self {
-        match role {
-            NetworkRole::Unknown => { 
-                warn!("Serializing a NetworkRole::Unknown. This shouldn't happen - consider this a bug. Unknown Role's value is {}", UNKNOWN_ROLE);
-                UNKNOWN_ROLE
-            },
-            NetworkRole::Server => SERVER_ROLE,
-            NetworkRole::Client => CLIENT_ROLE,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
@@ -239,14 +202,14 @@ pub struct PreProtocolReceiver {
     state: PreProtocolReceiverState,
     description: serde_json::Value,
     our_identity: IdentityKeyPair,
-    our_role: NetworkRole,
+    our_role: SelfNetworkRole,
     peer_identity: Option<NodeIdentity>,
     peer_role: Option<NetworkRole>,
     peer_engine_version: Option<Version>,
 }
 
 impl PreProtocolReceiver { 
-    pub fn new(our_identity: IdentityKeyPair, role: NetworkRole) -> Self { 
+    pub fn new(our_identity: IdentityKeyPair, role: SelfNetworkRole) -> Self { 
         PreProtocolReceiver { 
             state: PreProtocolReceiverState::QueryAnswerer, 
             description: serde_json::Value::default(),
@@ -303,7 +266,7 @@ impl PreProtocolReceiver {
                 PreProtocolOutput::Reply(
                     PreProtocolReply::Identity(Introduction { 
                         identity_key: self.our_identity.public.to_base64(),
-                        role: self.our_role, // TODO when mirror-servers / CDN-type stuff is implemented - make this more flexible. 
+                        role: self.our_role.into(), // TODO when mirror-servers / CDN-type stuff is implemented - make this more flexible. 
                         gestalt_engine_version: crate::ENGINE_VERSION,
                     })
                 )
@@ -395,7 +358,7 @@ pub async fn read_preprotocol_message(stream: &mut TcpStream) -> Result<String, 
     Ok(String::from_utf8_lossy(&message_buf).to_string())
 }
 
-pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: NetworkRole /* In most cases this will be Server for a receiver, but I want to leave it flexible. */, 
+pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: SelfNetworkRole /* In most cases this will be Server for a receiver, but I want to leave it flexible. */, 
         peer_address: SocketAddr, mut stream: TcpStream, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>) {
     let mut receiver = PreProtocolReceiver::new(our_identity, our_role);
     while match read_preprotocol_message(&mut stream).await {
@@ -500,7 +463,7 @@ pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_addr
                 let completed_channel_clone = completed_channel.clone();
                 tokio::spawn(
                     // connection succeeded
-                    preprotocol_receiver_session(our_identity,  NetworkRole::Server, peer_address, stream, completed_channel_clone)
+                    preprotocol_receiver_session(our_identity,  SelfNetworkRole::Server, peer_address, stream, completed_channel_clone)
                 );
             }, 
             Err(e) => { 
@@ -510,7 +473,7 @@ pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_addr
     }
 }
 
-pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, our_role: NetworkRole, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
+pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, our_role: SelfNetworkRole, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
     let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
         warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
         true
@@ -518,7 +481,7 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: Ide
 
     let introduction = Introduction {
         identity_key: our_identity.public.to_base64(),
-        role: our_role,
+        role: our_role.into(),
         gestalt_engine_version: crate::ENGINE_VERSION,
     };
     // Exchange identities.
@@ -615,7 +578,7 @@ pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server
     match tokio::time::timeout(connect_timeout, TcpStream::connect(&server_address)).await {
         Ok(Ok(mut stream)) => {
             // TODO figure out how connections where the initiator will be a non-client at some point
-            match preprotocol_connect_inner(&mut stream, our_identity, NetworkRole::Client, server_address).await {
+            match preprotocol_connect_inner(&mut stream, our_identity, SelfNetworkRole::Client, server_address).await {
                 Ok(completed_connection) => {
                     info!("Successfully initiated connection to a server with identity {}, running Gestalt v{}", completed_connection.peer_identity.to_base64(), &completed_connection.peer_engine_version);
                     stream.shutdown().await.unwrap();

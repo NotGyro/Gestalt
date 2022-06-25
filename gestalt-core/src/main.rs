@@ -34,7 +34,7 @@ use common::{identity::{do_keys_need_generating, does_private_key_need_passphras
 use std::collections::{HashSet, HashMap};
 use tokio::sync::mpsc;
 
-use crate::{net::{PREPROTCOL_PORT, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server, NetworkRole}, GESTALT_PORT, run_network_system, LaminarConfig, TypedNetMsgReceiver, net_channels::{NetSendChannel, net_msg_channel}, NetMsg}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::START_SHUTDOWN};
+use crate::{net::{PREPROTCOL_PORT, NetworkRole, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}, GESTALT_PORT, run_network_system, LaminarConfig, TypedNetMsgReceiver, net_channels::{NetSendChannel, net_msg_channel}, NetMsg}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::{START_QUIT, QuitReceiver}};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -345,6 +345,7 @@ fn main() {
         info!("Launching server mainloop.");
         let mut total_changes: Vec<VoxelChangeAnnounce> = Vec::new();
         async_runtime.block_on(async move { 
+            let mut quit_receiver = QuitReceiver::new();
             loop {
                 tokio::select! { 
                     voxel_events_maybe = server_voxel_receiver_from_client.recv() => { 
@@ -372,10 +373,14 @@ fn main() {
                             }
                         }
                     }
+                    quit_ready_indicator = quit_receiver.wait_for_quit() => { 
+                        quit_ready_indicator.notify_ready();
+                        break;
+                    }
                 }
             }
         });
-        message::send_one((), &START_SHUTDOWN).unwrap();
+        message::quit_game(Duration::from_secs(10));
         async_runtime.block_on(net_system_join_handle);
     }
     else if let Some( ArgumentMatch{ aliases: _, parameter: Some(raw_addr) }) = matches.get("--join") {
@@ -420,42 +425,28 @@ fn main() {
             }
         });
 
-        let quit_sender = message::sender_subscribe(&START_SHUTDOWN).unwrap();
-        let (quit_ready_sender, quit_ready_receiver) = tokio::sync::mpsc::unbounded_channel();
-
         async_runtime.spawn( async move {
-            message::at_quit().await;
+            let mut quit_receiver = QuitReceiver::new();
+            let quit_ready = quit_receiver.wait_for_quit().await;
             net_system_join_handle.await; //This is why quit_ready_sender exists. Make sure that's all done. 
-            quit_ready_sender.send(()).unwrap();
+            quit_ready.notify_ready();
         });
         client::clientmain::run_client(keys, 
                 voxel_event_sender, 
                 client_voxel_receiver_from_server, 
                 Some(server_identity),
                 async_runtime,
-                quit_sender,
-                quit_ready_receiver,
             );
     }
     else {
         let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096); 
         let voxel_event_sender = NetSendChannel::new(voxel_event_sender); 
 
-        async_runtime.spawn( async move { 
+        async_runtime.spawn( async move {
             loop { 
                 //redirect to /dev/null
-                if let Ok(msgs) = voxel_event_receiver.recv().await { 
-                    drop(msgs);
-                }
+                let _ = voxel_event_receiver.recv().await;
             }
-        });
-
-        let quit_sender = message::sender_subscribe(&START_SHUTDOWN).unwrap();
-        let (quit_ready_sender, quit_ready_receiver) = tokio::sync::mpsc::unbounded_channel();
-
-        async_runtime.spawn( async move {
-            message::at_quit().await;
-            quit_ready_sender.send(()).unwrap();
         });
 
         client::clientmain::run_client(keys, 
@@ -463,8 +454,6 @@ fn main() {
             client_voxel_receiver_from_server, 
             None,
             async_runtime,
-            quit_sender,
-            quit_ready_receiver,
             );
     }
 }

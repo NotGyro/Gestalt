@@ -117,7 +117,7 @@ pub mod net_msg_channel {
         message::send_to_all_except(packet, &PACKET_TO_SESSION, exclude)
     }
 
-    pub fn send_to_all_multi_except<T, C, D, V>(messages: V, channel: &C, exclude: &D) -> Result<(), SendError> 
+    pub fn send_to_all_multi_except<T, C, D, V>(messages: V, exclude: &NodeIdentity) -> Result<(), SendError> 
             where T: NetMsg, V: IntoIterator<Item=T> { 
         let mut packets = Vec::new();
         for message in messages {
@@ -125,6 +125,6 @@ pub mod net_msg_channel {
                 .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
             packets.push(packet);
         }
-        message::send_to_all_multi(packets, &PACKET_TO_SESSION)
+        message::send_to_all_multi_except(packets, &PACKET_TO_SESSION, exclude)
     }
 }

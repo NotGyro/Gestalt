@@ -2,7 +2,7 @@ use std::{
     error::Error,
     io::{BufReader, Read, Write},
     sync::Arc,
-    time::Instant, fs::OpenOptions,
+    time::{Instant, Duration}, fs::OpenOptions,
 };
 
 use glam::Vec4;
@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_msg_channel}, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_msg_channel}, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -353,9 +353,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
         voxel_event_sender: NetSendChannel<VoxelChangeRequest>, 
         mut voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, 
         server_identity: Option<NodeIdentity>, 
-        async_runtime: tokio::runtime::Runtime,
-        quit_sender: MessageSender<()>,
-        mut quit_ready_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,) {
+        async_runtime: tokio::runtime::Runtime,) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
     let mut open_options = std::fs::OpenOptions::new();
@@ -747,10 +745,8 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = false; 
                     }
-                    else if input.virtual_keycode == Some(VirtualKeyCode::Escape) { 
-                        //Quit
-                        quit_sender.send_one(()).unwrap();
-                        async_runtime.block_on(quit_ready_receiver.recv());
+                    else if input.virtual_keycode == Some(VirtualKeyCode::Escape) {
+                        async_runtime.block_on(message::quit_game(Duration::from_secs(5))).unwrap();
                         *control = ControlFlow::Exit;
                     }
                     let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);
