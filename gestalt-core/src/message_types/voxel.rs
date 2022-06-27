@@ -2,8 +2,6 @@ use serde::{Serialize, Deserialize};
 
 use crate::{common::voxelmath::VoxelPos, world::TileId};
 
-use crate::net::{NetMsg, PacketGuarantees, StreamSelector};
-
 /// Usually client-to-server. 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VoxelChangeRequest {
@@ -18,12 +16,12 @@ pub struct VoxelChangeAnnounce {
     pub new_tile: TileId,
 }
 
-impl_netmsg!(VoxelChangeRequest, 40, ReliableOrdered);
-impl_netmsg!(VoxelChangeAnnounce, 41, ReliableOrdered);
+impl_netmsg!(VoxelChangeRequest, 40, ClientToServer, ReliableOrdered);
+impl_netmsg!(VoxelChangeAnnounce, 41, ServerToClient, ReliableOrdered);
 
 impl Into<VoxelChangeAnnounce> for VoxelChangeRequest {
     fn into(self) -> VoxelChangeAnnounce {
-        VoxelChangeAnnounce { 
+        VoxelChangeAnnounce {
             pos: self.pos,
             new_tile: self.new_tile,
         }

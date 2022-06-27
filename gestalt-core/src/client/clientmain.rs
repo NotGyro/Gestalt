@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_msg_channel}, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_send_channel, net_recv_channel::NetMsgReceiver},}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -351,7 +351,7 @@ pub fn load_or_generate_dev_world(world: &mut TileSpace, world_id: &WorldId, chu
 // Never returns. Unfortunately the event loop's exit functionality does not just destroy the event loop, it closes the program.
 pub fn run_client(identity_keys: IdentityKeyPair, 
         voxel_event_sender: NetSendChannel<VoxelChangeRequest>, 
-        mut voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, 
+        mut voxel_event_receiver: NetMsgReceiver<VoxelChangeAnnounce>, 
         server_identity: Option<NodeIdentity>, 
         async_runtime: tokio::runtime::Runtime,) {
     let event_loop = winit::event_loop::EventLoop::new();
@@ -388,7 +388,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
         let join_msg = JoinDefaultEntry {
             display_name: config.your_display_name.clone(),
         };
-        net_msg_channel::send_to(join_msg, &server).unwrap(); 
+        net_send_channel::send_to(join_msg, &server).unwrap(); 
     }
 
     let world_id = get_lobby_world_id(&identity_keys.public);
@@ -563,7 +563,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
 
     event_loop.run(move |event, _, control| {
         let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
-        if let Ok(events) = voxel_event_receiver.try_recv() { 
+        if let Ok(events) = voxel_event_receiver.recv_poll() { 
             for (_ident, announce) in events { 
                 let old_value = world_space.get(announce.pos).unwrap();
                 if announce.new_tile != *old_value { 

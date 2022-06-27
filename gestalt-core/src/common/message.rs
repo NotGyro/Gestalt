@@ -80,18 +80,25 @@ impl<T> MessageReceiver<T> where T: Clone {
         resl.append(&mut maybe_more);
         Ok(resl)
     }
+
+    pub fn resubscribe(&self) -> Self { 
+        MessageReceiver {
+            inner: self.inner.resubscribe(),
+        }
+    }
 }
 
 pub trait ChannelDomain: Clone + PartialEq + Eq + PartialOrd + Hash + Debug {}
+impl<A, B> ChannelDomain for (A, B) where A: ChannelDomain, B: ChannelDomain {}
 
 impl ChannelDomain for WorldId {}
 impl ChannelDomain for NodeIdentity {}
 
-pub trait MessageHasDomain<D> where D: ChannelDomain { 
+pub trait MessageWithDomain<D> where D: ChannelDomain { 
     fn get_domain(&self) -> &D;
 }
 
-impl<T,D> MessageHasDomain<D> for (T, D) where T: Clone, D: ChannelDomain {
+impl<T,D> MessageWithDomain<D> for (T, D) where T: Clone, D: ChannelDomain {
     fn get_domain(&self) -> &D {
         &self.1
     }
@@ -362,7 +369,7 @@ impl<T,D,R> SenderDomainAccepts<T, D> for DomainMultiChannel<R,D> where T: Into<
     }
 }
 
-impl<T, D, R> SenderAccepts<T> for DomainMultiChannel<R, D> where T: Into<R> + MessageHasDomain<D>, D: ChannelDomain, R: Clone + MessageHasDomain<D> { 
+impl<T, D, R> SenderAccepts<T> for DomainMultiChannel<R, D> where T: Into<R> + MessageWithDomain<D>, D: ChannelDomain, R: Clone + MessageWithDomain<D> { 
     fn send_multi<V>(&self, messages: V) -> Result<(), SendError> where V: IntoIterator<Item=T> { 
         for message in messages {
             let message = message.into();
@@ -498,10 +505,19 @@ pub fn send_to_all_multi_except<T, C, D, V>(messages: V, channel: &C, exclude: &
     Ok(())
 }
 
+// Global channel helpers
+
+// A way to use Rust's type system to refer to specific individual channels.
+// This is mostly a weird hack to make type dynamism easier. 
+//pub trait MessageChannelTy<T> where T: Clone {
+//    
+//    fn accepted_types()
+//}
+
 macro_rules! channel {
     ($name:ident, $message:ty, $capacity:expr) => {
         lazy_static::lazy_static!{
-            pub static ref $name: crate::common::message::ChannelMutex<MessageChannel<$message>> = {
+            pub static ref $name: crate::common::message::ChannelMutex<crate::common::message::MessageChannel<$message>> = {
                 crate::common::message::ChannelMutex::new(crate::common::message::MessageChannel::new($capacity))
             };
         }
@@ -510,7 +526,7 @@ macro_rules! channel {
 macro_rules! domain_channel {
     ($name:ident, $message:ty, $domain:ty, $capacity:expr) => {
         lazy_static::lazy_static!{
-            pub static ref $name: crate::common::message::ChannelMutex<DomainMultiChannel<$message, $domain>> = {
+            pub static ref $name: crate::common::message::ChannelMutex<crate::common::message::DomainMultiChannel<$message, $domain>> = {
                 crate::common::message::ChannelMutex::new(crate::common::message::DomainMultiChannel::new($capacity))
             };
         }
@@ -518,7 +534,6 @@ macro_rules! domain_channel {
 }
 
 // A few *very universal* channels can exist in this file. 
-
 channel!(START_QUIT, (), 1);
 channel!(READY_FOR_QUIT, (), 1024);
 
@@ -700,8 +715,7 @@ pub mod test {
             assert_eq!(out_msg.msg, String::from("Hello, player2!"));
         }
     }
-    
-    
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct MessageC { 
         pub msg: String,
@@ -724,7 +738,5 @@ pub mod test {
         let output = receiver.recv_poll().unwrap();
         assert_eq!(output.len(), NUM_MESSAGES);
         assert_eq!(receiver.inner.try_recv(), Err(TryRecvError::Empty) ); 
-
-        //assert_eq!(out_msg.msg, String::from("Hello, world!"));
     }
 }

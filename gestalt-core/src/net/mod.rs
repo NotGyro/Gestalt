@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use std::fs;
-use std::marker::PhantomData;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
@@ -16,7 +15,7 @@ use log::error;
 use log::info;
 use log::warn;
 use serde::Deserialize;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 
 use snow::StatelessTransportState;
 use tokio::net::UdpSocket;
@@ -24,141 +23,40 @@ use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
 use crate::common::Version;
-use crate::common::growable_buffer::GrowableBuf;
 use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
-use crate::message;
 use crate::message::MessageReceiver;
+use crate::message::MessageSender;
 use crate::message::QuitReceiver;
-use crate::net::net_channels::net_msg_channel;
+use crate::message::add_domain;
+use crate::message::sender_subscribe_domain;
+use crate::net::net_channels::net_send_channel;
 
 pub const PREPROTCOL_PORT: u16 = 54134;
 pub const GESTALT_PORT: u16 = 54134;
-//use tokio::sync::mpsc::error::TryRecvError; 
-
-//use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
-
-/*use std::boxed::Box;
-use std::error::Error;
-use std::marker::PhantomData;
-use std::net::{IpAddr, SocketAddr};
-use std::result::Result;
-use std::thread;
-
-use std::collections::{HashSet, HashMap};
-use log::error;
-use log::info;
-use log::warn;
-use parking_lot::Mutex;
-
-use laminar::{SocketEvent, Socket, Packet};
-
-use crossbeam_channel::{bounded, Sender, Receiver, TryRecvError};
-
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-
-use lazy_static::lazy_static;
-
-use crate::common::Version;
-use crate::common::identity::IdentityKeyPair;
-use crate::common::identity::NodeIdentity;*/
 
 pub mod handshake;
 pub mod net_channels;
+#[macro_use]
+pub mod netmsg;
 pub mod preprotocol;
+
+pub use netmsg::NetworkRole as NetworkRole; 
+pub use netmsg::SelfNetworkRole as SelfNetworkRole; 
+pub use netmsg::OuterEnvelope as OuterEnvelope;
+pub use netmsg::PacketIntermediary as PacketIntermediary; 
+pub use netmsg::NetMsgId as NetMsgId; 
+pub use netmsg::NetMsg as NetMsg; 
+pub use netmsg::NetMsgDomain as NetMsgDomain;
+pub use netmsg::InboundNetMsg as InboundNetMsg; 
+pub use netmsg::DISCONNECT_RESERVED as DISCONNECT_RESERVED;
+
+use self::net_channels::INBOUND_NET_MESSAGES;
 
 pub const SESSION_ID_LEN: usize = 4;
 pub type SessionId = [u8; SESSION_ID_LEN];
 
 pub type MessageCounter = u32;
-
-
-pub const UNKNOWN_ROLE: u8 = 0;
-pub const SERVER_ROLE: u8 = 1;
-pub const CLIENT_ROLE: u8 = 2;
-
-#[repr(u8)]
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
-pub enum NetworkRole { 
-    Unknown = UNKNOWN_ROLE,
-    Server = SERVER_ROLE,
-    Client = CLIENT_ROLE,
-    //Later, roles will be added for things like CDNs, sharding, mirrors, backup-servers, etc.
-}
-
-impl From<u8> for NetworkRole {
-    fn from(value: u8) -> Self {
-        match value { 
-            SERVER_ROLE => NetworkRole::Server,
-            CLIENT_ROLE => NetworkRole::Client,
-            _ => NetworkRole::Unknown,
-        }
-    }
-}
-
-impl From<NetworkRole> for u8 {
-    fn from(role: NetworkRole) -> Self {
-        match role {
-            NetworkRole::Unknown => { 
-                warn!("Serializing a NetworkRole::Unknown. This shouldn't happen - consider this a bug. Unknown Role's value is {}", UNKNOWN_ROLE);
-                UNKNOWN_ROLE
-            },
-            NetworkRole::Server => SERVER_ROLE,
-            NetworkRole::Client => CLIENT_ROLE,
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Serialize, Deserialize, Copy, Clone, PartialEq, Eq)]
-pub enum SelfNetworkRole {
-    Server = SERVER_ROLE,
-    Client = CLIENT_ROLE,
-    //Later, roles will be added for things like CDNs, sharding, mirrors, backup-servers, etc.
-}
-
-impl From<SelfNetworkRole> for u8 {
-    fn from(role: SelfNetworkRole) -> Self {
-        match role {
-            SelfNetworkRole::Server => SERVER_ROLE,
-            SelfNetworkRole::Client => CLIENT_ROLE,
-        }
-    }
-}
-impl From<SelfNetworkRole> for NetworkRole {
-    fn from(role: SelfNetworkRole) -> Self {
-        match role {
-            SelfNetworkRole::Server => NetworkRole::Server,
-            SelfNetworkRole::Client => NetworkRole::Client,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum MessageSidedness { 
-    ClientToServer, 
-    ServerToClient, 
-    Common,
-}
-
-impl SelfNetworkRole { 
-    /// On a node with this role, should we ingest a message with that sidedness?
-    /// This is checked, even in release builds, as an extra security measure. 
-    /// Certain net message IDs are just *not allowed* to be sent to servers.
-    pub fn should_we_ingest(&self, message_sidedness: MessageSidedness) -> bool { 
-        match message_sidedness {
-            MessageSidedness::ClientToServer => match self {
-                SelfNetworkRole::Server => true,
-                SelfNetworkRole::Client => false,
-            },
-            MessageSidedness::ServerToClient => match self {
-                SelfNetworkRole::Server => false,
-                SelfNetworkRole::Client => true,
-            },
-            MessageSidedness::Common => true,
-        }
-    }
-}
 
 /// Represents a client who has completed a handshake in the pre-protocol and will now be moving over to the game protocol proper
 #[derive(Debug)]
@@ -183,10 +81,10 @@ impl SuccessfulConnect {
 
 /// Which directory holds temporary network protocol data? 
 /// I.e. Noise protocol keys, cached knowledge of "this identity is at this IP," etc. 
-pub fn protocol_store_dir() -> PathBuf { 
-    const PROTOCOL_STORE_DIR: &str = "protocol/"; 
+pub fn protocol_store_dir() -> PathBuf {
+    const PROTOCOL_STORE_DIR: &str = "protocol/";
     let path = PathBuf::from(PROTOCOL_STORE_DIR);
-    if !path.exists() { 
+    if !path.exists() {
         fs::create_dir(&path).unwrap();
     }
     path
@@ -200,72 +98,6 @@ pub enum ConnectionRole {
     /// We are the client and we are connected to a server. 
     ClientToServer,
 }
-
-// A chunk has to be requested by a client (or peer server) before it is sent. So, a typical flow would go like this:
-// 1. Client: My revision number on chunk (15, -8, 24) is 732. Can you give me the new stuff if there is any?
-// 2. Server: Mine is 738, here is a buffer of 6 new voxel event logs to get you up to date.
-
-/// Describes what kind of ordering guarantees are made about a packet.
-/// Directly inspired by (and currently maps to!) Laminar's reliability types.
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Hash)]
-pub enum PacketGuarantees {
-    /// No guarantees - it'll get there when it gets there.
-    UnreliableUnordered,
-    /// Not guaranteed that it'll get there, and if an older packet arrives after a newer one it will be discarded.
-    UnreliableSequenced,
-    /// Guaranteed it will get there (resend if we don't get ack), but no guarantees about the order.
-    ReliableUnordered,
-    /// It is guaranteed it will get there, and in the right order. Do not send next packet before getting ack.
-    /// TCP-like.
-    ReliableOrdered,
-    /// Guaranteed it will get there (resend if we don't get ack),
-    /// and if an older packet arrives after a newer one it will be discarded.
-    ReliableSequenced,
-}
-
-pub type StreamId = u8;
-
-/// Which "stream" is this on?
-/// A stream in this context must be a u8-identified separate channel of packets
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Hash)]
-pub enum StreamSelector {
-    Any,
-    Specific(StreamId),
-}
-
-impl From<Option<StreamId>> for StreamSelector {
-    fn from(value: Option<StreamId>) -> Self {
-        match value { 
-            None => StreamSelector::Any,
-            Some(val) => StreamSelector::Specific(val),
-        }
-    }
-}
-impl From<StreamSelector> for Option<StreamId> {
-    fn from(value: StreamSelector) -> Self {
-        match value {
-            StreamSelector::Any => None,
-            StreamSelector::Specific(val) => Some(val),
-        }
-    }
-}
-// One Tokio task for polling the socket for inbound messages and routing them to and sending on channels per peer, and for polling from channels to send over the network. 
-// --
-// n Tokio tasks per peer for polling inbound channel from the above UDP socket task, decrypting, Laminar logic per connection, etc, and then pushing to the socket task.
-// These also poll off of channels sending user messages for outbound messages to turn into Laminar messages and then encrypt them, pushing to the socket task. 
-// This is where ConnectionManager and the Noise protocol transport cryptography lives, along with its cryptographic counter.
-// --
-// Somewhere we associate inbound messages with a NodeIdentity and correspond outgoing NetMsg's with the right session per NodeIdentity.
-// Also, message serialziation has to happen at some point. 
-// Perhaps the middle layer gets channels moved to the top layer and channels moved to the bottom layer, at the same time, upon successful connection start?
-// Do I need a "bottom layer"? 
-
-// Tokio channel "blocking_send()" can be used outside of a Tokio runtime to send a message inside a Tokio runtime. 
-// blocking_recv() also can be used to get messages from inside a Tokio runtime and pull them inside a Tokio runtime. 
-// try_recv() also appears to work outside of an async context! 
-// And sending on an unbounded channel never requires any kind of waiting - send() on an unbounded channel is sync... 
-// This has lots of implications! Including and especially ways we can make the message bus work, low low latency.
-
 
 #[derive(Clone, Debug)]
 pub struct NetConfig { 
@@ -295,7 +127,6 @@ struct TransportWrapper {
     pub outbox: VecDeque<(SocketAddr, Vec<u8>)>, 
     // Packets received
     pub inbox: VecDeque<laminar::SocketEvent>,
-
 }
 
 impl laminar::ConnectionMessenger<laminar::SocketEvent> for TransportWrapper {
@@ -331,7 +162,6 @@ pub struct LaminarConnectionManager {
 }
 
 impl LaminarConnectionManager {
-
     pub fn new(peer_address: SocketAddr, laminar_config: &LaminarConfig, time: Instant) -> Self {
         let mut messenger = TransportWrapper {
             laminar_config: laminar_config.clone(),
@@ -349,22 +179,23 @@ impl LaminarConnectionManager {
 
     /// Ingests a batch of packets coming off the wire.
     pub fn process_inbound<T: IntoIterator< Item: AsRef<[u8]> >>(&mut self, inbound_messages: T, time: Instant) -> Result<(), LaminarWrapperError> {
-        let mut at_least_one = false; 
+        //let mut at_least_one = false; 
         let messenger = &mut self.messenger;
         for payload in inbound_messages.into_iter() {
-            at_least_one = true;
-            let was_est = self.connection_state.is_established();
+            //at_least_one = true;
+            //let was_est = self.connection_state.is_established();
             //Processing inbound
             self.connection_state.process_packet(messenger, payload.as_ref(), time);
-            if !was_est && self.connection_state.is_established() {
-                info!("Connection established with {:?}", self.peer_address);
-            }
-        }
-        if at_least_one {
-            self.connection_state.last_heard = time.clone(); 
+            //if !was_est && self.connection_state.is_established() {
+            //    info!("Connection established with {:?}", self.peer_address);
+            //}
         }
 
         self.connection_state.update(messenger, time);
+
+        //if at_least_one {
+        //    self.connection_state.last_heard = time.clone(); 
+        //}
         
         match self.connection_state.should_drop(messenger, time) { 
             false => Ok(()),
@@ -388,19 +219,20 @@ impl LaminarConnectionManager {
     }
     /// Adds Laminar connection logic to messages that we are sending. 
     pub fn process_outbound<T: IntoIterator< Item=laminar::Packet >>(&mut self, outbound_messages: T, time: Instant)  -> Result<(), LaminarWrapperError> { 
+        let messenger = &mut self.messenger;
         // Return before attempting to send. 
-        if self.connection_state.should_drop(&mut self.messenger, time) { 
+        if self.connection_state.should_drop(messenger, time) { 
             return Err(LaminarWrapperError::Disconnect(self.peer_address));
         }
         
         // To send:
         for packet in outbound_messages.into_iter() {
-            self.connection_state.process_event(&mut self.messenger, packet, time);
+            self.connection_state.process_event(messenger, packet, time);
         }
-        self.connection_state.update(&mut self.messenger, time);
+        self.connection_state.update(messenger, time);
 
         // Check again!
-        match self.connection_state.should_drop(&mut self.messenger, time) { 
+        match self.connection_state.should_drop(messenger, time) { 
             false => Ok(()),
             true => {
                 info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
@@ -415,239 +247,6 @@ impl LaminarConnectionManager {
     pub fn empty_inbox<T: FromIterator<laminar::SocketEvent>>(&mut self) -> T { 
         self.messenger.inbox.drain(0..).collect()
     }
-}
-
-/// Decoded top-level envelope containing the session id, the counter, and the ciphertext, to send to the session layer.
-#[derive(Debug, Clone)]
-pub struct OuterEnvelope {
-    pub session_id: FullSessionName,
-    /// Counter, monotonically increasing, encoded as 4 little endian bytes on the wire. 
-    pub counter: MessageCounter,
-    /// Noise-protocol-encrypted ciphertext, which decrypts to a Laminar packet containing EncodedNetMsg bytes.
-    pub ciphertext: Vec<u8>,
-}
-
-/// What type of packet are we sending/receiving? Should 1-to-1 correspond with a type of NetMessage.
-/// On the wire, this will be Vu64's variable-length encoding.
-pub type NetMsgId = u32;
-
-pub const DISCONNECT_RESERVED: NetMsgId = 0;
-
-/// Information required to interconvert between raw packets and structured Rust types.
-#[derive(Debug, Copy, Clone)]
-pub struct NetMsgType {
-    pub id: NetMsgId,
-    pub guarantees: PacketGuarantees,
-    pub stream: StreamSelector, 
-}
-
-/// A NetMsg coming in off the wire 
-#[derive(Debug, Clone)]
-pub struct InboundNetMsg {
-    pub peer_identity: NodeIdentity, 
-    pub message_type_id: NetMsgId,
-    // Our MsgPack-encoded actual NetMsg.
-    pub payload: Vec<u8>,
-    // This used to have a `pub source: NodeIdentity,` line, but these are implicitly per-session and that is validated at the session layer. 
-}
-
-/// A NetMsg to send to one of our currently-connected peers. 
-#[derive(Debug, Clone)]
-pub struct OutboundNetMsg {
-    pub message_type: NetMsgType,
-    // Our MsgPack-encoded actual NetMsg.
-    pub payload: Vec<u8>,
-    pub destination: NodeIdentity,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum NetMsgDecodeErr {
-    #[error("Attempted to decode a NetMessage into type {0}, but it was a NetMessage of type {1}")]
-    WrongType(NetMsgId, NetMsgId),
-    #[error("Could not decode a NetMessage: {0:?}")]
-    CouldNotDecode(#[from] rmp_serde::decode::Error),
-    #[error("Could not send an inbound NetMsg over to the appropriate part of the program.")]
-    SendToChannel,
-    #[error("Could get an inbound NetMsg off of a channel from the network subsystem.")]
-    ReceiveFromChannel,
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum NetMsgRecvError {
-    #[error("Attempted to decode a NetMessage into type {0} (which is {1}), but it was a NetMessage of type {2}")]
-    WrongType(NetMsgId, &'static str, NetMsgId),
-    #[error("Could not decode a NetMessage: {0:?}")]
-    CouldNotDecode(#[from] rmp_serde::decode::Error),
-    #[error("Could not get an inbound NetMsg of type {0} off of a channel from the network subsystem.")]
-    ReceiveFromChannel(&'static str),
-}
-
-pub type NetMsgSender = tokio::sync::broadcast::Sender<Vec<InboundNetMsg>>; 
-pub type NetMsgReceiver = tokio::sync::broadcast::Receiver<Vec<InboundNetMsg>>;
-
-pub type NetMsgBroadcast = Vec<(InboundNetMsg, NodeIdentity)>;
-
-pub struct TypedNetMsgReceiver<T> { 
-    pub inner: NetMsgReceiver,
-    _t: PhantomData<T>,
-}
-impl<T: NetMsg> TypedNetMsgReceiver<T> { 
-    pub fn new(inner: NetMsgReceiver) -> Self { 
-        TypedNetMsgReceiver { 
-            inner, 
-            _t: PhantomData::default(),
-        }
-    }
-    pub fn subscribe_on(sender: NetMsgSender) -> Self { 
-        TypedNetMsgReceiver { 
-            inner: sender.subscribe(), 
-            _t: PhantomData::default(),
-        }
-    }
-    pub fn len(&self) -> usize { 
-        self.inner.len()
-    }
-    pub fn is_empty(&self) -> bool { 
-        self.inner.is_empty()
-    }
-    pub(crate) fn decode(inbound: Vec<InboundNetMsg>) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {
-        let mut output = Vec::with_capacity(inbound.len());
-        for message in inbound { 
-            if T::net_msg_id() != message.message_type_id { 
-                return Err(NetMsgRecvError::WrongType(T::net_msg_id(), T::net_msg_name(), message.message_type_id));
-            }
-            else {
-                let InboundNetMsg{peer_identity, message_type_id: _, payload } = message;
-                let payload: T = rmp_serde::from_read(&payload[..])?;
-                output.push((peer_identity, payload));
-            }
-        }
-        Ok(output)
-    }
-
-    pub fn resubscribe(&self) -> Self { 
-        TypedNetMsgReceiver { 
-            inner: self.inner.resubscribe(), 
-            _t: PhantomData::default(),
-        }
-    }
-    pub async fn recv(&mut self) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> { 
-        Self::decode(
-            self.inner.recv().await
-                .map_err(|_e| NetMsgRecvError::ReceiveFromChannel(T::net_msg_name()) )?
-        )
-    }
-    pub fn try_recv(&mut self) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> { 
-        match self.inner.try_recv() {
-            Ok(buf) => Self::decode(buf),
-            Err(e) => match e {
-                tokio::sync::broadcast::error::TryRecvError::Empty => Ok(Vec::new()) /* Return an empty vector - nothing went wrong, our mailbox is just empty.*/,
-                tokio::sync::broadcast::error::TryRecvError::Closed => Err(NetMsgRecvError::ReceiveFromChannel(T::net_msg_name())),
-                tokio::sync::broadcast::error::TryRecvError::Lagged(_x) => Err(NetMsgRecvError::ReceiveFromChannel(T::net_msg_name())),
-            },
-        }
-    }
-}
-
-//Packet with no destination.
-#[derive(Clone, Debug)]
-pub struct PacketIntermediary { 
-    pub guarantees: PacketGuarantees, 
-    pub stream: StreamSelector, 
-    pub payload: Vec<u8>,
-}
-
-impl PacketIntermediary { 
-    pub fn make_full_packet(self, send_to: SocketAddr) -> laminar::Packet { 
-        use laminar::Packet;
-        // Branch on our message properties to figure out what kind of packet to construct.
-        match self.guarantees {
-            PacketGuarantees::UnreliableUnordered => {
-                // Unordered packets have no concept of a "stream"
-                Packet::unreliable(send_to, self.payload)
-            },
-            PacketGuarantees::UnreliableSequenced => {
-                match self.stream {
-                    StreamSelector::Any => Packet::unreliable_sequenced(send_to, self.payload, None),
-                    StreamSelector::Specific(id) => Packet::unreliable_sequenced(send_to, self.payload, Some(id)),
-                }
-            },
-            PacketGuarantees::ReliableUnordered => {
-                // Unordered packets have no concept of a "stream"
-                Packet::reliable_unordered(send_to, self.payload)
-            },
-            PacketGuarantees::ReliableOrdered => {
-                match self.stream {
-                    StreamSelector::Any => Packet::reliable_ordered(send_to, self.payload, None),
-                    StreamSelector::Specific(id) => Packet::reliable_ordered(send_to, self.payload, Some(id)),
-                }
-            },
-            PacketGuarantees::ReliableSequenced => {
-                match self.stream {
-                    StreamSelector::Any => Packet::reliable_sequenced(send_to, self.payload, None),
-                    StreamSelector::Specific(id) => Packet::reliable_sequenced(send_to, self.payload, Some(id)),
-                }
-            },
-        }
-    }
-}
-
-pub const PACKET_ENCODE_MAX: usize = 1024 * 1024 * 512;
-pub const RECEIVED_PACKET_BROADCASTER_MAX: usize = 2048;
-
-/// Any type which can be encoded as a NetMessage to be sent out over the wire.
-pub trait NetMsg: Serialize + DeserializeOwned + Clone {
-
-    fn net_msg_id() -> NetMsgId;
-    fn net_msg_guarantees() -> PacketGuarantees;
-    fn net_msg_stream() -> StreamSelector;
-    /// Used with the `stringify!()` macro
-    fn net_msg_name() -> &'static str;
-    fn net_msg_type() -> NetMsgType {
-        NetMsgType {
-            id: Self::net_msg_id(), 
-            guarantees: Self::net_msg_guarantees(), 
-            stream: Self::net_msg_stream(),
-        }
-    }
-    
-    fn construct_packet(&self) -> Result<PacketIntermediary, Box<dyn std::error::Error>> {
-        // Start by writing our tag.
-        let encode_start: Vec<u8> = vu64::encode(Self::net_msg_id() as u64).as_ref().to_vec();
-        // Write our data.
-        let mut buffer = GrowableBuf::new(encode_start, PACKET_ENCODE_MAX);
-        rmp_serde::encode::write(&mut buffer, self)?;
-        let encoded = buffer.into_inner();
-
-        Ok(PacketIntermediary{ guarantees: Self::net_msg_guarantees(), stream: Self::net_msg_stream(), payload: encoded})
-    }
-}
-
-macro_rules! impl_netmsg {
-    ($message:ident, $id:expr, $guarantee:ident) => {
-        impl NetMsg for $message {
-            #[inline(always)]
-            fn net_msg_id() -> u32 { $id }
-            #[inline(always)]
-            fn net_msg_guarantees() -> PacketGuarantees { PacketGuarantees::$guarantee }
-            #[inline(always)]
-            fn net_msg_stream() -> StreamSelector { StreamSelector::Any }
-            #[inline(always)]
-            fn net_msg_name() -> &'static str { stringify!($message) }
-        }
-    };
-    ($message:ident, $id:expr, $guarantee:ident, $stream:expr) => {
-        impl NetMsg for $message {
-            #[inline(always)]
-            fn net_msg_id() -> u32 { $id }
-            #[inline(always)]
-            fn net_msg_guarantees() -> PacketGuarantees { PacketGuarantees::$guarantee }
-            #[inline(always)]
-            fn net_msg_stream() -> StreamSelector { StreamSelector::Specific($stream) }
-            #[inline(always)]
-            fn net_msg_name() -> &'static str { stringify!($message) }
-        }
-    };
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Eq)]
@@ -703,8 +302,7 @@ pub type PushReceiver = mpsc::UnboundedReceiver<Vec<OuterEnvelope>>;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DisconnectMsg {}
-
-impl_netmsg!(DisconnectMsg, DISCONNECT_RESERVED, ReliableUnordered);
+impl_netmsg!(DisconnectMsg, DISCONNECT_RESERVED, Common, ReliableUnordered);
 
 /// One per session, handles both cryptography and Laminar reliable-UDP logic.
 pub struct Session {
@@ -722,17 +320,26 @@ pub struct Session {
     /// Channel the Session uses to send packets to the UDP socket
     push_channel: PushSender,
 
-    /// Channels to distribute out inbound packets to the rest of the engine on. 
-    received_channels: HashMap<NetMsgId, NetMsgSender>,
+    inbound_channels: HashMap<NetMsgDomain, MessageSender<InboundNetMsg>>,
 
     pub disconnect_deliberate: bool,
 }
 
 impl Session {
+    /// Get a message-passing sender for the given NetMsgDomain, caching so we don't have to lock the mutex constantly. 
+    fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut MessageSender<InboundNetMsg> {
+        self.inbound_channels.entry(domain).or_insert_with(|| { 
+            add_domain(&INBOUND_NET_MESSAGES, &domain);
+            sender_subscribe_domain(&INBOUND_NET_MESSAGES, &domain).unwrap()
+        })
+    }
+
     pub fn new(local_identity: IdentityKeyPair, peer_address: SocketAddr, connection: SuccessfulConnect, laminar_config: LaminarConfig, 
-                push_channel: PushSender, received_message_channels: HashMap<NetMsgId, NetMsgSender>, time: Instant) -> Self {
+                push_channel: PushSender, time: Instant) -> Self {
+        let mut laminar_layer = LaminarConnectionManager::new(connection.peer_address, &laminar_config, time);
+        laminar_layer.connection_state.last_heard = time;
         Session {
-            laminar: LaminarConnectionManager::new(connection.peer_address, &laminar_config, time),
+            laminar: laminar_layer,
             local_identity,
             peer_identity: connection.peer_identity,
             peer_address,
@@ -740,7 +347,7 @@ impl Session {
             local_counter: connection.transport_counter,
             transport_cryptography: connection.transport_cryptography,
             push_channel,
-            received_channels: received_message_channels,
+            inbound_channels: HashMap::new(),
             disconnect_deliberate: false,
         }
     }
@@ -768,7 +375,7 @@ impl Session {
     }
 
     /// Called inside process_inbound()
-    fn decrypt_outer_envelope(&mut self, envelope: OuterEnvelope) -> Result<Vec<u8>, SessionLayerError> { 
+    fn decrypt_outer_envelope(&mut self, envelope: OuterEnvelope) -> Result<Vec<u8>, SessionLayerError> {
         let OuterEnvelope{ session_id: _session_id, counter, ciphertext } = envelope;
 
         let mut buf = vec![0u8; (ciphertext.len() * 3)/2];
@@ -789,9 +396,9 @@ impl Session {
             }
         }
 
-        if batch.len() > 0 { 
-            self.laminar.connection_state.last_heard = time;
-        }
+        //if batch.len() > 0 {
+        //    self.laminar.connection_state.last_heard = time;
+        //}
 
         match self.laminar.process_inbound(batch, time) {
             Ok(_) => {},
@@ -799,25 +406,8 @@ impl Session {
         }
 
         //Packets to send to the rest of the Gestalt application, having been decoded.
-        let mut processed_packets: Vec<laminar::SocketEvent> = self.laminar.empty_inbox();
+        let processed_packets: Vec<laminar::SocketEvent> = self.laminar.empty_inbox();
 
-        //Are any of these types of Laminar packets which should close the channel? 
-        let drop_packets: Vec<laminar::SocketEvent> = processed_packets.drain_filter(|packet| { 
-            match packet {
-                laminar::SocketEvent::Packet(_) => false,
-                _ => true,
-            }
-        }).collect();
-        if !drop_packets.is_empty() { 
-            match drop_packets.first().unwrap() {
-                laminar::SocketEvent::Timeout(addr) => errors.push(SessionLayerError::LaminarTimeout(addr.clone())),
-                laminar::SocketEvent::Disconnect(addr) => errors.push(SessionLayerError::LaminarDisconnect(addr.clone())),
-                laminar::SocketEvent::Connect(_addr) => {
-                    self.laminar.connection_state.last_heard = time;
-                },
-                laminar::SocketEvent::Packet(_) => unreachable!(), 
-            }
-        }
         //Now that we've handled those, convert.
         //Batch them according to ID.
         let mut finished_packets: HashMap<NetMsgId, Vec<InboundNetMsg>> = HashMap::new();
@@ -844,31 +434,32 @@ impl Session {
                         Err(e) => errors.push(e.into()),
                     }
                 },
-                _ => unreachable!("We already filtered out all non-packet Laminar SocketEvents!"),
+                laminar::SocketEvent::Timeout(addr) => errors.push(SessionLayerError::LaminarTimeout(addr.clone())),
+                laminar::SocketEvent::Disconnect(addr) => errors.push(SessionLayerError::LaminarDisconnect(addr.clone())),
+                laminar::SocketEvent::Connect(addr) => {
+                    //self.laminar.connection_state.last_heard = time;
+                    info!("Connection marked established with {:?}", addr);
+                },
             }
         };
         // Push our messages out to the rest of the application.
         for (message_type, message_buf) in finished_packets { 
             match message_type {
+                // Handle network-subsystem builtin messages
                 DISCONNECT_RESERVED => { 
                     info!("Peer {} has disconnected (deliberately - this is not an error)", self.peer_identity.to_base64()); 
                     self.disconnect_deliberate = true;
                 }
+                // Handle messages meant to go out into the rest of the engine. 
                 _ => {
                     //Non-reserved, game-defined net msg IDs.  
-                    if let Some(channel) = self.received_channels.get_mut(&(message_type as NetMsgId)) { 
-                        match channel.send(message_buf)
+                    let channel = self.get_or_susbscribe_inbound_sender(message_type);
+                    match channel.send(message_buf)
                             .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
-                            Ok(_x) => {
-                                info!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
-                            },
-                            Err(e) => errors.push(e),
-                        }
-                    }
-                    else {
-                        error!("A NetMessage of type {} has been receved from {}, but we have no handlers associated with that type of message. \n It's possible this peer is using a newer version of Gestalt.", 
-                            message_type, self.peer_identity.to_base64());
-                        errors.push(SessionLayerError::NoHandler(message_type, self.peer_identity.to_base64()));
+                        Ok(_x) => {
+                            info!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
+                        },
+                        Err(e) => errors.push(e),
                     }
                 }
             }
@@ -886,9 +477,9 @@ impl Session {
             }
         }
 
-        if !processed_reply_buf.is_empty() {
-            self.laminar.connection_state.record_send();
-        }
+        //if !processed_reply_buf.is_empty() {
+        //    self.laminar.connection_state.record_send();
+        //}
 
         //Send to UDP socket.
         match self.push_channel.send(processed_reply_buf) {
@@ -915,10 +506,6 @@ impl Session {
                 Ok(envelope) => processed_send.push(envelope),
                 Err(e) => errors.push(e),
             }
-        }
-
-        if !processed_send.is_empty() {
-            self.laminar.connection_state.record_send();
         }
 
         //Send to UDP socket.
@@ -959,7 +546,7 @@ impl Session {
         }
 
         //Send to UDP socket.
-        match self.push_channel.send(processed_send) { 
+        match self.push_channel.send(processed_send) {
             Ok(()) => {},
             Err(e) => errors.push(e.into()),
         }
@@ -975,7 +562,7 @@ impl Session {
     /// Network connection CPR.
     pub fn force_heartbeat(&mut self) -> Result<(), laminar::error::ErrorKind> {
         let packets = self.laminar.connection_state.process_outgoing(laminar::packet::PacketInfo::heartbeat_packet(&[]), None, Instant::now())?;
-        for packet in packets { 
+        for packet in packets {
             self.laminar.messenger.send_packet(&self.peer_address, &packet.contents());
         }
         Ok(())
@@ -1090,13 +677,11 @@ pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> us
     //let header_len = SESSION_ID_LEN + COUNTER_LEN + len_tag_bytes.len();
 
     let mut cursor = 0;
-    //pub session_id: FullSessionName,
     let session_id = message.session_id.session_id.clone();
-    //pub counter: MessageCounter,
+
     send_buf[cursor..cursor+SESSION_ID_LEN].copy_from_slice(&session_id);
     cursor += SESSION_ID_LEN;
     
-    //pub counter: MessageCounter,
     send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&message.counter.to_le_bytes());
     cursor += COUNTER_LEN;
     
@@ -1111,8 +696,7 @@ pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> us
 
 pub async fn run_network_system(role: NetworkRole, address: SocketAddr, 
             mut new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
-            local_identity: IdentityKeyPair, 
-            received_message_channels: HashMap<NetMsgId, NetMsgSender>,
+            local_identity: IdentityKeyPair,
             laminar_config: LaminarConfig,
             session_tick_interval: Duration) {
     
@@ -1186,20 +770,20 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                         };
                         match inbound_channels.get(&session_name) { 
                             Some(sender) => {
-                                if message_length > 0 {
-                                    let ciphertext = (&recv_buf[cursor..cursor+message_length as usize]).to_vec();
-                                    sender.send(vec![OuterEnvelope {
-                                        session_id: FullSessionName { 
-                                            session_id, 
-                                            peer_address,
-                                        },
-                                        counter,
-                                        ciphertext,
-                                    }]).unwrap()
-                                }
-                                else { 
+                                let ciphertext = if message_length > 0 {
+                                    (&recv_buf[cursor..cursor+message_length as usize]).to_vec()
+                                } else { 
                                     warn!("Zero-length message on session {:?}", &session_name);
-                                }
+                                    Vec::new()
+                                };
+                                sender.send(vec![OuterEnvelope {
+                                    session_id: FullSessionName { 
+                                        session_id, 
+                                        peer_address,
+                                    },
+                                    counter,
+                                    ciphertext,
+                                }]).unwrap()
                             },
                             None => {
                                 if role == NetworkRole::Server {
@@ -1211,11 +795,12 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                         Some(connection) => {
                                             info!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
                                             //Communication with the rest of the engine.
-                                            net_msg_channel::register_peer(&connection.peer_identity);
-                                            match net_msg_channel::subscribe_receiver(&connection.peer_identity) { 
+                                            net_channels::register_peer(&connection.peer_identity);
+                                            match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
                                                 Ok(receiver) => {
                                                     info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
-                                                    let mut session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
+                                                    let peer_identity = connection.peer_identity.clone();
+                                                    let mut session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
                                                     session.laminar.connection_state.record_recv();
                                                     //Make a channel 
                                                     let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
@@ -1226,16 +811,20 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                     
                                                     let killer_clone = kill_from_inside_sender.clone();
                                                     session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
-                                                    let jh = tokio::spawn( async move {
-                                                        session.force_heartbeat().unwrap();
-                                                        handle_session(session, from_net_receiver, receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver).await
-                                                    });
+                                                    let jh = tokio::spawn( 
+                                                        handle_session(session, from_net_receiver, receiver, session_tick_interval.clone(), killer_clone, kill_from_outside_receiver)
+                                                    );
 
                                                     join_handles.push(jh);
 
-                                                    if message_length > 0 {
-                                                        let ciphertext = (&recv_buf[cursor..cursor+message_length as usize]).to_vec();
-                                                        inbound_channels.get(&session_name).unwrap().send(vec![OuterEnvelope {
+                                                    if let Some(sender) = inbound_channels.get(&session_name) {                                                    
+                                                        let ciphertext = if message_length > 0 {
+                                                            (&recv_buf[cursor..cursor+message_length as usize]).to_vec()
+                                                        } else { 
+                                                            warn!("Zero-length message on session {:?}", &session_name);
+                                                            Vec::new()
+                                                        };
+                                                        sender.send(vec![OuterEnvelope {
                                                             session_id: FullSessionName { 
                                                                 session_id, 
                                                                 peer_address,
@@ -1244,15 +833,8 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                                             ciphertext,
                                                         }]).unwrap()
                                                     }
-                                                    else { 
-                                                        inbound_channels.get(&session_name).unwrap().send(vec![OuterEnvelope {
-                                                            session_id: FullSessionName { 
-                                                                session_id, 
-                                                                peer_address,
-                                                            },
-                                                            counter,
-                                                            ciphertext: Vec::new(),
-                                                        }]).unwrap()
+                                                    else {
+                                                        error!("Could not send message to newly-connected peer {}", peer_identity.to_base64());
                                                     }
                                                 },
                                                 Err(e) => { 
@@ -1274,7 +856,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                         }
                     }
                     Err(e) => { 
-                        if e.raw_os_error() == Some(10054) { 
+                        if e.raw_os_error() == Some(10054) {
                             //An existing connection was forcibly closed by the remote host.
                             //ignore - timeout will catch it.
                             warn!("Bad disconnect, an existing connection was forcibly closed by the remote host.");
@@ -1320,7 +902,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
                 if role == NetworkRole::Server {
                     info!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
-                    net_msg_channel::register_peer(&connection.peer_identity);
+                    net_channels::register_peer(&connection.peer_identity);
                     anticipated_clients.insert( PartialSessionName{
                         session_id: connection.session_id.clone(), 
                         peer_address: connection.peer_address.ip(),
@@ -1328,12 +910,12 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                 }
                 else {
                     //Communication with the rest of the engine.
-                    net_msg_channel::register_peer(&connection.peer_identity);
-                    match net_msg_channel::subscribe_receiver(&connection.peer_identity) { 
+                    net_channels::register_peer(&connection.peer_identity);
+                    match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
                         Ok(receiver) => {
                             info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
-                            let mut session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), received_message_channels.clone(), Instant::now());
-                            session.laminar.connection_state.record_recv();
+                            let mut session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
+                            //session.laminar.connection_state.record_recv();
                             //Make a channel 
                             let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
                             inbound_channels.insert(session_name, from_net_sender);
@@ -1360,16 +942,16 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
             // Has one of our sessions failed or disconnected? 
             kill_maybe = (&mut kill_from_inside_receiver).recv() => { 
                 if let Some((session_kill, errors)) = kill_maybe { 
-                    if errors.is_empty() { 
+                    if errors.is_empty() {
                         info!("Closing connection for a session with {:?}.", session_kill.peer_address); 
                     }
-                    else { 
+                    else {
                         info!("Closing connection for a session with {:?}, due to errors: {:?}", session_kill.peer_address, errors); 
                     }
                     let session = session_to_identity.get(&session_kill).unwrap(); 
                     inbound_channels.remove(&session_kill); 
                     session_kill_from_outside.remove(&session_kill);
-                    net_msg_channel::drop_peer(session);
+                    net_channels::drop_peer(session);
                 }
             }
             quit_ready_indicator = quit_reciever.wait_for_quit() => {
@@ -1377,7 +959,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                 // Notify sessions we're done.
                 for (peer_address, _) in inbound_channels.iter() { 
                     let peer_ident = session_to_identity.get(&peer_address).unwrap();
-                    net_msg_channel::send_to(DisconnectMsg{}, &peer_ident).unwrap();
+                    net_send_channel::send_to(DisconnectMsg{}, &peer_ident).unwrap();
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await; 
                 // Clear out remaining messages.
@@ -1411,8 +993,11 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
 #[cfg(test)]
 mod tests {
+    use crate::message;
     use crate::message::SenderAccepts;
     use crate::message_types::JoinDefaultEntry;
+    use crate::net::net_channels::net_recv_channel;
+    use crate::net::net_channels::net_recv_channel::NetMsgReceiver;
 
     use super::*;
     use log::LevelFilter;
@@ -1430,7 +1015,7 @@ mod tests {
     struct TestNetMsg {
         pub message: String, 
     }
-    impl_netmsg!(TestNetMsg, 3, ReliableOrdered);
+    impl_netmsg!(TestNetMsg, 3, Common, ReliableOrdered);
     lazy_static! {
         /// Used to keep tests which use real network i/o from clobbering eachother. 
         pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -1450,21 +1035,12 @@ mod tests {
         let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
         //let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-        let (serv_message_inbound_sender, serv_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
-        let (client_message_inbound_sender, client_message_inbound_receiver) = tokio::sync::broadcast::channel(4096);
-        let (join_msg_sender, _join_msg_receiver) = tokio::sync::broadcast::channel(4096);
-        let (join_msg_sender1, _join_msg_receiver1) = tokio::sync::broadcast::channel(4096);
-
-        let server_channels = HashMap::from([(TestNetMsg::net_msg_id(), serv_message_inbound_sender.clone()), (JoinDefaultEntry::net_msg_id(), join_msg_sender)]);
-        let client_channels = HashMap::from([(TestNetMsg::net_msg_id(), client_message_inbound_sender.clone()), (JoinDefaultEntry::net_msg_id(), join_msg_sender1)]);
-
         //Launch server
         let join_handle_s = tokio::spawn(
             run_network_system(NetworkRole::Server,
                 server_socket_addr,
                 serv_completed_receiver,
-                server_key_pair.clone(), 
-                server_channels.clone(),
+                server_key_pair.clone(),
                 LaminarConfig::default(),
                 Duration::from_millis(50))
         );
@@ -1477,7 +1053,6 @@ mod tests {
             run_network_system( NetworkRole::Client,  server_socket_addr, 
             client_completed_receiver,
                 client_key_pair.clone(),
-                client_channels.clone(),
                 LaminarConfig::default(),
                 Duration::from_millis(50))
         );
@@ -1488,19 +1063,21 @@ mod tests {
         client_completed_sender.send(client_completed_connection).unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        net_msg_channel::send_to(JoinDefaultEntry{ display_name: "test".to_string()}, &server_key_pair.public ).unwrap();
+        net_send_channel::send_to(JoinDefaultEntry{ display_name: "test".to_string()}, &server_key_pair.public ).unwrap();
+
+        let mut test_receiver: NetMsgReceiver<TestNetMsg> = net_recv_channel::subscribe().unwrap();
 
         let test = TestNetMsg { 
             message: String::from("Boop!"), 
         };
-        let client_to_server_sender: NetSendChannel<TestNetMsg> = net_msg_channel::subscribe_sender(&server_key_pair.public).unwrap();
+        let client_to_server_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
         client_to_server_sender.send_one(test.clone()).unwrap();
         info!("Attempting to send a message to {}", client_key_pair.public.to_base64());
-        let mut server_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(serv_message_inbound_receiver);
 
         {
-            let out = tokio::time::timeout(Duration::from_secs(5), server_receiver.recv()).await.unwrap().unwrap();
+            let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait()).await.unwrap().unwrap();
             let (peer_ident, out) = out.first().unwrap().clone();
+            assert_eq!(&peer_ident, &client_key_pair.public);
 
             info!("Got {:?} from {}", out, peer_ident.to_base64());
 
@@ -1510,17 +1087,16 @@ mod tests {
         let test_reply = TestNetMsg { 
             message: String::from("Beep!"), 
         };
-        let message_sender: NetSendChannel<TestNetMsg> = net_msg_channel::subscribe_sender(&client_key_pair.public).unwrap();
+        let message_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
         info!("Attempting to send a message to {}", server_key_pair.public.to_base64());
         message_sender.send_one(test_reply.clone()).unwrap();
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        let mut client_receiver: TypedNetMsgReceiver<TestNetMsg> = TypedNetMsgReceiver::new(client_message_inbound_receiver);
-
         {
-            let out = tokio::time::timeout(Duration::from_secs(5), client_receiver.recv()).await.unwrap().unwrap();
+            let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait()).await.unwrap().unwrap();
             let (peer_ident, out) = out.first().unwrap().clone();
+            assert_eq!(&peer_ident, &server_key_pair.public);
 
             info!("Got {:?} from {}", out, peer_ident.to_base64());
 

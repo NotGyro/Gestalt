@@ -1,6 +1,5 @@
 use serde::{Serialize, Deserialize};
 use crate::common::identity::NodeIdentity;
-use crate::net::{NetMsg, PacketGuarantees, StreamSelector};
 
 pub mod voxel; 
 
@@ -18,5 +17,5 @@ pub struct JoinAnnounce {
     pub identity: NodeIdentity,
 }
 
-impl_netmsg!(JoinDefaultEntry, 8, ReliableOrdered);
-impl_netmsg!(JoinAnnounce, 9, ReliableOrdered);
+impl_netmsg!(JoinDefaultEntry, 8, ClientToServer, ReliableOrdered);
+impl_netmsg!(JoinAnnounce, 9, ServerToClient, ReliableOrdered);
