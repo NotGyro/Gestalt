@@ -40,6 +40,7 @@ pub mod net_channels;
 #[macro_use]
 pub mod netmsg;
 pub mod preprotocol;
+pub mod generated;
 
 pub use netmsg::NetworkRole as NetworkRole; 
 pub use netmsg::SelfNetworkRole as SelfNetworkRole; 
@@ -301,8 +302,8 @@ pub type PushSender = mpsc::UnboundedSender<Vec<OuterEnvelope>>;
 pub type PushReceiver = mpsc::UnboundedReceiver<Vec<OuterEnvelope>>;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[netmsg(DISCONNECT_RESERVED, Common, ReliableUnordered)]
 pub struct DisconnectMsg {}
-impl_netmsg!(DisconnectMsg, DISCONNECT_RESERVED, Common, ReliableUnordered);
 
 /// One per session, handles both cryptography and Laminar reliable-UDP logic.
 pub struct Session {
@@ -1012,10 +1013,10 @@ mod tests {
 
  
     #[derive(Clone, Serialize, Deserialize, Debug)]
+    #[netmsg(3, Common, ReliableOrdered)]
     struct TestNetMsg {
         pub message: String, 
     }
-    impl_netmsg!(TestNetMsg, 3, Common, ReliableOrdered);
     lazy_static! {
         /// Used to keep tests which use real network i/o from clobbering eachother. 
         pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());

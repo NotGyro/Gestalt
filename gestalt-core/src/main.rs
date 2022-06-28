@@ -9,6 +9,9 @@
 #![allow(clippy::large_enum_variant)]
 
 #[macro_use]
+extern crate gestalt_proc_macros;
+
+#[macro_use]
 pub mod common;
 pub use common::message as message;
 
