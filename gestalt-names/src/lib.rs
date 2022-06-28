@@ -1,5 +1,5 @@
 extern crate string_cache;
 
-pub mod msg_type {
-    include!("generated/msg_type.rs");
+pub mod gestalt_atom {
+    include!("generated/gestalt_atom.rs");
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, error::Error};
 
 use glam::{vec3, Vec2, Vec3};
-use hashbrown::HashSet;
+use std::collections::HashSet;
 use log::{error, warn};
 
 use crate::common::voxelmath::VoxelPos;

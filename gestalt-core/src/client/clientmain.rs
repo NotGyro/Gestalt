@@ -2,11 +2,11 @@ use std::{
     error::Error,
     io::{BufReader, Read, Write},
     sync::Arc,
-    time::Instant, fs::OpenOptions,
+    time::{Instant, Duration}, fs::OpenOptions,
 };
 
 use glam::Vec4;
-use hashbrown::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use image::RgbaImage;
 use log::{warn, error, info, trace};
 use rend3::types::{Handedness};
@@ -19,7 +19,7 @@ use winit::{
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channel::{NetSendChannel, self}, NetMsgReceiver, TypedNetMsgReceiver}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_send_channel, net_recv_channel::NetMsgReceiver},}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -351,11 +351,9 @@ pub fn load_or_generate_dev_world(world: &mut TileSpace, world_id: &WorldId, chu
 // Never returns. Unfortunately the event loop's exit functionality does not just destroy the event loop, it closes the program.
 pub fn run_client(identity_keys: IdentityKeyPair, 
         voxel_event_sender: NetSendChannel<VoxelChangeRequest>, 
-        mut voxel_event_receiver: TypedNetMsgReceiver<VoxelChangeAnnounce>, 
+        mut voxel_event_receiver: NetMsgReceiver<VoxelChangeAnnounce>, 
         server_identity: Option<NodeIdentity>, 
-        async_runtime: tokio::runtime::Runtime,
-        quit_sender: tokio::sync::mpsc::UnboundedSender<()>,
-        mut quit_ready_receiver: tokio::sync::mpsc::UnboundedReceiver<()>,) {
+        async_runtime: tokio::runtime::Runtime,) {
     let event_loop = winit::event_loop::EventLoop::new();
     // Open config
     let mut open_options = std::fs::OpenOptions::new();
@@ -390,7 +388,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
         let join_msg = JoinDefaultEntry {
             display_name: config.your_display_name.clone(),
         };
-        net_channel::send_to(&join_msg, server).unwrap(); 
+        net_send_channel::send_to(join_msg, &server).unwrap(); 
     }
 
     let world_id = get_lobby_world_id(&identity_keys.public);
@@ -415,7 +413,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     
     // Create the Instance, Adapter, and Device. We can specify preferred backend,
     // device name, or rendering mode. In this case we let rend3 choose for us.
-    let iad = pollster::block_on(rend3::create_iad(
+    let iad = async_runtime.block_on(rend3::create_iad(
         Some(Backend::Vulkan),
         config
             .display_properties
@@ -565,7 +563,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
 
     event_loop.run(move |event, _, control| {
         let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
-        if let Ok(events) = voxel_event_receiver.try_recv() { 
+        if let Ok(events) = voxel_event_receiver.recv_poll() { 
             for (_ident, announce) in events { 
                 let old_value = world_space.get(announce.pos).unwrap();
                 if announce.new_tile != *old_value { 
@@ -638,12 +636,12 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     match world_space.set(result_position, air_id) {
                         Ok(()) => {
 
-                            if let Some(server) = server_identity.as_ref() { 
+                            if let Some(_server) = server_identity.as_ref() { 
                                 let voxel_msg = VoxelChangeRequest {
                                     pos: result_position.clone(),
                                     new_tile: air_id,
                                 };
-                                voxel_event_sender.send(&voxel_msg).unwrap();
+                                voxel_event_sender.send_one(voxel_msg).unwrap();
                             }
 
                             terrain_renderer.notify_changed(&result_position);
@@ -684,12 +682,12 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                             match world_space.set(placement_position, stone_id) {
                                 Ok(()) => {
                                     
-                                    if let Some(server) = server_identity.as_ref() { 
+                                    if let Some(_server) = server_identity.as_ref() { 
                                         let voxel_msg = VoxelChangeRequest {
                                             pos: result_position.clone(),
                                             new_tile: stone_id,
                                         };
-                                        voxel_event_sender.send(&voxel_msg).unwrap();
+                                        voxel_event_sender.send_one(voxel_msg).unwrap();
                                     }
 
                                     terrain_renderer.notify_changed(&placement_position);
@@ -747,10 +745,8 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     else if input.virtual_keycode == Some(VirtualKeyCode::Tab) { 
                         is_tab_down = false; 
                     }
-                    else if input.virtual_keycode == Some(VirtualKeyCode::Escape) { 
-                        //Quit
-                        quit_sender.send(()).unwrap();
-                        async_runtime.block_on(quit_ready_receiver.recv());
+                    else if input.virtual_keycode == Some(VirtualKeyCode::Escape) {
+                        async_runtime.block_on(message::quit_game(Duration::from_secs(5))).unwrap();
                         *control = ControlFlow::Exit;
                     }
                     let dir_maybe = input.virtual_keycode.and_then(camera::Directions::from_key);

@@ -1,6 +1,6 @@
 use std::io::{BufReader, Read};
 
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use log::warn;
 use serde::{Deserialize, Serialize};
 
