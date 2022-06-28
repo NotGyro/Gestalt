@@ -18,13 +18,14 @@ fn main() {
 
     let mut output = r#"use std::collections::HashMap;
 use toolbelt::once::InitOnce;
-use crate::net::netmsg::NetMsg;
+use crate::net::netmsg::{NetMsg, NetMsgId, NetMsgType};
 
-pub(crate) static NETMSG_LOOKUP_TABLE: InitOnce<HashMap<crate::net::netmsg::NetMsgId, crate::net::netmsg::NetMsgType>> = InitOnce::uninitialized();
+static NETMSG_LOOKUP_TABLE: InitOnce<HashMap<NetMsgId, NetMsgType>> = InitOnce::uninitialized();
 
-pub(crate) fn initialize_netmsg_lookup() {
-    let mut msgs = HashMap::new();
-    "#.to_string();
+pub(crate) fn lookup_netmsg_info(id: &NetMsgId) -> Option<&NetMsgType> {
+    NETMSG_LOOKUP_TABLE.get_or_init(|| {
+        let mut msgs = HashMap::new();
+        "#.to_string();
 
     for entry in WalkDir::new("src").into_iter()
         .filter_map(|e| e.ok())
@@ -50,12 +51,16 @@ pub(crate) fn initialize_netmsg_lookup() {
                     is_test = true;
                 }
                 segments.push(cap.get(1).unwrap().as_str().to_string());
-                output.push_str(&format!("\n{0}    msgs.insert(crate::{1}::net_msg_id(), crate::{1}::net_msg_type());",
-                                         if is_test { "    #[cfg(test)]\n" } else { "" },
+                output.push_str(&format!("\n{0}        msgs.insert(crate::{1}::net_msg_id(), crate::{1}::net_msg_type());",
+                                         if is_test { "        #[cfg(test)]\n" } else { "" },
                                          segments.join("::")));
             }
         }
     }
-    output.push_str("\n\n    NETMSG_LOOKUP_TABLE.initialize(msgs).unwrap();\n}\n");
+    output.push_str(r#"
+        msgs
+    }).unwrap().get(id)
+}
+"#);
     std::fs::write("src/net/generated.rs", output).unwrap();
 }
