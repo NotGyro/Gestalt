@@ -13,6 +13,7 @@ use laminar::ConnectionMessenger;
 use laminar::VirtualConnection;
 use log::error;
 use log::info;
+use log::trace;
 use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
@@ -422,7 +423,7 @@ impl Session {
                     match vu64::decode_with_length(message_type_len, &pkt.payload()[0..message_type_len as usize]) {
                         Ok(message_type_id) => {
                             let message_type_id = message_type_id as NetMsgId;
-                            info!("Decoding a NetMsg from {} with message_type_id {}", self.peer_identity.to_base64(), message_type_id); 
+                            trace!("Decoding a NetMsg from {} with message_type_id {}", self.peer_identity.to_base64(), message_type_id); 
                             let message = InboundNetMsg {
                                 message_type_id,
                                 payload: pkt.payload()[message_type_len as usize..].to_vec(),
@@ -440,7 +441,7 @@ impl Session {
                 laminar::SocketEvent::Disconnect(addr) => errors.push(SessionLayerError::LaminarDisconnect(addr.clone())),
                 laminar::SocketEvent::Connect(addr) => {
                     //self.laminar.connection_state.last_heard = time;
-                    info!("Connection marked established with {:?}", addr);
+                    trace!("Connection marked established with {:?}", addr);
                 },
             }
         };
@@ -459,7 +460,7 @@ impl Session {
                     match channel.send(message_buf)
                             .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
                         Ok(_x) => {
-                            info!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
+                            trace!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
                         },
                         Err(e) => errors.push(e),
                     }
@@ -478,10 +479,6 @@ impl Session {
                 Err(e) => errors.push(e),
             }
         }
-
-        //if !processed_reply_buf.is_empty() {
-        //    self.laminar.connection_state.record_send();
-        //}
 
         //Send to UDP socket.
         match self.push_channel.send(processed_reply_buf) {
