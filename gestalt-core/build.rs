@@ -22,7 +22,12 @@ use crate::net::netmsg::{NetMsg, NetMsgId, NetMsgType};
 
 static NETMSG_LOOKUP_TABLE: InitOnce<HashMap<NetMsgId, NetMsgType>> = InitOnce::uninitialized();
 
-pub(crate) fn lookup_netmsg_info(id: &NetMsgId) -> Option<&NetMsgType> {
+pub(crate) fn get_netmsg_table() -> &'static HashMap<NetMsgId, NetMsgType> {
+    //If it's already there, just get it.
+    if let Some(out) = NETMSG_LOOKUP_TABLE.try_get() { 
+        return out;
+    }
+    //If not, initialize it.
     NETMSG_LOOKUP_TABLE.get_or_init(|| {
         let mut msgs = HashMap::new();
         "#.to_string();
@@ -52,14 +57,17 @@ pub(crate) fn lookup_netmsg_info(id: &NetMsgId) -> Option<&NetMsgType> {
                 }
                 segments.push(cap.get(1).unwrap().as_str().to_string());
                 output.push_str(&format!("\n{0}        msgs.insert(crate::{1}::net_msg_id(), crate::{1}::net_msg_type());",
-                                         if is_test { "        #[cfg(test)]\n" } else { "" },
+                                         if is_test { "        #[cfg(test)] {\n        " } else { "" },
                                          segments.join("::")));
+                if is_test {
+                    output.push_str("\n        }")
+                }
             }
         }
     }
     output.push_str(r#"
         msgs
-    }).unwrap().get(id)
+    }).unwrap()
 }
 "#);
     std::fs::write("src/net/generated.rs", output).unwrap();

@@ -68,7 +68,8 @@ impl From<SelfNetworkRole> for NetworkRole {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
+#[repr(u8)]
 pub enum MessageSidedness { 
     ClientToServer, 
     ServerToClient, 
@@ -79,7 +80,8 @@ impl SelfNetworkRole {
     /// On a node with this role, should we ingest a message with that sidedness?
     /// This is checked, even in release builds, as an extra security measure. 
     /// Certain net message IDs are just *not allowed* to be sent to servers.
-    pub fn should_we_ingest(&self, message_sidedness: MessageSidedness) -> bool { 
+    #[inline(always)]
+    pub fn should_we_ingest(&self, message_sidedness: &MessageSidedness) -> bool { 
         match message_sidedness {
             MessageSidedness::ClientToServer => match self {
                 SelfNetworkRole::Server => true,

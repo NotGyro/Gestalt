@@ -9,7 +9,7 @@ edition = "2021"
 gestalt_names = { path = "../gestalt-names" }
 gestalt_proc_macros = { path = "../gestalt-proc-macros" }
 
-toolbelt = "0.0.4"
+toolbelt = "0.0.5"
 
 # External
 #pollster = "0.2.1" # Provides `block_on()` to wait for futures from sync code
@@ -44,7 +44,7 @@ vu64 = "0.1.5"
 
 # Network
 laminar = { version = "0.5.2", git = "https://github.com/NotGyro/laminar", rev = "23290f37605b52dfde7f1e84a74a4255c8358f4a" } 
-tokio = { version = "1.18", features = ["full", "sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
+tokio = { version = "1.19.2", features = ["full", "sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
 
 # Scripting
 mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "serialize"] }

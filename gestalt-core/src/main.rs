@@ -37,7 +37,7 @@ use common::{identity::{do_keys_need_generating, does_private_key_need_passphras
 use std::collections::{HashSet, HashMap};
 use tokio::sync::mpsc;
 
-use crate::{net::{PREPROTCOL_PORT, NetworkRole, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}, GESTALT_PORT, run_network_system, LaminarConfig, net_channels::{NetSendChannel, net_send_channel, net_recv_channel}, NetMsg}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::{START_QUIT, QuitReceiver}};
+use crate::{net::{PREPROTCOL_PORT, NetworkRole, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}, GESTALT_PORT, run_network_system, LaminarConfig, net_channels::{NetSendChannel, net_send_channel, net_recv_channel}, NetMsg, SelfNetworkRole}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::{START_QUIT, QuitReceiver}};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -309,7 +309,7 @@ fn main() {
 
         info!("Spawning network system task.");
         let net_system_join_handle = async_runtime.spawn(
-            run_network_system(NetworkRole::Server,
+            run_network_system(SelfNetworkRole::Server,
                 udp_address, 
                 connect_receiver,
                 keys.clone(),
@@ -384,7 +384,7 @@ fn main() {
 
         let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
         let net_system_join_handle = async_runtime.spawn(
-            run_network_system( NetworkRole::Client,  address, 
+            run_network_system( SelfNetworkRole::Client,  address, 
                 connect_receiver,
                 keys.clone(), 
                 laminar_config,

@@ -25,6 +25,7 @@ use tokio::time::MissedTickBehavior;
 use crate::common::Version;
 use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
+use crate::message;
 use crate::message::MessageReceiver;
 use crate::message::MessageSender;
 use crate::message::QuitReceiver;
@@ -329,8 +330,8 @@ pub struct Session {
 impl Session {
     /// Get a message-passing sender for the given NetMsgDomain, caching so we don't have to lock the mutex constantly. 
     fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut MessageSender<InboundNetMsg> {
-        self.inbound_channels.entry(domain).or_insert_with(|| { 
-            add_domain(&INBOUND_NET_MESSAGES, &domain);
+        self.inbound_channels.entry(domain).or_insert_with(|| {
+            //add_domain(&INBOUND_NET_MESSAGES, &domain);
             sender_subscribe_domain(&INBOUND_NET_MESSAGES, &domain).unwrap()
         })
     }
@@ -695,14 +696,13 @@ pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> us
     cursor
 }
 
-pub async fn run_network_system(role: NetworkRole, address: SocketAddr, 
+pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr, 
             mut new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
             local_identity: IdentityKeyPair,
             laminar_config: LaminarConfig,
             session_tick_interval: Duration) {
-    
-    info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), role, address);
-    let socket = if role == NetworkRole::Client {
+    info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), our_role, address);
+    let socket = if our_role == SelfNetworkRole::Client {
         let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
         socket.connect(address).await.unwrap();
         socket
@@ -710,7 +710,16 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
     else {
         UdpSocket::bind(address).await.unwrap()
     };
-    info!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), role);
+    info!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), our_role);
+
+    // Register all valid NetMsgs. 
+    let netmsg_table = generated::get_netmsg_table(); 
+    info!("Registering {} NetMsgIds.", netmsg_table.len());
+    for (id, msg_type) in netmsg_table.iter() {
+        if our_role.should_we_ingest(&msg_type.sidedness) {
+            message::add_domain(&INBOUND_NET_MESSAGES, id);
+        }
+    }
 
     const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
     const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
@@ -734,7 +743,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
     let mut session_to_identity: HashMap<FullSessionName, NodeIdentity> = HashMap::new();
     
-    info!("Network system initialized. Our role is {:?}, our address is {:?}, and our identity is {}", &role, &socket.local_addr(), local_identity.public.to_base64());
+    info!("Network system initialized. Our role is {:?}, our address is {:?}, and our identity is {}", &our_role, &socket.local_addr(), local_identity.public.to_base64());
     let mut join_handles = Vec::new();
 
     let mut quit_reciever = QuitReceiver::new(); 
@@ -787,7 +796,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                                 }]).unwrap()
                             },
                             None => {
-                                if role == NetworkRole::Server {
+                                if our_role == SelfNetworkRole::Server {
                                     let partial_session_name = PartialSessionName {
                                         peer_address: peer_address.ip(),
                                         session_id,
@@ -877,8 +886,8 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 
                     //println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), cursor+message_len, &message.session_id.peer_address);
                     //Push
-                    match role {
-                        NetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
+                    match our_role {
+                        SelfNetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
                         _ => socket.send_to(&send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
                     };
                      //TODO: Error handling here.
@@ -888,7 +897,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                 let connection = match new_connection_maybe { 
                     Some(conn) => conn, 
                     None => {
-                        warn!("Channel for new connections closed (we are a {:?} and our address is {:?}) - most likely this means the engine is shutting down, which is fine.", role, address);
+                        warn!("Channel for new connections closed (we are a {:?} and our address is {:?}) - most likely this means the engine is shutting down, which is fine.", our_role, address);
                         break; // Return to loop head i.e. try a new tokio::select.
                     }, 
                 };
@@ -901,7 +910,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                 //push_channel: PushSender, received_message_channels: HashMap<NetMsgId, NetMsgSender>, time: Instant
                 //Todo: Senders.
 
-                if role == NetworkRole::Server {
+                if our_role == SelfNetworkRole::Server {
                     info!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
                     net_channels::register_peer(&connection.peer_identity);
                     anticipated_clients.insert( PartialSessionName{
@@ -969,8 +978,8 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
                         let encoded_len = encode_outer_envelope(&message, &mut send_buf);
 
                         //Push
-                        match role {
-                            NetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
+                        match our_role {
+                            SelfNetworkRole::Client => socket.send(&send_buf[0..encoded_len]).await.unwrap(),
                             _ => socket.send_to(&send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
                         };
                     }
@@ -993,7 +1002,7 @@ pub async fn run_network_system(role: NetworkRole, address: SocketAddr,
 }
 
 #[cfg(test)]
-mod tests {
+mod test {
     use crate::message;
     use crate::message::SenderAccepts;
     use crate::message_types::JoinDefaultEntry;
@@ -1002,7 +1011,6 @@ mod tests {
 
     use super::*;
     use log::LevelFilter;
-    use parking_lot::Mutex;
     use serde::Serialize;
     use serde::Deserialize;
     use simplelog::TermLogger;
@@ -1010,21 +1018,20 @@ mod tests {
     use super::preprotocol::launch_preprotocol_listener;
     use super::preprotocol::preprotocol_connect_to_server;
     use lazy_static::lazy_static;
-
  
     #[derive(Clone, Serialize, Deserialize, Debug)]
-    #[netmsg(3, Common, ReliableOrdered)]
-    struct TestNetMsg {
+    #[netmsg(1337, Common, ReliableOrdered)]
+    pub(crate) struct TestNetMsg {
         pub message: String, 
     }
     lazy_static! {
         /// Used to keep tests which use real network i/o from clobbering eachother. 
-        pub static ref NET_TEST_MUTEX: Mutex<()> = Mutex::new(());
+        pub static ref NET_TEST_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::new(());
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn session_with_localhost() {
-        let mutex_guard = NET_TEST_MUTEX.lock();
+        let mutex_guard = NET_TEST_MUTEX.lock().await;
         let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
 
         let server_key_pair = IdentityKeyPair::generate_for_tests();
@@ -1034,11 +1041,15 @@ mod tests {
 
         let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
-        //let client_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
+        let test_table = tokio::task::spawn_blocking(|| { 
+            generated::get_netmsg_table()
+        }).await.unwrap();
+        println!("Counted {} registered NetMsg types.", test_table.len());
+        
         //Launch server
         let join_handle_s = tokio::spawn(
-            run_network_system(NetworkRole::Server,
+            run_network_system(SelfNetworkRole::Server,
                 server_socket_addr,
                 serv_completed_receiver,
                 server_key_pair.clone(),
@@ -1051,7 +1062,7 @@ mod tests {
 
         //Launch client
         let join_handle_c = tokio::spawn(
-            run_network_system( NetworkRole::Client,  server_socket_addr, 
+            run_network_system( SelfNetworkRole::Client,  server_socket_addr, 
             client_completed_receiver,
                 client_key_pair.clone(),
                 LaminarConfig::default(),
@@ -1069,7 +1080,7 @@ mod tests {
         let mut test_receiver: NetMsgReceiver<TestNetMsg> = net_recv_channel::subscribe().unwrap();
 
         let test = TestNetMsg { 
-            message: String::from("Boop!"), 
+            message: String::from("Boop!"),
         };
         let client_to_server_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
         client_to_server_sender.send_one(test.clone()).unwrap();

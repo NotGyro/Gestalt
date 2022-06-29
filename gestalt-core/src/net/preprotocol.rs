@@ -606,7 +606,7 @@ pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server
 }
 
 #[cfg(test)]
-pub mod tests {
+pub mod test {
     use std::{time::Duration, net::Ipv6Addr};
     use tokio::sync::mpsc;
     use crate::common::identity::IdentityKeyPair;
@@ -614,7 +614,7 @@ pub mod tests {
  
     #[tokio::test(flavor = "multi_thread")]
     async fn preprotocol_connect_to_localhost() {
-        use crate::net::tests::NET_TEST_MUTEX;    
+        use crate::net::test::NET_TEST_MUTEX;
         let _guard = NET_TEST_MUTEX.lock();
         
         let server_key_pair = IdentityKeyPair::generate_for_tests();
@@ -640,5 +640,5 @@ pub mod tests {
         // Check if all is valid
         assert_eq!(successful_server_end.peer_identity, client_key_pair.public);
         assert_eq!(successful_client_end.peer_identity, server_key_pair.public);
-    }  
+    }
 }
