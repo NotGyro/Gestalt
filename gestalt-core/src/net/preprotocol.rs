@@ -18,7 +18,7 @@
 use lazy_static::lazy_static;
 
 use std::collections::HashSet;
-use log::{error, info, warn, debug};
+use log::{error, info, warn, debug, trace};
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
@@ -309,13 +309,13 @@ impl PreProtocolReceiver {
                 }
             },
             PreProtocolQuery::Handshake(msg) => { 
-                debug!("Handshake step message received: {}", msg.handshake_step);
+                trace!("Handshake step message received: {}", msg.handshake_step);
                 match &mut self.state { 
                     PreProtocolReceiverState::Handshake(receiver) => { 
                         let out = receiver.advance(msg, &self.peer_identity.unwrap(), callback_different_key);
                         match out { 
                             Ok(HandshakeNext::SendMessage(message)) => {
-                                debug!("Sending handshake step: {}", message.handshake_step);
+                                trace!("Sending handshake step: {}", message.handshake_step);
                                 PreProtocolOutput::Reply(PreProtocolReply::Handshake(message))
                             },
                             // Receiver doesn't work this way.
@@ -372,15 +372,16 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_rol
 
                                 match receiver.is_handshake_done() {
                                     true => {
+                                        let peer_identity =  receiver.peer_identity.unwrap().clone();
                                         let (transport, seq, session_id) = receiver.complete_handshake().unwrap();
-                                        info!("Successfully completed handshake with {}!", peer_address);
+                                        info!("Successfully completed handshake with {}!", peer_identity.to_base64());
 
                                         match (receiver.peer_role, receiver.peer_engine_version) { 
                                             (Some(peer_role), Some(peer_engine_version)) => {
                                             
                                                 let completed = SuccessfulConnect {
                                                     session_id,
-                                                    peer_identity: receiver.peer_identity.unwrap(),
+                                                    peer_identity,
                                                     peer_address,
                                                     peer_role,
                                                     peer_engine_version,
@@ -458,15 +459,15 @@ pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_addr
     let listener = TcpListener::bind(ip).await.unwrap();
     loop {
         match listener.accept().await {
-            Ok((stream, peer_address)) => { 
-                info!("New PreProtocol connection: {}", peer_address);
+            Ok((stream, peer_address)) => {
+                trace!("New PreProtocol connection: {}", peer_address);
                 let completed_channel_clone = completed_channel.clone();
                 tokio::spawn(
                     // connection succeeded
                     preprotocol_receiver_session(our_identity,  SelfNetworkRole::Server, peer_address, stream, completed_channel_clone)
                 );
-            }, 
-            Err(e) => { 
+            },
+            Err(e) => {
                 error!("An error was encountered in accepting an incoming session: {:?}", e);
             }
         }
@@ -541,7 +542,7 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: Ide
     // Loop until we're done.
     while !handshake_initiator.is_done() {
         let msg = read_preprotocol_message(stream).await?;
-        debug!("Got a pre-protocol reply: {}", &msg);
+        trace!("Got a pre-protocol reply: {}", &msg);
         let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
         let handshake_step = if let PreProtocolReply::Handshake(step) = reply { 
             step

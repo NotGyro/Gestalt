@@ -9,7 +9,7 @@ edition = "2021"
 gestalt_names = { path = "../gestalt-names" }
 gestalt_proc_macros = { path = "../gestalt-proc-macros" }
 
-toolbelt = "0.0.5"
+toolbelt = { git = "https://github.com/trashbyte/toolbelt" }
 
 # External
 #pollster = "0.2.1" # Provides `block_on()` to wait for futures from sync code

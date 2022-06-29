@@ -5,11 +5,6 @@ use crate::net::netmsg::{NetMsg, NetMsgId, NetMsgType};
 static NETMSG_LOOKUP_TABLE: InitOnce<HashMap<NetMsgId, NetMsgType>> = InitOnce::uninitialized();
 
 pub(crate) fn get_netmsg_table() -> &'static HashMap<NetMsgId, NetMsgType> {
-    //If it's already there, just get it.
-    if let Some(out) = NETMSG_LOOKUP_TABLE.try_get() { 
-        return out;
-    }
-    //If not, initialize it.
     NETMSG_LOOKUP_TABLE.get_or_init(|| {
         let mut msgs = HashMap::new();
         

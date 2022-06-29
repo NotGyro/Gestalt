@@ -203,7 +203,7 @@ impl LaminarConnectionManager {
         match self.connection_state.should_drop(messenger, time) { 
             false => Ok(()),
             true => {
-                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
+                trace!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
                 Err(LaminarWrapperError::Disconnect(self.peer_address))
             }
         }
@@ -215,7 +215,7 @@ impl LaminarConnectionManager {
         match self.connection_state.should_drop(messenger, time) {
             false => Ok(()),
             true => {
-                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
+                trace!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
                 Err(LaminarWrapperError::Disconnect(self.peer_address))
             }
         }
@@ -238,7 +238,7 @@ impl LaminarConnectionManager {
         match self.connection_state.should_drop(messenger, time) { 
             false => Ok(()),
             true => {
-                info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
+                trace!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", self.connection_state.packets_in_flight(), self.connection_state.last_heard(Instant::now()), self.connection_state.is_established()); 
                 Err(LaminarWrapperError::Disconnect(self.peer_address))
             }
         }
@@ -642,7 +642,7 @@ pub async fn handle_session(mut session_manager: Session,
             _ = (&mut ticker).tick() => {
                 let update_results = session_manager.process_update(Instant::now());
                 if let Err(e) = update_results {
-                    info!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now()), session_manager.laminar.connection_state.is_established()); 
+                    trace!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now()), session_manager.laminar.connection_state.is_established()); 
                     error!("Error encountered while ticking network connection to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
                     kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
                     break;
@@ -698,7 +698,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
             local_identity: IdentityKeyPair,
             laminar_config: LaminarConfig,
             session_tick_interval: Duration) {
-    info!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), our_role, address);
+    trace!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", local_identity.public.to_base64(), our_role, address);
     let socket = if our_role == SelfNetworkRole::Client {
         let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
         socket.connect(address).await.unwrap();
@@ -707,7 +707,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
     else {
         UdpSocket::bind(address).await.unwrap()
     };
-    info!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), our_role);
+    trace!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), our_role);
 
     // Register all valid NetMsgs. 
     let netmsg_table = generated::get_netmsg_table(); 
@@ -740,7 +740,8 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
 
     let mut session_to_identity: HashMap<FullSessionName, NodeIdentity> = HashMap::new();
     
-    info!("Network system initialized. Our role is {:?}, our address is {:?}, and our identity is {}", &our_role, &socket.local_addr(), local_identity.public.to_base64());
+    info!("Network system initialized.");
+    trace!("Network system init - our role is {:?}, our address is {:?}, and our identity is {}", &our_role, &socket.local_addr(), local_identity.public.to_base64());
     let mut join_handles = Vec::new();
 
     let mut quit_reciever = QuitReceiver::new(); 
@@ -800,12 +801,12 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                                     };
                                     match anticipated_clients.remove(&partial_session_name) {
                                         Some(connection) => {
-                                            info!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
+                                            trace!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
                                             //Communication with the rest of the engine.
                                             net_channels::register_peer(&connection.peer_identity);
                                             match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
                                                 Ok(receiver) => {
-                                                    info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
+                                                    trace!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                                                     let peer_identity = connection.peer_identity.clone();
                                                     let mut session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
                                                     session.laminar.connection_state.record_recv();
@@ -869,8 +870,9 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                             warn!("Bad disconnect, an existing connection was forcibly closed by the remote host.");
                         }
                         else { 
+                            // Do this twice to ensure it gets added to logs, as well as showing up in the panic message.
                             error!("Error while polling for UDP packets: {:?}", e); 
-                            panic!();
+                            panic!("Error while polling for UDP packets: {:?}", e); 
                         }
                     }
                 }
@@ -894,12 +896,12 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                 let connection = match new_connection_maybe { 
                     Some(conn) => conn, 
                     None => {
-                        warn!("Channel for new connections closed (we are a {:?} and our address is {:?}) - most likely this means the engine is shutting down, which is fine.", our_role, address);
+                        error!("Channel for new connections closed.");
                         break; // Return to loop head i.e. try a new tokio::select.
                     }, 
                 };
                 
-                info!("Setting up reliability-over-UDP and cryptographic session \n for peer {} with address {:?}, role {:?}, \n connecting from Gestalt engine version v{}", connection.peer_identity.to_base64(), &connection.peer_address, &connection.peer_role, &connection.peer_engine_version);
+                info!("Setting up reliability-over-UDP and cryptographic session for peer {}, connecting from Gestalt engine version v{}", connection.peer_identity.to_base64(), &connection.peer_engine_version);
 
                 let session_name = connection.get_full_session_name();
                 
@@ -908,7 +910,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                 //Todo: Senders.
 
                 if our_role == SelfNetworkRole::Server {
-                    info!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
+                    trace!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
                     net_channels::register_peer(&connection.peer_identity);
                     anticipated_clients.insert( PartialSessionName{
                         session_id: connection.session_id.clone(), 
@@ -920,7 +922,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                     net_channels::register_peer(&connection.peer_identity);
                     match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
                         Ok(receiver) => {
-                            info!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
+                            trace!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                             let mut session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
                             //session.laminar.connection_state.record_recv();
                             //Make a channel 
@@ -949,16 +951,17 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
             // Has one of our sessions failed or disconnected? 
             kill_maybe = (&mut kill_from_inside_receiver).recv() => { 
                 if let Some((session_kill, errors)) = kill_maybe { 
+                    let ident = session_to_identity.get(&session_kill).unwrap().clone(); 
                     if errors.is_empty() {
-                        info!("Closing connection for a session with {:?}.", session_kill.peer_address); 
+                        info!("Closing connection for a session with {:?}.", &ident); 
                     }
                     else {
-                        info!("Closing connection for a session with {:?}, due to errors: {:?}", session_kill.peer_address, errors); 
+                        info!("Closing connection for a session with {:?}, due to errors: {:?}", &ident, errors); 
                     }
-                    let session = session_to_identity.get(&session_kill).unwrap(); 
-                    inbound_channels.remove(&session_kill); 
+                    inbound_channels.remove(&session_kill);
                     session_kill_from_outside.remove(&session_kill);
-                    net_channels::drop_peer(session);
+                    let _ = session_to_identity.remove(&session_kill);
+                    net_channels::drop_peer(&ident);
                 }
             }
             quit_ready_indicator = quit_reciever.wait_for_quit() => {
@@ -982,8 +985,8 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                     }
                 }
                 // Notify sessions we're done.
-                for (session, channel) in session_kill_from_outside { 
-                    info!("Terminating session {:?}", session);
+                for (session, channel) in session_kill_from_outside {
+                    info!("Terminating session with peer {}", session_to_identity.get(&session).unwrap().to_base64());
                     channel.send(()).unwrap();
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await; 
