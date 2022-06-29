@@ -30,7 +30,7 @@ pub mod world;
 
 use std::{io::Write, path::PathBuf, net::{SocketAddr, IpAddr, Ipv6Addr}, time::Duration};
 
-use log::{LevelFilter, info, error};
+use log::{LevelFilter, info, error, warn};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
 use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version};
@@ -203,14 +203,24 @@ fn main() {
     
     //Initialize our logger.
     let mut log_config_builder = ConfigBuilder::default();
-    let level_filter = if matches.get("--verbose").is_some() { 
-        LevelFilter::Debug
-    } else {
-        LevelFilter::Info
+    
+    let level_filter = { 
+        if let Some(_) = matches.get("--verbose") {
+            // Verbosely log Gestalt messages but try not to verbosely log renderer messages because they can get ridiculous.
+            log_config_builder.add_filter_ignore_str("wgpu");
+            log_config_builder.add_filter_ignore_str("rend3");
+            log_config_builder.add_filter_ignore_str("naga");
+            log_config_builder.set_location_level(LevelFilter::Error);
+            LevelFilter::Trace
+        }
+        else { 
+            log_config_builder.add_filter_ignore_str("wgpu_core::device");
+            LevelFilter::Info
+        }
     };
+
     log_config_builder.set_target_level(level_filter);
-    //Prevent enormous log spam.
-    log_config_builder.add_filter_ignore_str("wgpu_core::device");
+
     let log_config = log_config_builder.build();
 
     let log_dir = PathBuf::from("logs/"); 
@@ -233,6 +243,10 @@ fn main() {
             std::fs::File::create(log_file_path).unwrap(),
         ),
     ]).unwrap();
+
+    if matches!(level_filter, LevelFilter::Trace) { 
+        warn!("Verbose logging CAN, OCCASIONALLY, LEAK PRIVATE INFORMATION. \n It is only recommended for debugging purposes. \n Please do not use it for general play.");
+    }
 
     // Load our identity key pair. Right now this will be the same on both client and server - that will change later. 
     let keys = if do_keys_need_generating() {

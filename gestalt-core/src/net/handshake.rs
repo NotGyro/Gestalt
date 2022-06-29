@@ -4,7 +4,7 @@
     use std::io::{Read, Write};
     use std::path::PathBuf;
 
-    use log::{debug, warn};
+    use log::{warn, trace};
     use rand::Rng;
     use serde::{Serialize, Deserialize};
     use signature::Signature;
@@ -217,7 +217,7 @@
         // Generate "-> e" message
         let mut first_message_buf = [0u8; 1024];
         let wrote_len = noise.write_message(&[], &mut first_message_buf)?;
-        debug!("Wrote a handshake initiator message which is {} bytes long", wrote_len);
+        trace!("Wrote a handshake initiator message which is {} bytes long", wrote_len);
         // Encode
         let msg = HandshakeStepMessage {
             handshake_step: 1,
@@ -244,7 +244,7 @@
             // Generate "e, ee, s, es" message
             let mut write_buf = [0u8; 1024];
             let wrote_len = state.write_message(&[], &mut write_buf)?;
-            debug!("Wrote a handshake responder message which is {} bytes long", wrote_len);
+            trace!("Wrote a handshake responder message which is {} bytes long", wrote_len);
             // Encode
             let msg = HandshakeStepMessage {
                 handshake_step: 2,
@@ -273,7 +273,7 @@
             // Send our "s, se ->"
             let mut send_buf = [0u8; 1024];
             let wrote_len = state.write_message(&[], &mut send_buf)?;
-            debug!("Wrote a response which is {} bytes long", wrote_len);
+            trace!("Wrote a response which is {} bytes long", wrote_len);
 
             // Format it
             let output = HandshakeStepMessage { 

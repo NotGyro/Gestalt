@@ -18,7 +18,7 @@
 use lazy_static::lazy_static;
 
 use std::collections::HashSet;
-use log::{error, info, warn, debug, trace};
+use log::{error, info, warn, trace};
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
