@@ -23,9 +23,13 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
+use crate::common::FastHashMap;
+use crate::common::FastHashSet;
 use crate::common::Version;
 use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
+use crate::common::new_fast_hash_map;
+use crate::common::new_fast_hash_set;
 use crate::message;
 use crate::message::MessageReceiver;
 use crate::message::MessageSender;
@@ -55,6 +59,7 @@ pub use netmsg::InboundNetMsg as InboundNetMsg;
 pub use netmsg::DISCONNECT_RESERVED as DISCONNECT_RESERVED;
 
 use self::net_channels::INBOUND_NET_MESSAGES;
+use self::netmsg::MessageSidedness;
 
 pub const SESSION_ID_LEN: usize = 4;
 pub type SessionId = [u8; SESSION_ID_LEN];
@@ -296,8 +301,10 @@ pub enum SessionLayerError {
     ConnectAfterStarted(SocketAddr),
     #[error("Variable-length integer could not be decoded: {0:?}")]
     VarIntError(#[from] vu64::Error),
-    #[error("A NetMessage of type {0} has been receved from {1}, but we have no handlers associated with that type of message. \n It's possible this peer is using a newer version of Gestalt.")]
-    NoHandler(NetMsgId, String),
+    #[error("A NetMessage of type {0} has been receved from {1}, but no type has been associated with this ID in the engine. \n It's possible this peer is using a newer version of Gestalt.")]
+    UnrecognizedMsg(NetMsgId, String),
+    #[error("A NetMessage of type {0} has been receved from {1}, but we are a {2:?} and this message's sidedness is a {3:?}.")]
+    WrongSidedness(NetMsgId, String, SelfNetworkRole, MessageSidedness),
 }
 
 pub type PushSender = mpsc::UnboundedSender<Vec<OuterEnvelope>>;
@@ -311,6 +318,7 @@ pub struct DisconnectMsg {}
 pub struct Session {
     /// Handles reliability-over-UDP.
     pub laminar: LaminarConnectionManager,
+    pub local_role: SelfNetworkRole,
     pub local_identity: IdentityKeyPair,
     pub peer_identity: NodeIdentity,
     pub peer_address: SocketAddr, 
@@ -323,9 +331,13 @@ pub struct Session {
     /// Channel the Session uses to send packets to the UDP socket
     push_channel: PushSender,
 
-    inbound_channels: HashMap<NetMsgDomain, MessageSender<InboundNetMsg>>,
+    /// Cached sender handles so we don't have to lock the mutex every time we want to send a message.
+    inbound_channels: FastHashMap<NetMsgDomain, MessageSender<InboundNetMsg>>,
 
     pub disconnect_deliberate: bool,
+
+    /// Valid NetMsg types for our network role.
+    valid_incoming_messages: FastHashSet<NetMsgId>,
 }
 
 impl Session {
@@ -337,20 +349,35 @@ impl Session {
         })
     }
 
-    pub fn new(local_identity: IdentityKeyPair, peer_address: SocketAddr, connection: SuccessfulConnect, laminar_config: LaminarConfig, 
+    pub fn new(local_identity: IdentityKeyPair, local_role: SelfNetworkRole, peer_address: SocketAddr, connection: SuccessfulConnect, laminar_config: LaminarConfig, 
                 push_channel: PushSender, time: Instant) -> Self {
         let mut laminar_layer = LaminarConnectionManager::new(connection.peer_address, &laminar_config, time);
         laminar_layer.connection_state.last_heard = time;
+
+        let mut valid_incoming_messages = new_fast_hash_set();
+        for id in generated::get_netmsg_table().iter().filter_map(|v| { 
+            let (id, info) = v;
+            if local_role.should_we_ingest(&info.sidedness) { 
+                Some(*id)
+            } else { 
+                None
+            }
+        }) { 
+            valid_incoming_messages.insert(id);
+        }
+
         Session {
             laminar: laminar_layer,
             local_identity,
+            local_role,
             peer_identity: connection.peer_identity,
             peer_address,
             session_id: connection.session_id,
             local_counter: connection.transport_counter,
             transport_cryptography: connection.transport_cryptography,
             push_channel,
-            inbound_channels: HashMap::new(),
+            inbound_channels: new_fast_hash_map(),
+            valid_incoming_messages,
             disconnect_deliberate: false,
         }
     }
@@ -399,10 +426,6 @@ impl Session {
             }
         }
 
-        //if batch.len() > 0 {
-        //    self.laminar.connection_state.last_heard = time;
-        //}
-
         match self.laminar.process_inbound(batch, time) {
             Ok(_) => {},
             Err(e) => errors.push(e.into()),
@@ -447,24 +470,36 @@ impl Session {
         };
         // Push our messages out to the rest of the application.
         for (message_type, message_buf) in finished_packets { 
-            match message_type {
-                // Handle network-subsystem builtin messages
-                DISCONNECT_RESERVED => { 
-                    info!("Peer {} has disconnected (deliberately - this is not an error)", self.peer_identity.to_base64()); 
-                    self.disconnect_deliberate = true;
-                }
-                // Handle messages meant to go out into the rest of the engine. 
-                _ => {
-                    //Non-reserved, game-defined net msg IDs.  
-                    let channel = self.get_or_susbscribe_inbound_sender(message_type);
-                    match channel.send(message_buf)
-                            .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
-                        Ok(_x) => {
-                            trace!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
-                        },
-                        Err(e) => errors.push(e),
+            if self.valid_incoming_messages.contains(&message_type) { 
+                match message_type {
+                    // Handle network-subsystem builtin messages
+                    DISCONNECT_RESERVED => { 
+                        info!("Peer {} has disconnected (deliberately - this is not an error)", self.peer_identity.to_base64()); 
+                        self.disconnect_deliberate = true;
+                    }
+                    // Handle messages meant to go out into the rest of the engine. 
+                    _ => {
+                        //Non-reserved, game-defined net msg IDs.  
+                        let channel = self.get_or_susbscribe_inbound_sender(message_type);
+                        match channel.send(message_buf)
+                                .map_err(|e| SessionLayerError::SendBroadcastError(e)) {
+                            Ok(_x) => {
+                                trace!("Successfully just sent a NetMsg from {} of type {} from the session to the rest of the engine.", self.peer_identity.to_base64(), message_type); 
+                            },
+                            Err(e) => errors.push(e),
+                        }
                     }
                 }
+            }
+            else { 
+                errors.push(match generated::get_netmsg_table().get(&message_type) {
+                    Some(info) => {
+                        SessionLayerError::WrongSidedness(message_type, self.peer_identity.to_base64(), self.local_role, info.sidedness.clone())
+                    },
+                    None => {
+                        SessionLayerError::UnrecognizedMsg(message_type, self.peer_identity.to_base64())
+                    },
+                });
             }
         }
 
@@ -598,7 +633,7 @@ pub async fn handle_session(mut session_manager: Session,
                         if !ingest_results.is_empty() { 
                             let mut built_string = String::default();
                             for errorout in ingest_results.iter() { 
-                                let to_append = format!("* {:?} \n", errorout);
+                                let to_append = format!("* {} \n", errorout);
                                 built_string.push_str(to_append.as_str());
                             }
                             error!("Errors encountered parsing inbound packets in a session with {}: \n {}", session_manager.peer_identity.to_base64(), built_string);
@@ -808,7 +843,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                                                 Ok(receiver) => {
                                                     trace!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                                                     let peer_identity = connection.peer_identity.clone();
-                                                    let mut session = Session::new(local_identity.clone(), peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
+                                                    let mut session = Session::new(local_identity.clone(), our_role, peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
                                                     session.laminar.connection_state.record_recv();
                                                     //Make a channel 
                                                     let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
@@ -923,7 +958,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
                     match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
                         Ok(receiver) => {
                             trace!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
-                            let mut session = Session::new(local_identity.clone(), connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
+                            let mut session = Session::new(local_identity.clone(), our_role, connection.peer_address, connection, laminar_config.clone(), push_sender.clone(), Instant::now());
                             //session.laminar.connection_state.record_recv();
                             //Make a channel 
                             let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();

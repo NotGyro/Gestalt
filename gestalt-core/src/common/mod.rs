@@ -5,11 +5,24 @@ pub mod message;
 #[macro_use]
 pub mod voxelmath;
 
-use std::{fmt::Display, future::Future, pin::Pin};
+use std::{fmt::Display, future::Future, pin::Pin, collections::{HashMap, HashSet}};
 
 use serde::{Deserialize, Serialize};
+use xxhash_rust::xxh3::Xxh3Builder;
 
 pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
+
+/// Non-cryptographic hashmap for internally-generated structures.
+pub type FastHashMap<K, V> = std::collections::HashMap<K, V, Xxh3Builder>;
+/// Non-cryptographic hashset for internally-generated structures.
+pub type FastHashSet<T> = std::collections::HashSet<T, Xxh3Builder>;
+
+pub fn new_fast_hash_map<K, V>() -> FastHashMap<K, V> { 
+    HashMap::with_hasher(Xxh3Builder::new())
+}
+pub fn new_fast_hash_set<T>() -> FastHashSet<T> { 
+    HashSet::with_hasher(Xxh3Builder::new())
+}
 
 // Any HashMap which does not need to be resistant against HashDos / collision attacks. 
 // pub type FastHash = 
