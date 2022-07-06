@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use futures::executor::block_on;
 use glam::{Vec3, Quat};
+use log::info;
+use wgpu::{Instance, Surface, Adapter, AdapterInfo, DeviceDescriptor, Queue, Device};
+use winit::window::Window;
 use std::collections::{HashMap, HashSet};
 use image::{Rgba, RgbaImage};
-use rend3::types::{MeshBuilder, Handedness};
 
 use crate::common::voxelmath::SidesArray;
 use crate::resource::ResourceId;
@@ -16,11 +19,133 @@ use crate::world::voxelstorage::{Voxel, VoxelSpace};
 use self::tiletextureatlas::{TileAtlasLayout, build_tile_atlas, TileAtlasError};
 use self::voxelmesher::{ChunkMesh, MesherState};
 
+use super::clientmain::ClientConfig;
+
 pub mod tiletextureatlas;
 pub mod voxelmesher;
 
 type TextureId = ResourceId;
 
+#[derive(thiserror::Error, Debug)]
+pub enum InitRenderError {
+    #[error("Unable to instantiate a rendering device: {0:?}")]
+    CannotRequestDevice(#[from] wgpu::RequestDeviceError),
+    #[error("Failed to request an adapter - no valid rendering device available!")]
+    CannotRequestAdapter,
+    #[error("Surface incompatible with adapter (As indicated by no preferred format).")]
+    NoPreferredFormat,
+}
+
+pub struct Renderer {
+    window_size: winit::dpi::PhysicalSize<u32>, 
+    instance: wgpu::Instance, 
+    surface: wgpu::Surface,
+    surface_config: wgpu::SurfaceConfiguration,
+    adapter: wgpu::Adapter,
+    queue: wgpu::Queue, 
+    device: wgpu::Device,
+    aspect_ratio: f32,
+}
+
+impl Renderer { 
+    pub async fn init(window: &Window, config: &ClientConfig) -> Result<Self, InitRenderError> { 
+        // WGPU instance / drawing-surface.
+        let instance = wgpu::Instance::new(wgpu::Backends::all());
+        let surface = unsafe { instance.create_surface(window) };
+
+        let mut adapters: HashMap<String, wgpu::Adapter> = instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .map(|a| (a.get_info().name.clone(), a) )
+            .collect();
+
+        let mut adapter_select: Option<String> = None; 
+        let mut info_string = "Available rendering adapters are:\n".to_string();
+        // Iterate through our list of devices to print a list for debugging purposes. 
+        for adapter_info in adapters.values().map(|a| a.get_info()) { 
+            // Handy device listing.
+            let adapter_string = format!(" * {:?}\n", adapter_info);
+            info_string.push_str(&adapter_string);
+            // See if this one matches the one we requested.
+            if let Some(preferred_adapter) = config.display_properties.device.as_ref() { 
+                if &adapter_info.name == preferred_adapter { 
+                    adapter_select = Some(adapter_info.name.clone());
+                    break;
+                }
+            }
+        }
+        // Print debug list.
+        info!("{}", info_string);
+        //If we didn't already pick one, look for any Vulkan device.
+        /*
+        if adapter_select.is_none() { 
+            for adapter_info in adapters.values().map(|a| a.get_info()) { 
+                if adapter_info.backend == wgpu::Backend::Vulkan {
+                    adapter_select = Some(adapter_info.name.clone());
+                    break;
+                }
+            }
+        }*/
+
+        // Final decision on which device gets used. 
+        let adapter = match adapter_select { 
+            Some(adapt_name) => { 
+                adapters.remove(&adapt_name).unwrap()
+            }, 
+            None => instance.request_adapter(&wgpu::RequestAdapterOptions {
+                        power_preference: wgpu::PowerPreference::default(),
+                        compatible_surface: Some(&surface),
+                        force_fallback_adapter: false,}).await.ok_or(InitRenderError::CannotRequestAdapter)?,
+        };
+
+
+        let (device, queue) = adapter.request_device(
+            &DeviceDescriptor{ 
+                label: None,
+                features: wgpu::Features::default(),
+                limits: wgpu::Limits::default(),
+            }, None).await?;
+        
+        //Ensure WGPU knows how to use our surface.
+        let supported_formats = surface.get_supported_formats(&adapter); 
+        if supported_formats.is_empty() { 
+            return Err(InitRenderError::NoPreferredFormat);
+        }
+        info!("Render surface supports formats: {:?}", supported_formats);
+
+        let window_size = window.inner_size();
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT, // When we implement portals I am likely to touch this again. 
+            format: *supported_formats.first().unwrap(),
+            width: window_size.width,
+            height: window_size.height,
+            present_mode: wgpu::PresentMode::Fifo,
+        };
+        surface.configure(&device, &surface_config);
+        
+        let aspect_ratio = (window_size.width as f32) / (window_size.height as f32); 
+
+        Ok(Self {
+            aspect_ratio,
+            window_size,
+            surface_config,
+            instance,
+            surface,
+            adapter,
+            queue,
+            device
+        })
+    }
+    /// Resize the display area
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.window_size = new_size;
+            self.surface_config.width = new_size.width;
+            self.surface_config.height = new_size.height;
+            self.surface.configure(&self.device, &self.surface_config);
+            self.aspect_ratio = (new_size.width as f32) / (new_size.height as f32);
+        }
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum TerrainRendererError {
@@ -67,16 +192,16 @@ impl IntermediaryChunkMesh {
 /// Handle to GPU data for this chunk
 #[allow(dead_code)]
 struct GpuChunkMeshHandle {
-    mesh_handle: rend3::types::MeshHandle,
-    object_handle: rend3::types::ObjectHandle, 
+    mesh_handle: (), // TODO 
+    object_handle: (),  // TODO
 }
 
 /// Data we keep around for a tile texture atlas for as long as we don't need to rebuild it.
 #[allow(dead_code)]
 struct BuiltTexture {
     last_built_revision: u64, 
-    gpu_handle: rend3::types::TextureHandle,
-    material: rend3::types::MaterialHandle,
+    gpu_handle: (), // TODO
+    material: (), // TODO
 }
 
 #[derive(Copy, Clone, Hash, Debug)]
@@ -213,7 +338,7 @@ impl TerrainRenderer {
         }
     }
     /// Takes any of the changed or new chunk meshes made in process_remesh() and makes them available for rendering. 
-    pub fn push_to_gpu<TextureSource: ImageProvider>(&mut self, texture_source: &mut TextureSource, renderer: Arc<rend3::Renderer>) -> Result<(), TerrainRendererError> {
+    pub fn push_to_gpu<TextureSource: ImageProvider>(&mut self, texture_source: &mut TextureSource) -> Result<(), TerrainRendererError> {
         // First, handle textures.
         let mut textures_to_build: HashSet<u32> = HashSet::new();
         for (_, binding) in self.texture_for_chunk.iter() {
@@ -229,7 +354,7 @@ impl TerrainRenderer {
             let image = build_tile_atlas(tile_atlas, texture_source)?;
 
             // Set up Rend3 texture handle.
-            let atlas_texture = rend3::types::Texture {
+            /*let atlas_texture = rend3::types::Texture {
                 label: Option::None,
                 data: image.to_vec(),
                 format: rend3::types::TextureFormat::Rgba8UnormSrgb,
@@ -253,12 +378,13 @@ impl TerrainRenderer {
                 last_built_revision: tile_atlas.get_revision(),
                 gpu_handle: texture_handle,
                 material: material_handle,
-            });
+            });*/
         }
 
         // Then, geometry.
         for (position, meshed_chunk) in self.meshed_chunks.drain() { 
             let ChunkMesh { verticies, uv } = meshed_chunk;
+            /*
             let mesh = MeshBuilder::new(verticies, Handedness::Left)
                 .with_vertex_uv0(uv)
                 .build()
@@ -286,7 +412,7 @@ impl TerrainRenderer {
             self.built_chunks.insert(position, GpuChunkMeshHandle {
                 mesh_handle,
                 object_handle,
-            });
+            });*/
         }
         Ok(())
     }

@@ -1,25 +1,22 @@
 use std::{
     error::Error,
     io::{BufReader, Read, Write},
-    sync::Arc,
     time::{Instant, Duration}, fs::OpenOptions,
 };
 
-use glam::Vec4;
 use std::collections::{HashMap, HashSet};
 use image::RgbaImage;
 use log::{warn, error, info, trace};
-use rend3::types::{Handedness};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use wgpu::Backend;
+
 use winit::{
     event::{DeviceEvent, ElementState, VirtualKeyCode},
     event_loop::ControlFlow,
     window::Fullscreen, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::TerrainRenderer, net::{net_channels::{NetSendChannel, net_send_channel, net_recv_channel::NetMsgReceiver},}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::{TerrainRenderer, Renderer}, net::{net_channels::{NetSendChannel, net_send_channel, net_recv_channel::NetMsgReceiver},}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
 use crate::{
     client::render::CubeArt,
     resource::{
@@ -397,76 +394,11 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     let window_builder = config.display_properties.to_window_builder();
     let window = window_builder.build(&event_loop).unwrap();
 
-    let window_size = window.inner_size();
-    let mut resolution = glam::UVec2::new(window_size.width, window_size.height);
+    //let window_size = window.inner_size();
+    //let mut resolution = glam::UVec2::new(window_size.width, window_size.height);
 
-    {
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let adapters: Vec<wgpu::AdapterInfo> = instance
-            .enumerate_adapters(wgpu::Backends::all())
-            .map(|a| a.get_info())
-            .collect();
-        info!("Available rendering adapters are: {:?}", adapters);
-        drop(adapters);
-        drop(instance);
-    }
+    let mut renderer = async_runtime.block_on(Renderer::init(&window, &config)).unwrap(); 
     
-    // Create the Instance, Adapter, and Device. We can specify preferred backend,
-    // device name, or rendering mode. In this case we let rend3 choose for us.
-    let iad = async_runtime.block_on(rend3::create_iad(
-        Some(Backend::Vulkan),
-        config
-            .display_properties
-            .device
-            .clone()
-            .map(|name| name.to_lowercase()),
-        Some(rend3::RendererMode::GpuPowered),
-        None,
-    ))
-    .unwrap();
-
-    // The one line of unsafe needed. We just need to guarentee that the window
-    // outlives the use of the surface.
-    let surface = Arc::new(unsafe { iad.instance.create_surface(&window) });
-    // Get the preferred format for the surface.
-    let format = surface.get_preferred_format(&iad.adapter).unwrap();
-    // Configure the surface to be ready for rendering.
-    rend3::configure_surface(
-        &surface,
-        &iad.device,
-        format,
-        glam::UVec2::new(window_size.width, window_size.height),
-        rend3::types::PresentMode::Mailbox,
-    );
-    // Make us a renderer.
-    let renderer = rend3::Renderer::new(
-        iad,
-        Handedness::Left,
-        Some(window_size.width as f32 / window_size.height as f32),
-    )
-    .unwrap();
-
-    info!(
-        "Launching with rendering device: {:?}",
-        &renderer.adapter_info
-    );
-
-    // Create the pbr pipeline with the same internal resolution and 4x multisampling
-    let base_render_graph = rend3_routine::base::BaseRenderGraph::new(&renderer);
-
-    let mut data_core = renderer.data_core.lock();
-    let pbr_routine = rend3_routine::pbr::PbrRoutine::new(
-        &renderer,
-        &mut data_core,
-        &base_render_graph.interfaces,
-    );
-    drop(data_core);
-    let tonemapping_routine = rend3_routine::tonemapping::TonemappingRoutine::new(
-        &renderer,
-        &base_render_graph.interfaces,
-        format,
-    );
-
     //Set up some test art assets.
     let air_id = 0;
     let stone_id = 1;
@@ -507,9 +439,6 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
     let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
     info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
-    terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
-    let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-    info!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
 
     let mut last_remesh_time = Instant::now();
 
@@ -521,29 +450,12 @@ pub fn run_client(identity_keys: IdentityKeyPair,
 
     camera.speed = SLOW_CAMERA_SPEED;
 
-    // Set camera's location
-    renderer.set_camera_data(rend3::types::Camera {
-        projection: rend3::types::CameraProjection::Perspective {
-            vfov: 90.0,
-            near: 0.1,
-        },
-        view: camera.get_view_matrix(),
-    });
-
-    let _directional_handle = renderer.add_directional_light(rend3::types::DirectionalLight {
-        color: glam::Vec3::new(0.2, 0.8, 1.0),
-        intensity: 10.0,
-        // Direction will be normalized
-        direction: glam::Vec3::new(-1.0, -4.0, 2.0),
-        distance: 400.0,
-    });
-
     let mut current_down = HashSet::new();
 
     let game_start_time = Instant::now();
     let mut prev_frame_time = Instant::now();
 
-    let ambient_light = Vec4::new(0.0, 0.4, 0.1, 0.0);
+    //let ambient_light = Vec4::new(0.0, 0.4, 0.1, 0.0);
 
     let mut total_frames: u64 = 0;
     let mut fps_counter_print_times: u64 = 0;
@@ -767,18 +679,8 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                 event: winit::event::WindowEvent::Resized(physical_size),
                 ..
             } => {
-                resolution = glam::UVec2::new(physical_size.width, physical_size.height);
-                // Reconfigure the surface for the new size.
-                rend3::configure_surface(
-                    &surface,
-                    &renderer.device,
-                    format,
-                    glam::UVec2::new(resolution.x, resolution.y),
-                    rend3::types::PresentMode::Mailbox,
-                );
-                // Tell the renderer about the new aspect ratio.
-                renderer.set_aspect_ratio(resolution.x as f32 / resolution.y as f32);
-
+                //resolution = glam::UVec2::new(physical_size.width, physical_size.height);
+                renderer.resize(physical_size);
                 window_center = { 
                     let window_top_left = window.inner_position().unwrap(); 
                     let window_size = window.inner_size();
@@ -797,11 +699,6 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     for dir in current_down.iter() {
                         camera.key_interact(*dir, elapsed_time);
                     }
-                    //Update camera
-                    renderer.set_camera_data(rend3::types::Camera {
-                        projection: rend3::types::CameraProjection::Perspective { vfov: 90.0, near: 0.1 },
-                        view: camera.get_view_matrix(),
-                    });
                 }
 
                 // Remesh if it's not too spammy. 
@@ -811,40 +708,12 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     if was_remesh_needed { 
                         let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
                         info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
-                        terrain_renderer.push_to_gpu(&mut image_loader, renderer.clone()).unwrap();
-                        let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0; 
-                        info!("Took {} milliseconds to do meshing + \"push_to_gpu()\" step", meshing_elapsed_millis);
     
                         last_remesh_time = Instant::now();
                     }
                 }
 
-                // Present the frame on screen
                 let draw_start = Instant::now();
-                // Get a frame
-                let frame = rend3::util::output::OutputFrame::Surface {
-                    surface: Arc::clone(&surface),
-                };
-                // Ready up the renderer
-                let (cmd_bufs, ready) = renderer.ready();
-
-                // Build a rendergraph
-                let mut graph = rend3::RenderGraph::new();
-
-                // Add the default rendergraph without a skybox
-                base_render_graph.add_to_graph(
-                    &mut graph,
-                    &ready,
-                    &pbr_routine,
-                    None,
-                    &tonemapping_routine,
-                    resolution,
-                    rend3::types::SampleCount::One,
-                    ambient_light,
-                );
-
-                // Dispatch a render using the built up rendergraph!
-                graph.execute(&renderer, frame, cmd_bufs, &ready);
                 
                 //Tell us some about it. 
                 let draw_time = draw_start.elapsed();
@@ -852,7 +721,6 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                 let total_time = game_start_time.elapsed(); 
                 let current_fps = (total_frames as f64)/(total_time.as_secs_f64());
                 if (total_time.as_secs() % 5 == 0) && (fps_counter_print_times < (total_time.as_secs()/5) ) {
-                    info!("Render device is: {:?}", &renderer.adapter_info);
                     info!("Average frames per second, total runtime of the program, is {}", current_fps);
                     info!("Last frame took {} millis", elapsed_time.as_millis());
                     info!("{} millis were spent drawing the frame.", draw_time.as_millis());

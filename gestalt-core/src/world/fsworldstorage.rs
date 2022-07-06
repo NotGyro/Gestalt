@@ -1,5 +1,3 @@
-// ! This funges your tokens. 
-// ! I stole your apes lmao 
 use std::{path::PathBuf, fs::OpenOptions, io::{BufReader, BufWriter}};
 
 use log::trace;
