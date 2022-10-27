@@ -26,6 +26,10 @@ pub mod voxelmesher;
 
 type TextureId = ResourceId;
 
+pub struct Drawable { 
+
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum InitRenderError {
     #[error("Unable to instantiate a rendering device: {0:?}")]
