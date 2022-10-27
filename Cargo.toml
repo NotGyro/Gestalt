@@ -2,7 +2,8 @@
 resolver="2"
 
 members = [
-    "gestalt-names",
-    "gestalt-core",
-    "gestalt-proc-macros",
+    "crates/gestalt-names",
+    "crates/gestalt-core",
+    "crates/gestalt-ecs",
+    "crates/gestalt-proc-macros",
 ]

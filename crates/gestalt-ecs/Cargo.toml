@@ -1,0 +1,6 @@
+[package]
+name = "gestalt_ecs"
+version = "0.0.1"
+authors = ["Emily 'Gyro' C. <gyrocoder@gmail.com>", "Aubrey 'Yaodema' Smith"]
+edition = "2021"
+#build = "build.rs"
