@@ -5,8 +5,8 @@ use crate::common::voxelmath::*;
 
 use super::{TileCoord, TilePos};
 
-pub trait Voxel: Clone + Debug + PartialEq + Eq + Hash {}
-impl<T> Voxel for T where T: Clone + Debug + PartialEq + Eq + Hash {}
+pub trait Voxel: Clone + Debug + PartialEq + Eq + Hash + Send {}
+impl<T> Voxel for T where T: Clone + Debug + PartialEq + Eq + Hash + Send {}
 
 /// Abstract categories of voxel errors allowing you to check 
 /// ANY voxel error to see things like, say, is this recoverable? 
@@ -20,7 +20,14 @@ pub enum VoxelErrorCategory {
     PaletteIssue,
     /// Any error encountered while trying to load a chunk
     LoadingIssue,
-    Other,
+    /// Problems related to chunks which are set up as memory-mapped files.
+    MemMapIssue,
+    /// Attempt to set metadata to an invalid value. 
+    InvalidMetadataAssignment,
+    /// Invalid metadata was found on a voxel. 
+    InvalidMetadataPresent,
+    /// Any other error with a string describing the error category. 
+    Other(String),
 }
 
 pub trait VoxelError: std::error::Error + std::fmt::Debug { 
@@ -72,8 +79,8 @@ pub trait VoxelSpace<T: Voxel> : VoxelStorage<T, TileCoord> {
     fn borrow_chunk(&self, chunk: &VoxelPos<Self::ChunkCoord>) -> Result<&Self::Chunk, Self::Error>;
     /// Try to borrow a chunk mutably. If it isn't loaded yet, returns None.
     fn borrow_chunk_mut(&mut self, chunk: &VoxelPos<Self::ChunkCoord>) -> Result<&mut Self::Chunk, Self::Error>;
-
-    fn get_loaded_chunks(&self) -> Vec<&VoxelPos<Self::ChunkCoord>>;
+    /// Get a chunk cell per every currently-loaded chunk (which can be used to look them up). 
+    fn get_loaded_chunk_cells(&self) -> Vec<&VoxelPos<Self::ChunkCoord>>;
 }
 
 pub mod voxel_bulk_ops { 

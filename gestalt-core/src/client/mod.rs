@@ -1,3 +1,3 @@
 pub mod camera;
-pub mod clientmain;
-pub mod render;
+//pub mod clientmain;
+//pub mod render;

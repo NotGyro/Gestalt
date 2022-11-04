@@ -6,7 +6,7 @@ use log::trace;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
-use super::{WorldId, ChunkCoord, ChunkPos, chunk::{Chunk, ChunkIoError, deserialize_chunk}, TileId};
+use super::{WorldId, ChunkCoord, ChunkPos, TileId};
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum StoredWorldRole { 
@@ -79,6 +79,7 @@ pub fn path_for_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos)
     path_for_terrain(world_id, role).join(filename_for_chunk(pos))
 }
 
+/*
 pub fn load_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos) -> std::result::Result<Chunk<TileId>, ChunkIoError> {
     let path = path_for_chunk(world_id, role, pos);
     let file = OpenOptions::new()
@@ -110,7 +111,7 @@ pub fn save_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos, chu
     //This should be an atomic operation, so world state won't get corrupted here.
     std::fs::rename(&in_progress_path, target_path)?;
     Ok(())
-}
+}*/
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorldDefaults { 

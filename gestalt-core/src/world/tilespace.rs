@@ -1,6 +1,5 @@
 //! A space made up of multiple chunks - the voxel-only parts of a "world". A "Dimension". Can be multiple per server.
 use crate::common::voxelmath::*;
-use crate::world::chunk::{CHUNK_SIZE, CHUNK_EXP};
 
 use std::collections::HashMap;
 
@@ -10,7 +9,6 @@ use crate::world::voxelstorage::*;
 use crate::world::{ChunkCoord, ChunkPos, TileCoord, TilePos};
 
 use super::TileId;
-use super::chunk;
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum TileSpaceError {
@@ -22,7 +20,7 @@ pub enum TileSpaceError {
     NotYetLoaded(TilePos),
     #[error("Chunk data error: {0:?}")]
     ChunkError(#[from] <chunk::Chunk<TileId> as VoxelStorage<TileId, u16>>::Error),
-    #[error("Attempted to laod in a new chunk at pos {0:?}, but one was already present in that cell!")]
+    #[error("Attempted to load in a new chunk at pos {0:?}, but one was already present in that cell!")]
     LoadExistingChunk(ChunkPos),
 }
 
