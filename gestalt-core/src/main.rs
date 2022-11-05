@@ -5,6 +5,7 @@
 #![feature(int_roundings)]
 #![feature(associated_type_bounds)]
 #![feature(inherent_associated_types)]
+#![feature(return_position_impl_trait_in_trait)]
 
 #![allow(clippy::large_enum_variant)]
 
@@ -359,7 +360,7 @@ fn main() {
                                 //world_space.set(event.pos, event.new_tile).unwrap();
                                 info!("Received {:?} from {}", &event, ident.to_base64());
                                 let announce: VoxelChangeAnnounce = event.into();
-                                net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
+                                net_send_channel::send_one_to_all_except(announce.clone(), &ident).unwrap();
                                 total_changes.push(announce);
                             }
                         }
@@ -372,7 +373,7 @@ fn main() {
                                     display_name: event.display_name, 
                                     identity: ident,
                                 };
-                                net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
+                                net_send_channel::send_one_to_all_except(announce.clone(), &ident).unwrap();
                                 info!("Sending all previous changes to the newly-joined user.");
                                 net_send_channel::send_multi_to(total_changes.clone(), &ident).unwrap();
                             }
@@ -411,10 +412,10 @@ fn main() {
 
         std::thread::sleep(Duration::from_millis(50));
                 
-        let voxel_event_sender: NetSendChannel<VoxelChangeRequest> = net_send_channel::subscribe_sender(&server_identity).unwrap();
+        let _voxel_event_sender: NetSendChannel<VoxelChangeRequest> = net_send_channel::subscribe_sender(&server_identity).unwrap();
         
         let mut client_join_receiver_from_server = net_recv_channel::subscribe::<JoinAnnounce>().unwrap();
-        let client_voxel_receiver_from_server = net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
+        let _client_voxel_receiver_from_server = net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
 
         async_runtime.spawn( async move { 
             loop { 

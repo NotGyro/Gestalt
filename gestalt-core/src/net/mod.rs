@@ -31,10 +31,9 @@ use crate::common::identity::NodeIdentity;
 use crate::common::new_fast_hash_map;
 use crate::common::new_fast_hash_set;
 use crate::message;
-use crate::message::MessageReceiver;
-use crate::message::MessageSender;
+use crate::message::BroadcastReceiver;
+use crate::message::MessageReceiverAsync;
 use crate::message::QuitReceiver;
-use crate::message::add_domain;
 use crate::message::sender_subscribe_domain;
 use crate::net::net_channels::net_send_channel;
 
@@ -59,6 +58,7 @@ pub use netmsg::InboundNetMsg as InboundNetMsg;
 pub use netmsg::DISCONNECT_RESERVED as DISCONNECT_RESERVED;
 
 use self::net_channels::INBOUND_NET_MESSAGES;
+use self::net_channels::InboundMsgSender;
 use self::netmsg::MessageSidedness;
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -332,7 +332,7 @@ pub struct Session {
     push_channel: PushSender,
 
     /// Cached sender handles so we don't have to lock the mutex every time we want to send a message.
-    inbound_channels: FastHashMap<NetMsgDomain, MessageSender<InboundNetMsg>>,
+    inbound_channels: FastHashMap<NetMsgDomain, InboundMsgSender>,
 
     pub disconnect_deliberate: bool,
 
@@ -342,7 +342,7 @@ pub struct Session {
 
 impl Session {
     /// Get a message-passing sender for the given NetMsgDomain, caching so we don't have to lock the mutex constantly. 
-    fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut MessageSender<InboundNetMsg> {
+    fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut InboundMsgSender {
         self.inbound_channels.entry(domain).or_insert_with(|| {
             //add_domain(&INBOUND_NET_MESSAGES, &domain);
             sender_subscribe_domain(&INBOUND_NET_MESSAGES, &domain).unwrap()
@@ -613,7 +613,7 @@ impl Session {
 ///
 pub async fn handle_session(mut session_manager: Session,
                         mut incoming_packets: mpsc::UnboundedReceiver<Vec<OuterEnvelope>>,
-                        mut from_game: MessageReceiver<PacketIntermediary>,
+                        mut from_game: BroadcastReceiver<PacketIntermediary>,
                         session_tick: Duration,
                         kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
                         mut kill_from_outside: tokio::sync::oneshot::Receiver<()>) { 
@@ -1039,7 +1039,7 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
 #[cfg(test)]
 mod test {
     use crate::message;
-    use crate::message::SenderAccepts;
+    use crate::message::MessageSender;
     use crate::message_types::JoinDefaultEntry;
     use crate::net::net_channels::net_recv_channel;
     use crate::net::net_channels::net_recv_channel::NetMsgReceiver;
