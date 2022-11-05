@@ -36,7 +36,7 @@ use tokio::net::{TcpStream, TcpListener};
 use super::handshake::HandshakeNext;
 use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, load_noise_local_keys, HandshakeError, HandshakeIntitiator}};
 
-use super::{MessageCounter, GESTALT_PORT, NetworkRole, SelfNetworkRole};
+use super::{MessageCounter, NetworkRole, SelfNetworkRole};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -451,10 +451,10 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_rol
 }
 
 /// Spawns a thread which listens for pre-protocol connections on TCP.
-pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: Option<SocketAddr>, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>) { 
+pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: Option<SocketAddr>, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>, port: u16) { 
     let ip = match our_address { 
         Some(value) => value, 
-        None => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), GESTALT_PORT),
+        None => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
     };
     let listener = TcpListener::bind(ip).await.unwrap();
     loop {
@@ -612,11 +612,24 @@ pub mod test {
     use tokio::sync::mpsc;
     use crate::common::identity::IdentityKeyPair;
     use super::*;
+
+    async fn find_available_port(range: std::ops::Range<u16>) -> Option<u16> { 
+        for i in range { 
+            match TcpListener::bind((Ipv6Addr::LOCALHOST, i)).await { 
+                Ok(_) => return Some(i),
+                Err(_) => {},
+            }
+        }
+        None
+    }  
  
     #[tokio::test(flavor = "multi_thread")]
     async fn preprotocol_connect_to_localhost() {
         use crate::net::test::NET_TEST_MUTEX;
         let _guard = NET_TEST_MUTEX.lock();
+
+        // Find an available port 
+        let port = find_available_port(3223..4223).await.unwrap();
         
         let server_key_pair = IdentityKeyPair::generate_for_tests();
         let client_key_pair = IdentityKeyPair::generate_for_tests();
@@ -625,9 +638,9 @@ pub mod test {
         let connect_timeout = Duration::from_secs(2);
     
         let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
-        let server_socket_addr = SocketAddr::new(server_addr.clone(), GESTALT_PORT);
+        let server_socket_addr = SocketAddr::new(server_addr.clone(), port);
         //Launch the server
-        tokio::spawn(launch_preprotocol_listener(server_key_pair, Some(server_socket_addr), serv_completed_sender));
+        tokio::spawn(launch_preprotocol_listener(server_key_pair, Some(server_socket_addr), serv_completed_sender, port));
         //Give it a moment
         tokio::time::sleep(Duration::from_millis(100)).await;
         //Try to connect

@@ -38,7 +38,7 @@ use common::{identity::{do_keys_need_generating, does_private_key_need_passphras
 use std::collections::{HashSet, HashMap};
 use tokio::sync::mpsc;
 
-use crate::{net::{PREPROTCOL_PORT, NetworkRole, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}, GESTALT_PORT, run_network_system, LaminarConfig, net_channels::{NetSendChannel, net_send_channel, net_recv_channel}, NetMsg, SelfNetworkRole}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::{START_QUIT, QuitReceiver}};
+use crate::{net::{NetworkRole, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}, run_network_system, LaminarConfig, net_channels::{NetSendChannel, net_send_channel, net_recv_channel}, NetMsg, SelfNetworkRole}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::{START_QUIT, QuitReceiver}};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -312,15 +312,15 @@ fn main() {
                 raw_addr.parse().unwrap()
             } else { 
                 let ip_addr: IpAddr = raw_addr.parse().unwrap();
-                SocketAddr::new(ip_addr, GESTALT_PORT)
+                SocketAddr::new(ip_addr, 3223)
             }
         }
         else { 
-            SocketAddr::from((Ipv6Addr::LOCALHOST, GESTALT_PORT))
+            SocketAddr::from((Ipv6Addr::LOCALHOST, 3223))
         };
 
         info!("Spawning preprotocol listener task.");
-        async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender ));
+        async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender, 3223));
 
         info!("Spawning network system task.");
         let net_system_join_handle = async_runtime.spawn(
@@ -394,7 +394,7 @@ fn main() {
             raw_addr.parse().unwrap()
         } else {
             let ip_addr: IpAddr = raw_addr.parse().unwrap();
-            SocketAddr::new(ip_addr, PREPROTCOL_PORT)
+            SocketAddr::new(ip_addr, 3223)
         };
 
         let (connect_sender, connect_receiver) = mpsc::unbounded_channel();

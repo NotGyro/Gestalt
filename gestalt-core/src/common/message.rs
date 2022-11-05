@@ -47,7 +47,6 @@ impl<T> From<tokio::sync::broadcast::error::SendError<T>> for SendError {
     }
 }
 
-
 pub trait MessageReceiver<T> where T: Message {
     /// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
     fn recv_poll(&mut self) -> Result<Vec<T>, RecvError>;
@@ -56,7 +55,6 @@ pub trait MessageReceiverAsync<T>: MessageReceiver<T> where T: Message {
     //type RecvFuture: Future<Output=Result<Vec<T>, RecvError>>;
     fn recv_wait(&mut self) -> impl Future<Output = Result<Vec<T>, RecvError>> + '_; 
 }
-
 
 pub struct BroadcastReceiver<T> where T: Message {
     pub(in crate::common::message) inner: UnderlyingBroadcastReceiver<T>, 

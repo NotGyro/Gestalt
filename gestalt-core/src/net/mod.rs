@@ -37,8 +37,8 @@ use crate::message::QuitReceiver;
 use crate::message::sender_subscribe_domain;
 use crate::net::net_channels::net_send_channel;
 
-pub const PREPROTCOL_PORT: u16 = 54134;
-pub const GESTALT_PORT: u16 = 54134;
+//pub const PREPROTCOL_PORT: u16 = 54134;
+//pub const GESTALT_PORT: u16 = 54134;
 
 pub mod handshake;
 pub mod net_channels;
@@ -1038,6 +1038,8 @@ pub async fn run_network_system(our_role: SelfNetworkRole, address: SocketAddr,
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv6Addr;
+
     use crate::message;
     use crate::message::MessageSender;
     use crate::message_types::JoinDefaultEntry;
@@ -1054,6 +1056,16 @@ mod test {
     use super::preprotocol::preprotocol_connect_to_server;
     use lazy_static::lazy_static;
  
+    async fn find_available_udp_port(range: std::ops::Range<u16>) -> Option<u16> { 
+        for i in range { 
+            match UdpSocket::bind((Ipv6Addr::LOCALHOST, i)).await { 
+                Ok(_) => return Some(i),
+                Err(_) => {},
+            }
+        }
+        None
+    }
+
     #[derive(Clone, Serialize, Deserialize, Debug)]
     #[netmsg(1337, Common, ReliableOrdered)]
     pub(crate) struct TestNetMsg {
@@ -1074,8 +1086,10 @@ mod test {
         let (serv_completed_sender, serv_completed_receiver) = mpsc::unbounded_channel();
         let (client_completed_sender, client_completed_receiver) = mpsc::unbounded_channel();
 
+        let port = find_available_udp_port(3223..4223).await.unwrap();
+
         let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
-        let server_socket_addr = SocketAddr::new(server_addr, GESTALT_PORT);
+        let server_socket_addr = SocketAddr::new(server_addr, port);
 
         let test_table = tokio::task::spawn_blocking(|| { 
             generated::get_netmsg_table()
@@ -1092,7 +1106,7 @@ mod test {
                 Duration::from_millis(50))
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
-        let _join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender ));
+        let _join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender, port));
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         //Launch client
