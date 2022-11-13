@@ -35,10 +35,37 @@ use log::{LevelFilter, info, error, warn};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
 use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version};
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 
-use crate::{net::{NetworkRole, preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server}, run_network_system, LaminarConfig, net_channels::{NetSendChannel, net_send_channel, net_recv_channel}, NetMsg, SelfNetworkRole}, common::{identity::generate_local_keys}, message_types::{voxel::{VoxelChangeAnnounce, VoxelChangeRequest}, JoinDefaultEntry, JoinAnnounce}, message::{START_QUIT, QuitReceiver}};
+use crate::{
+    net::{
+        preprotocol::{
+            launch_preprotocol_listener, 
+            preprotocol_connect_to_server
+        }, 
+        net_channels::{
+            NetSendChannel, 
+            net_send_channel, 
+            net_recv_channel
+        }, 
+        SelfNetworkRole, 
+        reliable_udp::LaminarConfig, 
+        NetworkSystem
+    }, 
+    common::{
+        identity::generate_local_keys
+    },
+    message_types::{
+        voxel::{
+            VoxelChangeAnnounce, 
+            VoxelChangeRequest
+        }, 
+        JoinDefaultEntry, 
+        JoinAnnounce
+    }, 
+    message::QuitReceiver
+};
 
 pub const ENGINE_VERSION: Version = version!(0,0,1);
 
@@ -323,13 +350,17 @@ fn main() {
         async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender, 3223));
 
         info!("Spawning network system task.");
+        let keys_for_net = keys.clone();
         let net_system_join_handle = async_runtime.spawn(
-            run_network_system(SelfNetworkRole::Server,
+            async move {
+                let mut sys = NetworkSystem::new(SelfNetworkRole::Server,
                 udp_address, 
                 connect_receiver,
-                keys.clone(),
+                keys_for_net,
                 laminar_config,
-                Duration::from_millis(25))
+                Duration::from_millis(25));
+                sys.run().await
+            }
         );
 
         //let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(3,3,3), lower: vpos!(-2,-2,-2) };
@@ -398,12 +429,16 @@ fn main() {
         };
 
         let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
+        let keys_for_net = keys.clone();
         let net_system_join_handle = async_runtime.spawn(
-            run_network_system( SelfNetworkRole::Client,  address, 
-                connect_receiver,
-                keys.clone(), 
-                laminar_config,
-                Duration::from_millis(25))
+            async move { 
+                let mut sys = NetworkSystem::new( SelfNetworkRole::Client,  address, 
+                    connect_receiver,
+                    keys_for_net, 
+                    laminar_config,
+                    Duration::from_millis(25) );
+                sys.run().await
+            }
         );
         let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
                 Duration::new(5, 0))).unwrap();

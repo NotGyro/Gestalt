@@ -7,7 +7,7 @@ use log::trace;
 /// Thin wrapper used to pretend, from the perspective of Laminar, 
 /// that Noise protocol encryption and async UDP are a transparent synchronous UDP socket.
 #[derive(Default)]
-struct TransportWrapper {
+pub(in crate::net) struct TransportWrapper {
     pub laminar_config: laminar::Config,
     // Packets to send
     pub outbox: VecDeque<(SocketAddr, Vec<u8>)>, 

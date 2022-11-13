@@ -122,7 +122,7 @@ impl NetworkSystem {
             laminar_config: LaminarConfig,
             session_tick_interval: Duration) -> Self { 
         
-        let (push_sender, mut push_receiver): (PushSender, PushReceiver) = mpsc::unbounded_channel(); 
+        let (push_sender, push_receiver): (PushSender, PushReceiver) = mpsc::unbounded_channel(); 
         let (kill_from_inside_session_sender, kill_from_inside_session_receiver) = mpsc::unbounded_channel::<(FullSessionName, Vec<SessionLayerError>)>();
         Self {
             our_role,
@@ -416,7 +416,7 @@ impl NetworkSystem {
                 }
                 quit_ready_indicator = quit_reciever.wait_for_quit() => {
                     info!("Shutting down network system.");
-                    self.shutdown(&socket, quit_ready_indicator.clone());
+                    self.shutdown(&socket, quit_ready_indicator.clone()).await;
                     break;
                 }
             }
@@ -488,7 +488,7 @@ mod test {
         
         //Launch server
         let join_handle_s = tokio::spawn(
-            async {
+            async move {
                 let mut sys = NetworkSystem::new(SelfNetworkRole::Server,
                     server_socket_addr,
                     serv_completed_receiver,
@@ -504,7 +504,7 @@ mod test {
 
         //Launch client
         let join_handle_c = tokio::spawn(
-            async { 
+            async move { 
                 let mut sys = NetworkSystem::new(SelfNetworkRole::Client,  server_socket_addr, 
                     client_completed_receiver,
                     client_key_pair.clone(),
