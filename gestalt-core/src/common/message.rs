@@ -650,6 +650,7 @@ macro_rules! global_domain_channel {
 global_channel!(BroadcastChannel, START_QUIT, (), 1);
 global_channel!(BroadcastChannel, READY_FOR_QUIT, (), 1024);
 
+#[derive(Clone)]
 #[warn(unused_must_use)]
 pub struct QuitReadyNotifier {
     inner: BroadcastSender<()>,

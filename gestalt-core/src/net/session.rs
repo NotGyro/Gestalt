@@ -516,8 +516,6 @@ pub async fn handle_session(mut session_manager: Session,
 // [- 1-9 bytes vu64 bytes encoding ciphertext size, n -]
 // [- n bytes ciphertext -------------------------------]
 
-const MAX_MESSAGE_SIZE: usize = 8192;
-
 pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> usize {
     const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
     const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
@@ -525,8 +523,6 @@ pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> us
     let encoded_len = vu64::encode(message_len as u64);
 
     let len_tag_bytes: &[u8] = encoded_len.as_ref();
-    
-    //let header_len = SESSION_ID_LEN + COUNTER_LEN + len_tag_bytes.len();
 
     let mut cursor = 0;
     let session_id = message.session_id.session_id.clone();
