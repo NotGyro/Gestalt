@@ -18,7 +18,8 @@
 use lazy_static::lazy_static;
 
 use std::collections::HashSet;
-use log::{error, info, warn, trace};
+use std::path::PathBuf;
+use log::{error, info, trace};
 use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
@@ -26,6 +27,7 @@ use tokio::sync::mpsc;
 
 use crate::common::identity::{IdentityKeyPair, DecodeIdentityError};
 use crate::common::{identity::NodeIdentity, Version};
+use crate::message::{SenderChannel, ReceiverChannel};
 use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
 
 use std::sync::Arc;
@@ -33,8 +35,8 @@ use std::time::Duration;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::{TcpStream, TcpListener};
 
-use super::handshake::HandshakeNext;
-use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, load_noise_local_keys, HandshakeError, HandshakeIntitiator}};
+use super::handshake::{HandshakeNext, load_noise_local_keys, NewProtocolKeyReporter, NewProtocolKeyApprover, noise_protocol_dir};
+use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, HandshakeError, HandshakeInitiator}};
 
 use super::{MessageCounter, NetworkRole, SelfNetworkRole};
 
@@ -69,67 +71,38 @@ pub enum ServerStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct HandshakeStepMessage { 
-    pub handshake_step: u8, 
+pub struct HandshakeStepMessage {
     pub data: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Introduction { 
-    /// Base-64 encoded [`crate::common::identity::NodeIdentity`]
-    pub identity_key: String,
-    /// What kind of network node are we? 
-    pub role: NetworkRole,
-    // Unnecessary reduction in anonymity, there should be an AnnounceName netmsg that goes over ciphertext.
-    // What should we call you?
-    // Note that this is a valid field for both a server and a player, but they will do different things in each context.
-    // pub display_name: String,
-    /// What version of Gestalt is this?
-    #[serde(with = "crate::common::version_string")] 
-    pub gestalt_engine_version: Version,
+    pub handshake_step: u8, 
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StartHandshakeMsg { 
-    pub use_protocol: ProtocolDef, 
-    /// Contains a Base-64 encoded [`NodeIdentity`], identifying the user who is connecting. 
-    pub initiator_identity: Introduction,
     pub handshake: HandshakeStepMessage,
+    pub initiator_role: NetworkRole, //"I am connecting as an initiator_role in relation to you"
+    pub use_protocol: ProtocolDef,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PreProtocolQuery {
-    /// Open a PreProtocol session with our Base-64 encoded [`crate::common::identity::NodeIdentity`], telling the server who we are. 
-    Introduction(Introduction),
     /// Find out which protocols the server supports. 
     SupportedProtocols,
-    /// Get Gestalt identity when you only have an IP.
-    RequestIdentity,
     /// Is the server ready to join? 
     RequestServerStatus,
-    /// Asks for the name, current playercount, etc of the server. 
-    /// Response will be json that is not guaranteed to be in any particular structure 
-    RequestServerInfo,
     /// Initiates a handshake, providing the handshake protocol definition of the handshake we will use.
     StartHandshake(StartHandshakeMsg),
     Handshake(HandshakeStepMessage),
-    /// Sent by the party who encountered an error when an error is encountered. Initiator will only ever send an error during handshake.
-    HandshakeFailed(String),
+    /// Sent by the party who encountered an error when an error is encountered.
+    Err(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum PreProtocolReply {
     Status(ServerStatus),
-    /// Basic information. Contains a Base-64 encoded [`crate::common::identity::NodeIdentity`]
-    Identity(Introduction),
-    
-    /// Name, current playercount, etc of the server. 
-    /// Response will be json that is not guaranteed to be in any particular structure 
-    ServerInfo(serde_json::Value),
     Handshake(HandshakeStepMessage),
     /// Find out which protocols the server supports. 
     SupportedProtocols(SupportedProtocols),
-    /// Sent by the party who encountered an error when an error is encountered. 
+    /// General or handshake-specific error.
     Err(String),
 }
 
@@ -187,6 +160,12 @@ impl PreProtocolReceiverState {
             PreProtocolReceiverState::Handshake(_) => true,
         }
     }
+    pub fn get_peer_identity(&self) -> Option<&NodeIdentity> { 
+        match self { 
+            PreProtocolReceiverState::QueryAnswerer => None,
+            PreProtocolReceiverState::Handshake(receiver) => receiver.get_peer_identity(), 
+        }
+    }
 }
 
 pub enum PreProtocolOutput { 
@@ -200,28 +179,30 @@ pub enum PreProtocolOutput {
 /// Pre-protocol receiver capable of answering questions from one peer.
 pub struct PreProtocolReceiver { 
     state: PreProtocolReceiverState,
-    description: serde_json::Value,
+    protocol_dir: PathBuf,
     our_identity: IdentityKeyPair,
     our_role: SelfNetworkRole,
-    peer_identity: Option<NodeIdentity>,
     peer_role: Option<NetworkRole>,
-    peer_engine_version: Option<Version>,
+    mismatch_reporter: Option<NewProtocolKeyReporter>,
+    mismatch_approver: Option<NewProtocolKeyApprover>,
 }
 
 impl PreProtocolReceiver { 
-    pub fn new(our_identity: IdentityKeyPair, role: SelfNetworkRole) -> Self { 
+    pub fn new(our_identity: IdentityKeyPair, 
+            role: SelfNetworkRole,
+            protocol_dir: PathBuf,
+            mismatch_reporter: NewProtocolKeyReporter,
+            mismatch_approver: NewProtocolKeyApprover,
+        ) -> Self { 
         PreProtocolReceiver { 
-            state: PreProtocolReceiverState::QueryAnswerer, 
-            description: serde_json::Value::default(),
+            state: PreProtocolReceiverState::QueryAnswerer,
+            protocol_dir,
             our_identity,
             our_role: role,
-            peer_identity: None,
-            peer_role: None, 
-            peer_engine_version: None,
+            peer_role: None,
+            mismatch_reporter: Some(mismatch_reporter),
+            mismatch_approver: Some(mismatch_approver),
         }
-    }
-    pub fn update_description(&mut self, description: serde_json::Value) { 
-        self.description = description;
     }
     pub fn is_handshake_done(&self) -> bool { 
         match &self.state {
@@ -231,7 +212,7 @@ impl PreProtocolReceiver {
             },
         }
     }
-    pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, MessageCounter, SessionId), PreProtocolError> { 
+    pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), PreProtocolError> { 
         match std::mem::take(&mut self.state) {
             PreProtocolReceiverState::QueryAnswerer => Err(HandshakeError::CompleteBeforeDone.into()),
             PreProtocolReceiverState::Handshake(receiver) => {
@@ -239,35 +220,12 @@ impl PreProtocolReceiver {
             },
         }
     }
-    pub fn receive_and_reply(&mut self, incoming: PreProtocolQuery) -> Result<PreProtocolOutput, PreProtocolError>{
-        let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
-            warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
-            true
-        };
+    pub async fn receive_and_reply(&mut self, incoming: PreProtocolQuery) -> Result<PreProtocolOutput, PreProtocolError>{
         Ok(match incoming {
-            PreProtocolQuery::Introduction(identity) => {
-                let maybe_ident = NodeIdentity::from_base64(&identity.identity_key); 
-                match maybe_ident { 
-                    Ok(ident) => { 
-                        self.peer_identity = Some(ident);
-                        PreProtocolOutput::NoMessage
-                    }, 
-                    Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("{:?}", e))),
-                }
-            },
             PreProtocolQuery::SupportedProtocols => {
                 PreProtocolOutput::Reply(
                     PreProtocolReply::SupportedProtocols( SupportedProtocols {
                         supported_protocols: SUPPORTED_PROTOCOL_SET.clone(),
-                    })
-                )
-            },
-            PreProtocolQuery::RequestIdentity => {
-                PreProtocolOutput::Reply(
-                    PreProtocolReply::Identity(Introduction { 
-                        identity_key: self.our_identity.public.to_base64(),
-                        role: self.our_role.into(), // TODO when mirror-servers / CDN-type stuff is implemented - make this more flexible. 
-                        gestalt_engine_version: crate::ENGINE_VERSION,
                     })
                 )
             },
@@ -276,59 +234,55 @@ impl PreProtocolReceiver {
                     PreProtocolReply::Status(*SERVER_STATUS.clone().lock())
                 )
             },
-            PreProtocolQuery::RequestServerInfo => { 
-                PreProtocolOutput::Reply( 
-                    PreProtocolReply::ServerInfo(self.description.clone())
-                )
-            },
-            PreProtocolQuery::StartHandshake(start_handshake) => { 
-                self.peer_engine_version = Some(start_handshake.initiator_identity.gestalt_engine_version);
-                self.peer_role = Some(start_handshake.initiator_identity.role);
-
-                let maybe_ident = NodeIdentity::from_base64(&start_handshake.initiator_identity.identity_key); 
-                match maybe_ident { 
-                    Ok(ident) => { 
-                        self.peer_identity = Some(ident);
-                        if !self.state.is_in_handshake() { 
-                            let mut receiver_state = HandshakeReceiver::new(load_noise_local_keys(self.our_identity.public)?, self.our_identity);
-                            let out = receiver_state.advance(start_handshake.handshake, &ident, callback_different_key);
-                            match out { 
-                                Ok(HandshakeNext::SendMessage(message)) => { 
-                                    self.state = PreProtocolReceiverState::Handshake(receiver_state);
-                                    PreProtocolOutput::Reply(PreProtocolReply::Handshake(message))
-                                },
-                                Ok(HandshakeNext::Done) => return Err(PreProtocolError::NoReplyToStart),
-                                Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("{:?}",e))),
-                            }
-                        }
-                        else {
-                            PreProtocolOutput::Reply(PreProtocolReply::Err(format!("{:?}", PreProtocolError::HandshakeAlreadyStarted)))
-                        }
-                    }, 
-                    Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("{:?}", e))),
+            PreProtocolQuery::StartHandshake(start_handshake) => {
+                self.peer_role = Some(start_handshake.initiator_role);
+                if !self.state.is_in_handshake() {
+                    // For when noise keys changed. 
+                    let mismatch_reporter = self.mismatch_reporter.take().ok_or(HandshakeError::NoMismatchChannels)?; 
+                    let mismatch_approver = self.mismatch_approver.take().ok_or(HandshakeError::NoMismatchChannels)?; 
+                    let noise_dir = noise_protocol_dir(&self.protocol_dir);
+                    // Init the receiver state machine
+                    let mut receiver_state = HandshakeReceiver::new(
+                        noise_dir,
+                        load_noise_local_keys(self.protocol_dir.clone(), self.our_identity.public.clone()).await?, 
+                        self.our_identity.clone(), 
+                        mismatch_reporter, 
+                        mismatch_approver,
+                        );
+                    match receiver_state.advance(start_handshake.handshake).await { 
+                        Ok(HandshakeNext::SendMessage(message)) => { 
+                            self.state = PreProtocolReceiverState::Handshake(receiver_state);
+                            PreProtocolOutput::Reply(PreProtocolReply::Handshake(message))
+                        },
+                        Ok(HandshakeNext::Done) => return Err(PreProtocolError::NoReplyToStart),
+                        Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("Handshake error: {:?}",e))),
+                    }
+                    //Mutex guard should drop here.
+                }
+                else {
+                    PreProtocolOutput::Reply(PreProtocolReply::Err(format!("Handshake error: {:?}", PreProtocolError::HandshakeAlreadyStarted)))
                 }
             },
             PreProtocolQuery::Handshake(msg) => { 
                 trace!("Handshake step message received: {}", msg.handshake_step);
-                match &mut self.state { 
-                    PreProtocolReceiverState::Handshake(receiver) => { 
-                        let out = receiver.advance(msg, &self.peer_identity.unwrap(), callback_different_key);
-                        match out { 
+                match &mut self.state {
+                    PreProtocolReceiverState::Handshake(receiver) => {
+                        match receiver.advance(msg).await {
                             Ok(HandshakeNext::SendMessage(message)) => {
                                 trace!("Sending handshake step: {}", message.handshake_step);
                                 PreProtocolOutput::Reply(PreProtocolReply::Handshake(message))
                             },
                             // Receiver doesn't work this way.
                             Ok(HandshakeNext::Done) => unreachable!(),
-                            Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("{:?}",e))),
+                            Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("Handshake error: {:?}",e))),
                         }
                     },
-                    PreProtocolReceiverState::QueryAnswerer => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("{:?}", PreProtocolError::HandshakeMessageWithoutHandshakeStart)) ),
+                    PreProtocolReceiverState::QueryAnswerer => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("Handshake error: {:?}", PreProtocolError::HandshakeMessageWithoutHandshakeStart)) ),
                 }
             },
-            PreProtocolQuery::HandshakeFailed(err) => {
+            PreProtocolQuery::Err(err) => {
                 self.state = PreProtocolReceiverState::QueryAnswerer;
-                match &self.peer_identity {
+                match self.state.get_peer_identity() {
                     Some(ident) => error!("Remote party {:?} reported an error in the handshake process: {}", ident, err),
                     None => error!("Unidentified remote party reported an error in the handshake process: {}", err),
                 }
@@ -358,13 +312,22 @@ pub async fn read_preprotocol_message(stream: &mut TcpStream) -> Result<String, 
     Ok(String::from_utf8_lossy(&message_buf).to_string())
 }
 
-pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_role: SelfNetworkRole /* In most cases this will be Server for a receiver, but I want to leave it flexible. */, 
-        peer_address: SocketAddr, mut stream: TcpStream, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>) {
-    let mut receiver = PreProtocolReceiver::new(our_identity, our_role);
+// To be clear- this is still handling ONE session with one peer, this is not "the server".
+pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, 
+        our_role: SelfNetworkRole, /* In most cases this will be Server for a receiver, 
+            but I want to leave it flexible for possible future NAT hole-punching shenanigans.*/
+        peer_address: SocketAddr, 
+        mut stream: TcpStream, 
+        completed_channel: mpsc::UnboundedSender<SuccessfulConnect>,
+        protocol_dir: PathBuf,
+        mismatch_reporter: NewProtocolKeyReporter,
+        mismatch_approver: NewProtocolKeyApprover,
+        ) {
+    let mut receiver = PreProtocolReceiver::new(our_identity, our_role, protocol_dir, mismatch_reporter, mismatch_approver);
     while match read_preprotocol_message(&mut stream).await {
         Ok(msg) => match serde_json::from_str::<PreProtocolQuery>(&msg) { 
                 Ok(query) => {
-                    match receiver.receive_and_reply(query) {
+                    match receiver.receive_and_reply(query).await {
                         Ok(out) => match out {
                             PreProtocolOutput::Reply(to_send) => {
                                 let json_string = serde_json::to_string(&to_send).unwrap();
@@ -372,26 +335,24 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_rol
 
                                 match receiver.is_handshake_done() {
                                     true => {
-                                        let peer_identity =  receiver.peer_identity.unwrap().clone();
-                                        let (transport, seq, session_id) = receiver.complete_handshake().unwrap();
+                                        let (transport, seq, peer_identity, session_id) = receiver.complete_handshake().unwrap();
                                         info!("Successfully completed handshake with {}!", peer_identity.to_base64());
 
-                                        match (receiver.peer_role, receiver.peer_engine_version) { 
-                                            (Some(peer_role), Some(peer_engine_version)) => {
+                                        match receiver.peer_role { 
+                                            Some(peer_role) => {
                                             
                                                 let completed = SuccessfulConnect {
                                                     session_id,
                                                     peer_identity,
                                                     peer_address,
                                                     peer_role,
-                                                    peer_engine_version,
                                                     transport_cryptography: transport,
                                                     transport_counter: seq as u32,
                                                 };
                                                 
-                                                info!("A connection to this server was successfully made by client {}, running Gestalt v{}", completed.peer_identity.to_base64(), &completed.peer_engine_version);
+                                                info!("A connection to this server was successfully made by client {}", completed.peer_identity.to_base64());
                                                 completed_channel.send(completed).unwrap();
-                                                // Done with this part, stop sending. 
+                                                // Done with this part, stop sending.
                                                 false
                                             },
                                             _ => {
@@ -430,7 +391,7 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_rol
                 Err(e) => { 
                     error!("Error parsing PreProtocolQuery from json received from {}: {:?}", stream.peer_addr().unwrap(), e);
                     let reply = PreProtocolReply::Err(
-                        format!("Parsing error: {:?}", e)
+                        format!("Preprotocol parsing error: {:?}", e)
                     );
                     let json_string = serde_json::to_string(&reply).unwrap();
                     write_preprotocol_message( &json_string, &mut stream).await.unwrap();
@@ -440,7 +401,7 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_rol
             },
         Err(_) => {
             error!("Error getting message length from {}", stream.peer_addr().unwrap());
-            let reply = PreProtocolReply::Err(String::from("Error getting message length."));
+            let reply = PreProtocolReply::Err(String::from("Handshake error: Error getting message length."));
             let json_string = serde_json::to_string(&reply).unwrap();
             write_preprotocol_message( &json_string, &mut stream).await.unwrap();
 
@@ -451,12 +412,22 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair, our_rol
 }
 
 /// Spawns a thread which listens for pre-protocol connections on TCP.
-pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_address: Option<SocketAddr>, completed_channel: mpsc::UnboundedSender<SuccessfulConnect>, port: u16) { 
+pub async fn launch_preprotocol_listener<R, A>(our_identity: IdentityKeyPair, 
+        our_address: Option<SocketAddr>, 
+        completed_channel: mpsc::UnboundedSender<SuccessfulConnect>, 
+        port: u16,
+        protocol_dir: PathBuf, 
+        mismatch_report_channel: R,
+        mismatch_approver_channel: A)
+        where R: SenderChannel<NodeIdentity, Sender=NewProtocolKeyReporter>, 
+            A: ReceiverChannel<(NodeIdentity, bool), Receiver=NewProtocolKeyApprover>{ 
+
     let ip = match our_address { 
         Some(value) => value, 
         None => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
     };
     let listener = TcpListener::bind(ip).await.unwrap();
+
     loop {
         match listener.accept().await {
             Ok((stream, peer_address)) => {
@@ -464,7 +435,16 @@ pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_addr
                 let completed_channel_clone = completed_channel.clone();
                 tokio::spawn(
                     // connection succeeded
-                    preprotocol_receiver_session(our_identity,  SelfNetworkRole::Server, peer_address, stream, completed_channel_clone)
+                    preprotocol_receiver_session(
+                            our_identity,
+                            SelfNetworkRole::Server,
+                            peer_address,
+                            stream, 
+                            completed_channel_clone, 
+                            protocol_dir.clone(),
+                            mismatch_report_channel.sender_subscribe(), 
+                            mismatch_approver_channel.receiver_subscribe(),
+                    )
                 );
             },
             Err(e) => {
@@ -474,44 +454,22 @@ pub async fn launch_preprotocol_listener(our_identity: IdentityKeyPair, our_addr
     }
 }
 
-pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: IdentityKeyPair, our_role: SelfNetworkRole, server_address: SocketAddr) -> Result<SuccessfulConnect, HandshakeError> {
-    let callback_different_key = | node_identity: &NodeIdentity, _old_key: &[u8], _new_key: &[u8]| -> bool {
-        warn!("Protocol keys for {} have changed. Accepting new key.", node_identity.to_base64());
-        true
-    };
-
-    let introduction = Introduction {
-        identity_key: our_identity.public.to_base64(),
-        role: our_role.into(),
-        gestalt_engine_version: crate::ENGINE_VERSION,
-    };
-    // Exchange identities.
-    let query_introduce = PreProtocolQuery::Introduction(introduction.clone());
-    let json_query = serde_json::to_string(&query_introduce)?;
-    write_preprotocol_message(&json_query, stream).await?;
-
-    let query_request_identity = PreProtocolQuery::RequestIdentity;
-    let json_query = serde_json::to_string(&query_request_identity)?;
-    write_preprotocol_message(&json_query, stream).await?;
-    stream.flush().await?;
-
-    let msg = read_preprotocol_message(stream).await?;
-    let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
-    let server_introduction = if let PreProtocolReply::Identity(introduction) = reply { 
-        introduction
-    } else { 
-        return Err(HandshakeError::NoIdentity);
-    };
-    let server_identity = NodeIdentity::from_base64(&server_introduction.identity_key)?;
-    
-    
+pub async fn preprotocol_connect_inner(stream: &mut TcpStream, 
+        our_identity: IdentityKeyPair, 
+        our_role: SelfNetworkRole, 
+        protocol_dir: PathBuf,
+        server_address: SocketAddr,
+        report_mismatch: NewProtocolKeyReporter,
+        mismatch_approver: NewProtocolKeyApprover) -> Result<SuccessfulConnect, HandshakeError> {
     // Get protocols 
     let query_request_protocols = PreProtocolQuery::SupportedProtocols;
     let json_query = serde_json::to_string(&query_request_protocols)?;
-    write_preprotocol_message(&json_query, stream).await?;
-    stream.flush().await?;
+    write_preprotocol_message(&json_query, stream).await
+        .map_err(HandshakeError::NetIoError)?;
+    stream.flush().await.map_err(HandshakeError::NetIoError)?;
     
-    let msg = read_preprotocol_message(stream).await?;
+    let msg = read_preprotocol_message(stream).await
+        .map_err(HandshakeError::NetIoError)?;
     let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
     let server_protocols = if let PreProtocolReply::SupportedProtocols(protocols) = reply { 
         protocols.supported_protocols
@@ -528,20 +486,30 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: Ide
         return Err(HandshakeError::NoProtocolsInCommon);
     }
 
+    let noise_dir = noise_protocol_dir(&protocol_dir);
+
     // Send first handshake message.
-    let mut handshake_initiator = HandshakeIntitiator::new(load_noise_local_keys(our_identity.public)?, our_identity);
+    let mut handshake_initiator = HandshakeInitiator::new(
+        noise_dir, 
+        load_noise_local_keys(protocol_dir.clone(), 
+        our_identity.public).await?, 
+        our_identity, 
+        report_mismatch,
+        mismatch_approver);
     let handshake_first = handshake_initiator.send_first()?;
     let query = PreProtocolQuery::StartHandshake(StartHandshakeMsg{
         use_protocol: current_protocol,
-        initiator_identity: introduction,
         handshake: handshake_first,
+        initiator_role: NetworkRole::Client,
     });
     let json_query = serde_json::to_string(&query)?;
-    write_preprotocol_message(&json_query, stream).await?;
+    write_preprotocol_message(&json_query, stream).await
+        .map_err(HandshakeError::NetIoError)?;
     
     // Loop until we're done.
     while !handshake_initiator.is_done() {
-        let msg = read_preprotocol_message(stream).await?;
+        let msg = read_preprotocol_message(stream).await
+            .map_err(HandshakeError::NetIoError)?;
         trace!("Got a pre-protocol reply: {}", &msg);
         let reply = serde_json::from_str::<PreProtocolReply>(&msg)?;
         let handshake_step = if let PreProtocolReply::Handshake(step) = reply { 
@@ -550,11 +518,12 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: Ide
             return Err(HandshakeError::WrongOrder);
         };
 
-        match handshake_initiator.advance(handshake_step, &server_identity, callback_different_key)? {
+        match handshake_initiator.advance(handshake_step).await? {
             HandshakeNext::SendMessage(msg) => {
                 let query = PreProtocolQuery::Handshake(msg);
                 let json_query = serde_json::to_string(&query)?;
-                write_preprotocol_message(&json_query, stream).await?;
+                write_preprotocol_message(&json_query, stream).await
+                    .map_err(HandshakeError::NetIoError)?;
             },
             HandshakeNext::Done => break,
         }
@@ -562,7 +531,7 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: Ide
 
     // We should be done here! Let's go ahead and connect.
 
-    let (transport, counter, session_id) = handshake_initiator.complete()?;
+    let (transport, counter, server_identity, session_id) = handshake_initiator.complete()?;
 
     Ok(SuccessfulConnect{
         session_id,
@@ -570,24 +539,28 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream, our_identity: Ide
         peer_address: server_address,
         transport_cryptography: transport,
         transport_counter: counter as u32,
-        peer_role: server_introduction.role,
-        peer_engine_version: server_introduction.gestalt_engine_version,
+        peer_role: NetworkRole::Server,
     })
 }
 
-pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server_address: SocketAddr, connect_timeout: Duration) -> Result<SuccessfulConnect, HandshakeError> {
+pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, 
+        server_address: SocketAddr, 
+        connect_timeout: Duration,
+        protocol_dir: PathBuf,
+        report_mismatch: NewProtocolKeyReporter,
+        mismatch_approver: NewProtocolKeyApprover) -> Result<SuccessfulConnect, HandshakeError> {
     match tokio::time::timeout(connect_timeout, TcpStream::connect(&server_address)).await {
         Ok(Ok(mut stream)) => {
             // TODO figure out how connections where the initiator will be a non-client at some point
-            match preprotocol_connect_inner(&mut stream, our_identity, SelfNetworkRole::Client, server_address).await {
+            match preprotocol_connect_inner(&mut stream, our_identity, SelfNetworkRole::Client, protocol_dir, server_address, report_mismatch, mismatch_approver).await {
                 Ok(completed_connection) => {
-                    info!("Successfully initiated connection to a server with identity {}, running Gestalt v{}", completed_connection.peer_identity.to_base64(), &completed_connection.peer_engine_version);
+                    info!("Successfully initiated connection to a server with identity {}", completed_connection.peer_identity.to_base64());
                     stream.shutdown().await.unwrap();
                     Ok(completed_connection)
                 },
                 Err(error) => {
                     error!("Handshake error connecting to server: {:?}", error);
-                    let error_to_send = PreProtocolQuery::HandshakeFailed(format!("{:?}", error));
+                    let error_to_send = PreProtocolQuery::Err(format!("Handshake error: {:?}", error));
                     let json_error = serde_json::to_string(&error_to_send).unwrap();
                     write_preprotocol_message(&json_error, &mut stream).await.unwrap();
                     stream.shutdown().await.unwrap();
@@ -601,7 +574,7 @@ pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server
         },
         Ok(Err(e)) => { 
             error!("Could not initiate connection to server: {:?}", e);
-            Err(e.into())
+            Err(HandshakeError::NetIoError(e))
         },
     }
 }
@@ -610,7 +583,7 @@ pub async fn preprotocol_connect_to_server(our_identity: IdentityKeyPair, server
 pub mod test {
     use std::{time::Duration, net::Ipv6Addr};
     use tokio::sync::mpsc;
-    use crate::common::identity::IdentityKeyPair;
+    use crate::{common::identity::IdentityKeyPair, message::{BroadcastChannel, ReceiverChannel, SenderChannel}, net::handshake::approver_no_mismatch};
     use super::*;
 
     async fn find_available_port(range: std::ops::Range<u16>) -> Option<u16> { 
@@ -621,14 +594,24 @@ pub mod test {
             }
         }
         None
-    }  
- 
+    }
+    
     #[tokio::test(flavor = "multi_thread")]
     async fn preprotocol_connect_to_localhost() {
         use crate::net::test::NET_TEST_MUTEX;
         let _guard = NET_TEST_MUTEX.lock();
+        
+        let protocol_dir = tempfile::tempdir().unwrap();
 
-        // Find an available port 
+        //Mismatch approver stuff. 
+        let mismatch_report_channel = BroadcastChannel::new(1024); 
+        let mismatch_approve_channel = BroadcastChannel::new(1024);
+        let mismatch_report_receiver = mismatch_report_channel.receiver_subscribe();
+        let mismatch_approve_sender = mismatch_approve_channel.sender_subscribe();
+        // Spawn our little "explode if the key isn't new" system. 
+        tokio::spawn( approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender) );
+
+        // Find an available port
         let port = find_available_port(3223..4223).await.unwrap();
         
         let server_key_pair = IdentityKeyPair::generate_for_tests();
@@ -640,11 +623,23 @@ pub mod test {
         let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr.clone(), port);
         //Launch the server
-        tokio::spawn(launch_preprotocol_listener(server_key_pair, Some(server_socket_addr), serv_completed_sender, port));
+        tokio::spawn(launch_preprotocol_listener(server_key_pair, 
+            Some(server_socket_addr), 
+            serv_completed_sender, 
+            port,
+            PathBuf::from(protocol_dir.path()),
+            mismatch_report_channel.clone(),
+            mismatch_approve_channel.clone()));
         //Give it a moment
         tokio::time::sleep(Duration::from_millis(100)).await;
         //Try to connect
-        let client_connection = preprotocol_connect_to_server(client_key_pair, server_socket_addr, connect_timeout).await.unwrap();
+        let client_connection = preprotocol_connect_to_server(
+            client_key_pair, 
+            server_socket_addr, 
+            connect_timeout,
+            PathBuf::from(protocol_dir.path()),
+            mismatch_report_channel.sender_subscribe(), 
+            mismatch_approve_channel.receiver_subscribe()).await.unwrap();
         client_completed_sender.send(client_connection).unwrap();
     
         let success_timeout = Duration::from_secs(2);

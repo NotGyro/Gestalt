@@ -1,4 +1,5 @@
 use std::fs;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -16,10 +17,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::common::Version;
 use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
-use crate::message;
 use crate::message::QuitReadyNotifier;
 use crate::message::QuitReceiver;
 use crate::net::net_channels::net_send_channel;
@@ -56,7 +55,7 @@ const MAX_MESSAGE_SIZE: usize = 8192;
 
 /// Which directory holds temporary network protocol data? 
 /// I.e. Noise protocol keys, cached knowledge of "this identity is at this IP," etc. 
-pub fn protocol_store_dir() -> PathBuf {
+pub fn default_protocol_store_dir() -> PathBuf {
     const PROTOCOL_STORE_DIR: &str = "protocol/";
     let path = PathBuf::from(PROTOCOL_STORE_DIR);
     if !path.exists() {
@@ -71,8 +70,7 @@ pub struct SuccessfulConnect {
     pub session_id: SessionId,
     pub peer_identity: NodeIdentity,
     pub peer_address: SocketAddr,
-    pub peer_role: NetworkRole, 
-    pub peer_engine_version: Version,
+    pub peer_role: NetworkRole,
     pub transport_cryptography: StatelessTransportState,
     pub transport_counter: u32,
 }
@@ -88,7 +86,7 @@ impl SuccessfulConnect {
 const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
 const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
 
-pub struct NetworkSystem { 
+pub struct NetworkSystem {
     pub our_role: SelfNetworkRole,
     pub address: SocketAddr,
     pub new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
@@ -112,9 +110,10 @@ pub struct NetworkSystem {
     session_kill_from_outside: HashMap<FullSessionName, tokio::sync::oneshot::Sender<()>>,
     session_to_identity: HashMap<FullSessionName, NodeIdentity>,
     join_handles: Vec<JoinHandle<()>>,
+    client_to_server_sockets: HashMap<FullSessionName, UdpSocket>, 
 }
 
-impl NetworkSystem { 
+impl NetworkSystem {
     pub fn new(our_role: SelfNetworkRole,
             address: SocketAddr,
             new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
@@ -142,6 +141,7 @@ impl NetworkSystem {
             session_kill_from_outside: HashMap::default(),
             session_to_identity: HashMap::default(),
             join_handles: Vec::default(),
+            client_to_server_sockets: HashMap::default(),
         }
     }
     pub async fn add_new_session(&mut self, session_name: FullSessionName, connection: SuccessfulConnect) {
@@ -158,6 +158,7 @@ impl NetworkSystem {
                     self.laminar_config.clone(), 
                     self.push_sender.clone(), 
                     Instant::now());
+
                 // Make a channel 
                 let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
                 self.inbound_channels.insert(session_name, from_net_sender);
@@ -167,20 +168,37 @@ impl NetworkSystem {
 
                 let killer_clone = self.kill_from_inside_session_sender.clone();
                 self.session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
+
+                if self.our_role == SelfNetworkRole::Client { 
+                    // TODO: Error handling 
+                    let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).await.unwrap();
+                    socket.connect(session.get_session_name().peer_address.clone()).await.unwrap();
+                    self.client_to_server_sockets.insert(session.get_session_name(), socket);
+                }
+
                 let session_tick_interval = self.session_tick_interval.clone();
+                let our_role = self.our_role.clone();
                 let jh = tokio::spawn( async move {
-                    session.force_heartbeat().unwrap();
-                    handle_session(session, 
-                        from_net_receiver, 
-                        receiver, 
-                        session_tick_interval, 
-                        killer_clone, 
+                    // If this is a server, this may have been in anticipated_clients and so we need to record that we got a packet here, 
+                    // because this session is being constructed because we just got a packet from the client. 
+                    if our_role == SelfNetworkRole::Server { 
+                        session.laminar.connection_state.record_recv();
+                    }
+                    else if our_role == SelfNetworkRole::Client { 
+                        session.force_heartbeat().unwrap();
+                    }
+
+                    handle_session(session,
+                        from_net_receiver,
+                        receiver,
+                        session_tick_interval,
+                        killer_clone,
                         kill_from_outside_receiver).await
                 });
 
                 self.join_handles.push(jh);
             },
-            Err(e) => { 
+            Err(e) => {
                 error!("Error initializing new session: {:?}", e);
                 println!("Game-to-session-sender already registered for {}", connection.peer_identity.to_base64());
             }
@@ -200,7 +218,7 @@ impl NetworkSystem {
 
                 //Push
                 match self.our_role {
-                    SelfNetworkRole::Client => socket.send(&self.send_buf[0..encoded_len]).await.unwrap(),
+                    SelfNetworkRole::Client => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap(),
                     _ => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
                 };
             }
@@ -223,7 +241,8 @@ impl NetworkSystem {
         trace!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", self.local_identity.public.to_base64(), self.our_role, self.address);
         let socket = if self.our_role == SelfNetworkRole::Client {
             let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
-            socket.connect(self.address).await.unwrap();
+            self.address = socket.local_addr().unwrap();
+            //socket.connect(self.address).await.unwrap();
             socket
         }
         else {
@@ -236,7 +255,7 @@ impl NetworkSystem {
         info!("Registering {} NetMsgIds.", netmsg_table.len());
         for (id, msg_type) in netmsg_table.iter() {
             if self.our_role.should_we_ingest(&msg_type.sidedness) {
-                message::add_domain(&INBOUND_NET_MESSAGES, id);
+                INBOUND_NET_MESSAGES.add_domain(id);
             }
         }
 
@@ -247,7 +266,7 @@ impl NetworkSystem {
 
         loop {
             tokio::select!{
-                // A packet has been received. 
+                // A packet has been received.
                 received_maybe = (&socket).recv_from(&mut self.recv_buf) => {
                     // TODO: Better error handling later.
                     match received_maybe {
@@ -286,10 +305,7 @@ impl NetworkSystem {
                                         Vec::new()
                                     };
                                     sender.send(vec![OuterEnvelope {
-                                        session_id: FullSessionName { 
-                                            session_id, 
-                                            peer_address,
-                                        },
+                                        session_id: session_name.clone(),
                                         counter,
                                         ciphertext,
                                     }]).unwrap()
@@ -303,6 +319,7 @@ impl NetworkSystem {
                                         match self.anticipated_clients.remove(&partial_session_name) {
                                             Some(connection) => {
                                                 trace!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
+                                                trace!("Addr is {:?}", &session_name.peer_address);
                                                 //Communication with the rest of the engine.
                                                 let peer_identity = connection.peer_identity.clone();
                                                 self.add_new_session(session_name, connection).await;
@@ -344,9 +361,9 @@ impl NetworkSystem {
                             if e.raw_os_error() == Some(10054) {
                                 //An existing connection was forcibly closed by the remote host.
                                 //ignore - timeout will catch it.
-                                warn!("Bad disconnect, an existing connection was forcibly closed by the remote host.");
+                                warn!("Bad disconnect, an existing connection was forcibly closed by the remote host. Our role is: {:?}", &self.our_role);
                             }
-                            else { 
+                            else {
                                 // Do this twice to ensure it gets added to logs, as well as showing up in the panic message.
                                 error!("Error while polling for UDP packets: {:?}", e); 
                                 panic!("Error while polling for UDP packets: {:?}", e); 
@@ -357,15 +374,14 @@ impl NetworkSystem {
                 send_maybe = (&mut self.push_receiver).recv() => {
                     let to_send = send_maybe.unwrap();
                     for message in to_send {
-
                         let encoded_len = encode_outer_envelope(&message, &mut self.send_buf);
-
-                        //println!("Buffer is {} bytes long and we got to {}. Sending to {:?}", send_buf.len(), cursor+message_len, &message.session_id.peer_address);
+                        trace!("Sending {}-byte packet to {:?}", encoded_len, &message.session_id);
                         //Push
-                        match self.our_role {
-                            SelfNetworkRole::Client => socket.send(&self.send_buf[0..encoded_len]).await.unwrap(),
-                            _ => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
+                        let resl: Result<usize, std::io::Error> = match self.our_role {
+                            SelfNetworkRole::Client => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await,
+                            _ => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await
                         };
+                        trace!("{:?}", resl);
                         //TODO: Error handling here.
                     }
                 }
@@ -378,14 +394,10 @@ impl NetworkSystem {
                         }, 
                     };
                     
-                    info!("Setting up reliability-over-UDP and cryptographic session for peer {}, connecting from Gestalt engine version v{}", connection.peer_identity.to_base64(), &connection.peer_engine_version);
+                    info!("Setting up reliability-over-UDP and cryptographic session for peer {}", connection.peer_identity.to_base64());
 
                     let session_name = connection.get_full_session_name();
                     
-                    //local_identity: IdentityKeyPair, connection: SuccessfulConnect, laminar_config: &LaminarConfig, 
-                    //push_channel: PushSender, received_message_channels: HashMap<NetMsgId, NetMsgSender>, time: Instant
-                    //Todo: Senders.
-
                     if self.our_role == SelfNetworkRole::Server {
                         trace!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
                         net_channels::register_peer(&connection.peer_identity);
@@ -422,7 +434,6 @@ impl NetworkSystem {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -431,8 +442,12 @@ mod test {
     use std::net::Ipv6Addr;
 
     use crate::message;
+    use crate::message::BroadcastChannel;
     use crate::message::MessageSender;
+    use crate::message::ReceiverChannel;
+    use crate::message::SenderChannel;
     use crate::message_types::JoinDefaultEntry;
+    use crate::net::handshake::approver_no_mismatch;
     use crate::net::net_channels::net_recv_channel;
     use crate::net::net_channels::net_recv_channel::NetMsgReceiver;
 
@@ -468,16 +483,29 @@ mod test {
 
     #[tokio::test]
     async fn session_with_localhost() {
+        // Init stuff
         let mutex_guard = NET_TEST_MUTEX.lock().await;
-        let _log = TermLogger::init(LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
+        let _log = TermLogger::init(LevelFilter::Trace, simplelog::Config::default(), simplelog::TerminalMode::Mixed, simplelog::ColorChoice::Auto );
+        
+        let protocol_dir = tempfile::tempdir().unwrap();
 
         let server_key_pair = IdentityKeyPair::generate_for_tests();
         let client_key_pair = IdentityKeyPair::generate_for_tests();
         let (serv_completed_sender, serv_completed_receiver) = mpsc::unbounded_channel();
         let (client_completed_sender, client_completed_receiver) = mpsc::unbounded_channel();
+        
+        // Mismatch approver stuff.
+        let mismatch_report_channel: BroadcastChannel<NodeIdentity> = BroadcastChannel::new(1024); 
+        let mismatch_approve_channel: BroadcastChannel<(NodeIdentity, bool)> = BroadcastChannel::new(1024);
+        let mismatch_report_receiver = mismatch_report_channel.receiver_subscribe();
+        let mismatch_approve_sender = mismatch_approve_channel.sender_subscribe();
+        // Spawn our little "explode if the key isn't new" system. 
+        tokio::spawn( approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender) );
 
-        let port = find_available_udp_port(3223..4223).await.unwrap();
-
+        // Port/binding stuff. 
+        let port = find_available_udp_port(54134..54534).await.unwrap();
+        info!("Binding on port {}", port); 
+        
         let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr, port);
 
@@ -486,6 +514,7 @@ mod test {
         }).await.unwrap();
         println!("Counted {} registered NetMsg types.", test_table.len());
         
+        //Actually start doing the test here: 
         //Launch server
         let join_handle_s = tokio::spawn(
             async move {
@@ -499,13 +528,22 @@ mod test {
             }
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
-        let _join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(server_key_pair.clone(), Some(server_socket_addr), serv_completed_sender, port));
+        let _join_handle_handshake_listener = tokio::spawn(
+            launch_preprotocol_listener(server_key_pair.clone(), 
+                Some(server_socket_addr), 
+                serv_completed_sender, 
+                port,
+                PathBuf::from(protocol_dir.path()),
+                mismatch_report_channel.clone(), 
+                mismatch_approve_channel.clone()));
         tokio::time::sleep(Duration::from_millis(10)).await;
 
         //Launch client
         let join_handle_c = tokio::spawn(
-            async move { 
-                let mut sys = NetworkSystem::new(SelfNetworkRole::Client,  server_socket_addr, 
+            async move {
+                let mut sys = NetworkSystem::new(
+                    SelfNetworkRole::Client,  
+                    server_socket_addr, 
                     client_completed_receiver,
                     client_key_pair.clone(),
                     LaminarConfig::default(),
@@ -516,7 +554,10 @@ mod test {
         tokio::time::sleep(Duration::from_millis(10)).await;
         let client_completed_connection = preprotocol_connect_to_server(client_key_pair.clone(),
                 server_socket_addr,
-                Duration::new(5, 0) ).await.unwrap();
+                Duration::new(5, 0),
+                PathBuf::from(protocol_dir.path()),
+                mismatch_report_channel.sender_subscribe(), 
+                mismatch_approve_channel.receiver_subscribe()).await.unwrap();
         client_completed_sender.send(client_completed_connection).unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
 
@@ -529,7 +570,7 @@ mod test {
         };
         let client_to_server_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
         client_to_server_sender.send_one(test.clone()).unwrap();
-        info!("Attempting to send a message to {}", client_key_pair.public.to_base64());
+        info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
 
         {
             let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait()).await.unwrap().unwrap();
@@ -545,7 +586,7 @@ mod test {
             message: String::from("Beep!"), 
         };
         let message_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
-        info!("Attempting to send a message to {}", server_key_pair.public.to_base64());
+        info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
         message_sender.send_one(test_reply.clone()).unwrap();
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -560,7 +601,7 @@ mod test {
             assert_eq!(out.message, test_reply.message);
         }
 
-        message::send_one((), &message::START_QUIT).unwrap(); 
+        message::START_QUIT.send_one(()).unwrap(); 
         tokio::time::sleep(Duration::from_millis(100)).await;
         let _ = join_handle_s.abort();
         let _ = join_handle_c.abort();

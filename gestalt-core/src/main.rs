@@ -34,7 +34,7 @@ use std::{io::Write, path::PathBuf, net::{SocketAddr, IpAddr, Ipv6Addr}, time::D
 use log::{LevelFilter, info, error, warn};
 use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger, ConfigBuilder};
 
-use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version};
+use common::{identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys}, Version, message::*, identity::NodeIdentity};
 use std::collections::HashSet;
 use tokio::sync::mpsc;
 
@@ -51,7 +51,7 @@ use crate::{
         }, 
         SelfNetworkRole, 
         reliable_udp::LaminarConfig, 
-        NetworkSystem
+        NetworkSystem, default_protocol_store_dir
     }, 
     common::{
         identity::generate_local_keys
@@ -209,6 +209,25 @@ impl Default for ProgramArgs {
     }
 }
 
+pub async fn protocol_key_change_approver(mut receiver: BroadcastReceiver<NodeIdentity>, sender: BroadcastSender<(NodeIdentity, bool)>) {
+    loop {     
+        match receiver.recv_wait().await { 
+            Ok(idents) => for ident in idents {
+                warn!("Protocol key has changed for peer {:?} - most likely this is the same user \n\
+                    connecting with a new device, but it's possible it's an attempt to impersonate them.", 
+                    ident.to_base64());
+                //Approve implicitly.
+                //When GUI is a thing, we want this to generate a popup for clients. 
+                sender.send_one((ident.clone(), true)).unwrap();
+            },
+            Err(e) => panic!("Protocol key change approver channel died: {:?}", e), 
+        }
+    }
+}
+
+global_channel!(BroadcastChannel, PROTOCOL_KEY_REPORTER, NodeIdentity, 1024);
+global_channel!(BroadcastChannel, PROTOCOL_KEY_APPROVER, (NodeIdentity, bool), 1024);
+
 #[allow(unused_must_use)]
 fn main() {
     // Announce the engine launching, for our command-line friends. 
@@ -326,9 +345,18 @@ fn main() {
     };
 
     info!("Setting up channels.");
+    
+    async_runtime.spawn( 
+        protocol_key_change_approver(
+            PROTOCOL_KEY_REPORTER.receiver_subscribe(), 
+            PROTOCOL_KEY_APPROVER.sender_subscribe(), 
+        ) 
+    );
 
     let mut laminar_config = LaminarConfig::default();
     laminar_config.heartbeat_interval = Some(Duration::from_secs(1));
+
+    let protocol_store_dir = default_protocol_store_dir();
 
     if let Some( ArgumentMatch{ aliases: _, parameter: addr } ) = matches.get("--server") { 
         info!("Launching as server - parsing address.");
@@ -347,7 +375,16 @@ fn main() {
         };
 
         info!("Spawning preprotocol listener task.");
-        async_runtime.spawn(launch_preprotocol_listener(keys, None, connect_sender, 3223));
+        async_runtime.spawn(
+            launch_preprotocol_listener(keys, 
+                None, 
+                connect_sender, 
+                3223, 
+                protocol_store_dir, 
+                PROTOCOL_KEY_REPORTER.clone(),
+                PROTOCOL_KEY_APPROVER.clone()
+            )
+        );
 
         info!("Spawning network system task.");
         let keys_for_net = keys.clone();
@@ -440,8 +477,16 @@ fn main() {
                 sys.run().await
             }
         );
-        let completed = async_runtime.block_on(preprotocol_connect_to_server(keys, address, 
-                Duration::new(5, 0))).unwrap();
+        let completed = async_runtime.block_on(
+            preprotocol_connect_to_server(
+                keys, 
+                address, 
+                Duration::new(5, 0),
+                protocol_store_dir,
+                PROTOCOL_KEY_REPORTER.sender_subscribe(), 
+                PROTOCOL_KEY_APPROVER.receiver_subscribe(), 
+            )
+        ).unwrap();
         let server_identity = completed.peer_identity.clone();
         connect_sender.send(completed).unwrap();
 

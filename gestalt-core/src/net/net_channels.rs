@@ -1,12 +1,12 @@
 use std::{marker::PhantomData};
 
-use crate::{message::{MessageSender, BroadcastSender, SendError, self, BroadcastChannel, Message}, net::{InboundNetMsg, NetMsgDomain}, common::identity::NodeIdentity};
+use crate::{message::{MessageSender, BroadcastSender, SendError, BroadcastChannel, Message}, net::{InboundNetMsg, NetMsgDomain}, common::identity::NodeIdentity};
 
 use self::net_send_channel::PACKET_TO_SESSION;
 
 use super::{NetMsg, PacketIntermediary};
 
-pub struct NetSendChannel<T> where T: Send + NetMsg { 
+pub struct NetSendChannel<T> where T: Send + NetMsg {
     pub(in crate::net::net_channels) inner: BroadcastSender<PacketIntermediary>,
     //pub(in crate::net::net_channel) peer_addr: SocketAddr,
     _t: PhantomData<T>,
@@ -56,18 +56,17 @@ impl<T,R> MessageSender<T> for NetSendChannel<R> where T: Message + Into<R>, R: 
 pub mod net_send_channel { 
     use super::*;
 
-    use crate::{common::identity::NodeIdentity, message::{GlobalChannelError, SendError, sender_subscribe_domain, self, receiver_subscribe_domain, BroadcastReceiver, BroadcastChannel}};
+    use crate::{common::identity::NodeIdentity, message::{SendError, BroadcastReceiver, BroadcastChannel, DomainMessageSender, DomainSubscribeErr}};
 
     global_domain_channel!(BroadcastChannel, PACKET_TO_SESSION, PacketIntermediary, NodeIdentity, 4096);
 
     // Subscribe
-    pub fn subscribe_sender<T>(peer: &NodeIdentity) -> Result<NetSendChannel<T>, GlobalChannelError>
+    pub fn subscribe_sender<T>(peer: &NodeIdentity) -> Result<NetSendChannel<T>, DomainSubscribeErr<NodeIdentity>>
             where T: Clone + Send + NetMsg {
-        let intermediary = sender_subscribe_domain(&PACKET_TO_SESSION, peer)?;
-        Ok(NetSendChannel::new(intermediary))
+        Ok(NetSendChannel::new(PACKET_TO_SESSION.sender_subscribe(peer)?))
     }
-    pub(in crate::net) fn subscribe_receiver(peer: &NodeIdentity) -> Result<BroadcastReceiver<PacketIntermediary>, GlobalChannelError> {
-        receiver_subscribe_domain(&PACKET_TO_SESSION, peer)
+    pub(in crate::net) fn subscribe_receiver(peer: &NodeIdentity) -> Result<BroadcastReceiver<PacketIntermediary>, DomainSubscribeErr<NodeIdentity>> {
+        PACKET_TO_SESSION.receiver_subscribe(peer)
     }
 
     // Send helpers
@@ -77,7 +76,7 @@ pub mod net_send_channel {
         let packet = message.construct_packet()
             .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
             
-        message::send_to(packet, &PACKET_TO_SESSION, peer)
+        PACKET_TO_SESSION.send_one_to(packet, peer)
     }
 
     pub fn send_multi_to<T, V>(messages: V, peer: &NodeIdentity) -> Result<(), SendError>
@@ -88,14 +87,14 @@ pub mod net_send_channel {
                 .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
             packets.push(packet);
         }
-        message::send_multi_to(packets, &PACKET_TO_SESSION, peer)
+        PACKET_TO_SESSION.send_multi_to(packets, peer)
     }
 
     pub fn send_one_to_all<T>(message: T) -> Result<(), SendError>
             where T: NetMsg {
         let packet = message.construct_packet()
             .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
-        message::send_one_to_all(packet, &PACKET_TO_SESSION)
+        PACKET_TO_SESSION.send_one_to_all(packet)
     }
 
     pub fn send_multi_to_all<T, V>(messages: V) -> Result<(), SendError>
@@ -106,14 +105,14 @@ pub mod net_send_channel {
                 .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
             packets.push(packet);
         }
-        message::send_multi_to_all(packets, &PACKET_TO_SESSION)
+        PACKET_TO_SESSION.send_multi_to_all(packets)
     }
 
     pub fn send_one_to_all_except<T>(message: T, exclude: &NodeIdentity) -> Result<(), SendError>
             where T: NetMsg {
         let packet = message.construct_packet()
             .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
-        message::send_one_to_all_except(packet, &PACKET_TO_SESSION, exclude)
+        PACKET_TO_SESSION.send_one_to_all_except(packet, exclude)
     }
 
     pub fn send_multi_to_all_except<T, C, D, V>(messages: V, exclude: &NodeIdentity) -> Result<(), SendError> 
@@ -124,7 +123,7 @@ pub mod net_send_channel {
                 .map_err(|e| SendError::Encode(format!("Could not convert packet of type {} into a packet intermediary: {:?}", T::net_msg_name(), e)))?;
             packets.push(packet);
         }
-        message::send_multi_to_all_except(packets, &PACKET_TO_SESSION, exclude)
+        PACKET_TO_SESSION.send_multi_to_all_except(packets, exclude)
     }
 }
 
@@ -137,7 +136,7 @@ pub type InboundMsgSender = BroadcastSender<InboundNetMsg>;
 pub mod net_recv_channel {
     use std::marker::PhantomData;
 
-    use crate::{net::{InboundNetMsg, NetMsg, netmsg::NetMsgRecvError}, message::{BroadcastReceiver, GlobalChannelError, receiver_subscribe_domain, self, MessageReceiver, MessageReceiverAsync}, common::identity::NodeIdentity};
+    use crate::{net::{InboundNetMsg, NetMsg, netmsg::NetMsgRecvError, NetMsgId}, message::{BroadcastReceiver, MessageReceiver, MessageReceiverAsync, DomainSubscribeErr}, common::identity::NodeIdentity};
 
     use super::INBOUND_NET_MESSAGES;
 
@@ -187,19 +186,17 @@ pub mod net_recv_channel {
         }
     }
     
-    pub fn subscribe<T>() -> Result<NetMsgReceiver<T>, GlobalChannelError> where T: NetMsg {
-        //let domain = &(peer.clone(), );
-        message::add_domain(&INBOUND_NET_MESSAGES, &T::net_msg_id());
-        receiver_subscribe_domain(&INBOUND_NET_MESSAGES, &T::net_msg_id()).map(|inner| { 
+    pub fn subscribe<T>() -> Result<NetMsgReceiver<T>, DomainSubscribeErr<NetMsgId>> where T: NetMsg {
+        INBOUND_NET_MESSAGES.add_domain(&T::net_msg_id());
+        INBOUND_NET_MESSAGES.receiver_subscribe(&T::net_msg_id()).map(|inner| { 
             NetMsgReceiver::new(inner)
         })
     }
-    // TODO: Better system of net messge registration.
 }
 
 pub fn register_peer(peer: &NodeIdentity) { 
-    message::add_domain(&PACKET_TO_SESSION, peer);
+    PACKET_TO_SESSION.add_domain(peer);
 }
-pub fn drop_peer(peer: &NodeIdentity) { 
-    message::drop_domain(&PACKET_TO_SESSION, peer);
+pub fn drop_peer(peer: &NodeIdentity) {
+    PACKET_TO_SESSION.drop_domain(peer);
 }

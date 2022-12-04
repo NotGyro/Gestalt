@@ -13,7 +13,7 @@ use crate::{
         NetMsgId}, 
     message::{
         BroadcastReceiver, 
-        sender_subscribe_domain, MessageReceiverAsync
+        MessageReceiverAsync
     }, 
     common::{
         new_fast_hash_map, 
@@ -163,7 +163,7 @@ impl Session {
     fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut InboundMsgSender {
         self.inbound_channels.entry(domain).or_insert_with(|| {
             //add_domain(&INBOUND_NET_MESSAGES, &domain);
-            sender_subscribe_domain(&INBOUND_NET_MESSAGES, &domain).unwrap()
+            INBOUND_NET_MESSAGES.sender_subscribe(&domain).unwrap()
         })
     }
 
