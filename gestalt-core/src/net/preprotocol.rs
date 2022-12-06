@@ -181,7 +181,6 @@ pub struct PreProtocolReceiver {
     state: PreProtocolReceiverState,
     protocol_dir: PathBuf,
     our_identity: IdentityKeyPair,
-    our_role: SelfNetworkRole,
     peer_role: Option<NetworkRole>,
     mismatch_reporter: Option<NewProtocolKeyReporter>,
     mismatch_approver: Option<NewProtocolKeyApprover>,
@@ -189,16 +188,15 @@ pub struct PreProtocolReceiver {
 
 impl PreProtocolReceiver { 
     pub fn new(our_identity: IdentityKeyPair, 
-            role: SelfNetworkRole,
+            _role: SelfNetworkRole,
             protocol_dir: PathBuf,
             mismatch_reporter: NewProtocolKeyReporter,
             mismatch_approver: NewProtocolKeyApprover,
-        ) -> Self { 
+        ) -> Self {
         PreProtocolReceiver { 
             state: PreProtocolReceiverState::QueryAnswerer,
             protocol_dir,
             our_identity,
-            our_role: role,
             peer_role: None,
             mismatch_reporter: Some(mismatch_reporter),
             mismatch_approver: Some(mismatch_approver),
@@ -458,7 +456,7 @@ pub async fn launch_preprotocol_listener<R, A>(our_identity: IdentityKeyPair,
 
 pub async fn preprotocol_connect_inner(stream: &mut TcpStream, 
         our_identity: IdentityKeyPair, 
-        our_role: SelfNetworkRole, 
+        _our_role: SelfNetworkRole, 
         protocol_dir: PathBuf,
         server_address: SocketAddr,
         report_mismatch: NewProtocolKeyReporter,

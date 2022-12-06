@@ -122,6 +122,8 @@ pub enum SessionLayerError {
     UnrecognizedMsg(NetMsgId, String),
     #[error("A NetMessage of type {0} has been receved from {1}, but we are a {2:?} and this message's sidedness is a {3:?}.")]
     WrongSidedness(NetMsgId, String, SelfNetworkRole, MessageSidedness),
+    #[error("Counter for a session with {0:?} is at the maximum value for a 4-byte unsized integer!")]
+    ExhaustedCounter(SocketAddr),
 }
 
 pub type PushSender = mpsc::UnboundedSender<Vec<OuterEnvelope>>;
@@ -207,7 +209,7 @@ impl Session {
 
     /// Encrypts the raw byte blobs produced by Laminar and encloses them in an OuterEnvelope,  
     fn encrypt_packet<T: AsRef<[u8]>>(&mut self, plaintext: T) -> Result<OuterEnvelope, SessionLayerError> {
-        self.local_counter.checked_add(1);
+        self.local_counter.checked_add(1).ok_or(SessionLayerError::ExhaustedCounter(self.peer_address.clone()))?;
         let mut buffer = vec![0u8; ( (plaintext.as_ref().len() as usize) * 3) + 64 ];
         let len_written = self.transport_cryptography.write_message(self.local_counter.get() as u64, plaintext.as_ref(), &mut buffer)?;
         buffer.truncate(len_written);

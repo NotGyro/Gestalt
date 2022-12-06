@@ -1,18 +1,12 @@
 use std::fs;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
 use std::collections::HashMap;
-use futures::StreamExt;
-use futures::TryFutureExt;
-use futures::stream::FuturesUnordered;
 use log::error;
 use log::info;
 use log::trace;
@@ -92,8 +86,6 @@ impl SuccessfulConnect {
         }
     }
 }
-const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
-const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
 
 #[derive(thiserror::Error, Debug)]
 pub enum NetworkError {
@@ -144,7 +136,7 @@ impl NetworkSystem {
 
         let socket = match our_role {
             SelfNetworkRole::Server => UdpSocket::bind(address).await?,
-            SelfNetworkRole::Client => UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await?,
+            SelfNetworkRole::Client => UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).await?,
         };
 
         Ok(Self {
@@ -340,7 +332,7 @@ impl NetworkSystem {
                         Ok((len_read, peer_address)) => {
                             match OuterEnvelope::decode_packet(&self.recv_buf[..len_read], peer_address.clone()) {
                                 Err(OuterEnvelopeError::ZeroLengthCiphertext(addr)) => { 
-                                    warn!("Zero-length ciphertext received on a ciphertext message from {:?}. Possible bug.", peer_address);
+                                    warn!("Zero-length ciphertext received on a ciphertext message from {:?}. Possible bug.", addr);
                                 },
                                 Err(e) => { 
                                     error!("Error attempting to decode an OuterEnvelope that just came in off the UDP socket from {:?}: {:?}", peer_address, e);
@@ -357,7 +349,7 @@ impl NetworkSystem {
                                                         body: ciphertext_message
                                                     })).unwrap()
                                                 },
-                                                netmsg::EnvelopeBody::Protocol(protocol_message) => {
+                                                netmsg::EnvelopeBody::Protocol(_protocol_message) => {
                                                     //TODO - the switch to having protocol messages at all is pretty new and I'm working on it. 
                                                 },
                                             }
@@ -387,7 +379,7 @@ impl NetworkSystem {
                                                                                 body: ciphertext_message
                                                                             })).unwrap()
                                                                         },
-                                                                        netmsg::EnvelopeBody::Protocol(protocol_message) => {
+                                                                        netmsg::EnvelopeBody::Protocol(_protocol_message) => {
                                                                             //TODO - the switch to having protocol messages at all is pretty new and I'm working on it. 
                                                                         },
                                                                     }
@@ -540,7 +532,7 @@ mod test {
         let port = find_available_udp_port(54134..54534).await.unwrap();
         info!("Binding on port {}", port); 
         
-        let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr, port);
 
         let test_table = tokio::task::spawn_blocking(|| { 

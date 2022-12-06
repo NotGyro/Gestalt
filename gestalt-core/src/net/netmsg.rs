@@ -163,13 +163,13 @@ pub enum ProtocolMessageError {
 /// Any message internal to the network system (not used by / propagatated through to the game engine).
 #[derive(Debug, Clone)]
 pub enum ProtocolMessage { 
-    Disconnect = 0,
+    Todo = 0,
 }
 
 impl ProtocolMessage { 
     pub fn encode(&self, send_buf: &mut [u8]) -> Result<usize, ProtocolMessageError> {
         match self {
-            ProtocolMessage::Disconnect => {
+            ProtocolMessage::Todo => {
                 if send_buf.len() == 0 {
                     return Err(ProtocolMessageError::NotEnoughBuffer(0, 1))
                 }
@@ -184,7 +184,7 @@ impl ProtocolMessage {
         }
         let variant = recv_buf[0];
         match variant {
-            0 => Ok((Self::Disconnect, 1)),
+            0 => Ok((Self::Todo, 1)),
             _ => Err(ProtocolMessageError::UnrecognizedType(variant)),
         }
     }
