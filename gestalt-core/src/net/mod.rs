@@ -95,91 +95,6 @@ impl SuccessfulConnect {
 const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
 const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
 
-enum SocketSet {
-    /// This node is a server and it has one socket in a listen mode. 
-    Server(UdpSocket),
-    /// This node is a client and it has many sockets, one for each server, 
-    /// in a connect mode. (This shouldn't be terribly different for UDP but
-    /// something about the way the socket is initialized screws it up if
-    /// we try to act as a listen-mode UDP server when we're behind a NAT). 
-    Client(HashMap<SocketAddr, UdpSocket>),
-}
-
-impl SocketSet {
-    pub async fn new(our_role: SelfNetworkRole, our_address: SocketAddr) -> std::io::Result<Self> { 
-        match our_role {
-            SelfNetworkRole::Server => Ok(
-                Self::Server(
-                    UdpSocket::bind(our_address).await?
-                )
-            ),
-            SelfNetworkRole::Client => Ok(Self::Client(HashMap::new())),
-        }
-    }
-    pub async fn add_new_peer<A: ToSocketAddrs>(&mut self, peer: A) -> std::io::Result<()> {
-        match self {
-            SocketSet::Server(_socket) => Ok(()) /* no operation, we should be in listen mode */,
-            SocketSet::Client(servers) => {
-                for server_address in peer.to_socket_addrs()? { 
-                    trace!("Attempting to initialize client socket to connect to server {:?}", &server_address);             
-                    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await?;
-                    socket.connect(server_address).await?;
-                    info!("Connected as a client to server {:?} - our address is {:?}", socket.peer_addr(), socket.local_addr());
-                    servers.insert(server_address, socket);
-                }
-                Ok(())
-            },
-        }
-    }
-    pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], recipient: A) -> std::io::Result<usize> { 
-        let mut running_tally: usize = 0; // Most likely this will only ever be one address but just in case.
-        match self {
-            SocketSet::Server(socket) => {
-                for peer in recipient.to_socket_addrs()? { 
-                    running_tally += socket.send_to(buf, peer).await?;
-                }
-                Ok(running_tally)
-            }
-            SocketSet::Client(servers) => { 
-                for peer in recipient.to_socket_addrs()? { 
-                    match servers.get(&peer) {
-                        Some(socket) => running_tally += socket.send(buf).await?,
-                        None => {
-                            return Err(std::io::Error::from(std::io::ErrorKind::NotConnected));
-                        },
-                    }
-                }
-                Ok(running_tally)
-            },
-        }
-    }
-    pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> { 
-        match self {
-            SocketSet::Server(socket) => { 
-                socket.recv_from(buf).await
-            },
-            SocketSet::Client(servers) => {
-                if servers.is_empty() { 
-                    return Err(std::io::Error::from(std::io::ErrorKind::NotConnected));
-                }
-                //Here is where things get complicated.
-                //Generate an unordered list of futures finding which socket is currently ready to be read from. 
-                let mut future_set: FuturesUnordered<_> = servers.iter().map( | (addr, socket) | { 
-                    socket.readable().map_ok( |_v| addr.clone() )
-                }).collect();
-                //Grab the first socket we're ready to read from
-                //The future set should not be empty, per the above check, so it's safe to unrwap the option. 
-                let which_ready = future_set.next().await.unwrap()?;
-                // Drop these futures so &servers is no longer borrowed. 
-                drop(future_set);
-                // Actually receive some data. 
-                let socket = servers.get(&which_ready).unwrap();
-                socket.recv(buf).await.map(|bytes_read| (bytes_read, which_ready) )
-            },
-        }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum NetworkError {
     #[error("Error encountered encoding or decoding an outer envelope: {0:?}")]
@@ -192,7 +107,7 @@ pub enum NetworkError {
 
 pub struct NetworkSystem {
     pub our_role: SelfNetworkRole,
-    socket: SocketSet,
+    socket: UdpSocket,
     pub new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
     pub local_identity: IdentityKeyPair,
     pub laminar_config: LaminarConfig,
@@ -227,7 +142,11 @@ impl NetworkSystem {
         let (push_sender, push_receiver): (PushSender, PushReceiver) = mpsc::unbounded_channel(); 
         let (kill_from_inside_session_sender, kill_from_inside_session_receiver) = mpsc::unbounded_channel::<(FullSessionName, Vec<SessionLayerError>)>();
 
-        let socket = SocketSet::new(our_role, address).await?;
+        let socket = match our_role {
+            SelfNetworkRole::Server => UdpSocket::bind(address).await?,
+            SelfNetworkRole::Client => UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await?,
+        };
+
         Ok(Self {
             our_role,
             socket,
@@ -250,8 +169,6 @@ impl NetworkSystem {
     }
     pub async fn add_new_session(&mut self, actual_address: FullSessionName, connection: SuccessfulConnect) -> std::io::Result<()> {
         trace!("Attempting to add connection for {:?} with transport counter {}", &actual_address.peer_address, &connection.transport_counter);
-        // On a server this will do nothing and on a client this will actually initialize the socket.
-        self.socket.add_new_peer(actual_address.peer_address.clone()).await?;
 
         //Communication with the rest of the engine.
         net_channels::register_peer(&connection.peer_identity);
@@ -418,7 +335,7 @@ impl NetworkSystem {
                     }
                 }
                 // A packet has been received.
-                received_maybe = (&mut self.socket).recv(&mut self.recv_buf) => {
+                received_maybe = (&mut self.socket).recv_from(&mut self.recv_buf) => {
                     match received_maybe {
                         Ok((len_read, peer_address)) => {
                             match OuterEnvelope::decode_packet(&self.recv_buf[..len_read], peer_address.clone()) {
