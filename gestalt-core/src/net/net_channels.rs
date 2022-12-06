@@ -128,10 +128,13 @@ pub mod net_send_channel {
 }
 
 pub const NET_MSG_CHANNEL_CAPACITY: usize = 1024;
-
 global_domain_channel!(BroadcastChannel, INBOUND_NET_MESSAGES, InboundNetMsg, NetMsgDomain, NET_MSG_CHANNEL_CAPACITY);
 
 pub type InboundMsgSender = BroadcastSender<InboundNetMsg>; 
+
+pub const CONNECTION_READY_CAPACITY: usize = 1024;
+
+global_channel!(BroadcastChannel, CONNECTED, NodeIdentity, CONNECTION_READY_CAPACITY);
 
 pub mod net_recv_channel {
     use std::marker::PhantomData;

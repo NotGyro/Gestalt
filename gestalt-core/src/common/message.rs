@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{TryFutureExt, Future};
-use log::{error, info};
+use log::{error, info, trace};
 use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::broadcast;
 
@@ -489,6 +489,7 @@ pub struct QuitReadyNotifier {
 
 impl QuitReadyNotifier {
     pub fn notify_ready(self) {
+        trace!("Sending quit-ready notification.");
         let _ = self.inner.send_one(());
     }
 }
@@ -513,10 +514,10 @@ impl QuitReceiver {
     }
 }
 
-
 /// Causes the engine to quit and then wait for as many READY_FOR_SHUTDOWN responses as there are START_SHUTDOWN receivers
 /// Only errors if the initial message to start a shutdown cannot start.
-pub async fn quit_game(deadline: Duration) -> Result<(), SendError> { 
+pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
+    let mut ready_receiver = READY_FOR_QUIT.receiver_subscribe();
     START_QUIT.send_one(())?;
     let num_receivers = START_QUIT.receiver_count();
 
@@ -524,13 +525,17 @@ pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 
     let mut timeout_future = Box::pin(tokio::time::sleep(deadline));
 
-    let mut ready_receiver = READY_FOR_QUIT.receiver_subscribe();
+    let mut count_received = 0;
     
-    for _num_readies_received in 0..num_receivers { 
+    while count_received < num_receivers { 
         tokio::select!{
             replies_maybe = ready_receiver.recv_wait() => { 
                 match replies_maybe { 
-                    Ok(_) => { /* A good reply, continue on */ }
+                    Ok(v) => {
+                        let count = v.len();  
+                        trace!("Received {} quit ready notifications.", count);
+                        count_received += count;
+                    }
                     Err(e) => {
                         error!("Error polling for READY_FOR_QUIT messages, exiting immediately. Error was: {:?}", e);
                         return Ok(());

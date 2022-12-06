@@ -19,8 +19,9 @@ use tokio::task::JoinHandle;
 
 use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
-use crate::message::QuitReadyNotifier;
+use crate::message::MessageSender;
 use crate::message::QuitReceiver;
+use crate::net::net_channels::CONNECTED;
 use crate::net::net_channels::net_send_channel;
 
 //pub const PREPROTCOL_PORT: u16 = 54134;
@@ -166,7 +167,8 @@ impl NetworkSystem {
         net_channels::register_peer(&connection.peer_identity);
         match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
             Ok(receiver) => {
-                trace!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
+                let peer_identity = connection.peer_identity.clone(); 
+                trace!("Sender channel successfully registered for {}", peer_identity.to_base64());
                 // Construct the session
                 let mut session = Session::new(self.local_identity.clone(), 
                     self.our_role,
@@ -207,6 +209,8 @@ impl NetworkSystem {
                 });
 
                 self.join_handles.push(jh);
+                // Let the rest of the engine know we're connected now. 
+                CONNECTED.send_one(peer_identity).unwrap();
             },
             Err(e) => {
                 error!("Error initializing new session: {:?}", e);
@@ -215,7 +219,7 @@ impl NetworkSystem {
         }
         Ok(())
     }
-    pub async fn shutdown(&mut self, quit_ready_indicator: QuitReadyNotifier) { 
+    pub async fn shutdown(&mut self) { 
         // Notify sessions we're done.
         for (peer_address, _) in self.inbound_channels.iter() { 
             let peer_ident = self.session_to_identity.get(&peer_address).unwrap();
@@ -249,7 +253,7 @@ impl NetworkSystem {
             jh.abort();
             let _ = jh;
         }
-        quit_ready_indicator.notify_ready();
+        info!("Network system should be safe to shut down.");
     }
     pub async fn wait_for_ready(&mut self) -> Result<(), NetworkError> {
         match (self.our_role, self.inbound_channels.len()) { 
@@ -454,7 +458,8 @@ impl NetworkSystem {
                 }
                 quit_ready_indicator = quit_reciever.wait_for_quit() => {
                     info!("Shutting down network system.");
-                    self.shutdown(quit_ready_indicator.clone()).await;
+                    self.shutdown().await;
+                    quit_ready_indicator.notify_ready();
                     break;
                 }
             }
@@ -467,11 +472,14 @@ mod test {
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
 
-    use crate::message;
     use crate::message::BroadcastChannel;
+    use crate::message::MessageReceiverAsync;
     use crate::message::MessageSender;
     use crate::message::ReceiverChannel;
+    use crate::message::ReceiverCount;
+    use crate::message::START_QUIT;
     use crate::message::SenderChannel;
+    use crate::message::quit_game;
     use crate::message_types::JoinDefaultEntry;
     use crate::net::handshake::approver_no_mismatch;
     use crate::net::net_channels::net_recv_channel;
@@ -530,7 +538,7 @@ mod test {
 
         // Port/binding stuff. 
         let port = find_available_udp_port(54134..54534).await.unwrap();
-        info!("Binding on port {}", port); 
+        info!("Binding on port {}", port);
         
         let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
         let server_socket_addr = SocketAddr::new(server_addr, port);
@@ -540,6 +548,8 @@ mod test {
         }).await.unwrap();
         println!("Counted {} registered NetMsg types.", test_table.len());
         
+        let mut connected_notifier = CONNECTED.receiver_subscribe();
+
         //Actually start doing the test here: 
         //Launch server
         let join_handle_s = tokio::spawn(
@@ -553,7 +563,6 @@ mod test {
                 sys.run().await
             }
         );
-        tokio::time::sleep(Duration::from_millis(10)).await;
         //Server's preprotocol listener
         let _join_handle_handshake_listener = tokio::spawn(
             launch_preprotocol_listener(server_key_pair.clone(), 
@@ -563,7 +572,6 @@ mod test {
                 PathBuf::from(protocol_dir.path()),
                 mismatch_report_channel.clone(), 
                 mismatch_approve_channel.clone()));
-        tokio::time::sleep(Duration::from_millis(10)).await;
 
         //Launch client
         let join_handle_c = tokio::spawn(
@@ -578,7 +586,6 @@ mod test {
                 sys.run().await
             }
         );
-        tokio::time::sleep(Duration::from_millis(10)).await;
         let client_completed_connection = preprotocol_connect_to_server(client_key_pair.clone(),
                 server_socket_addr,
                 Duration::new(5, 0),
@@ -586,7 +593,9 @@ mod test {
                 mismatch_report_channel.sender_subscribe(), 
                 mismatch_approve_channel.receiver_subscribe()).await.unwrap();
         client_completed_sender.send(client_completed_connection).unwrap();
-        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let connected_peer = connected_notifier.recv_wait().await.unwrap();
+        assert!(connected_peer.contains(&server_key_pair.public));
 
         net_send_channel::send_to(JoinDefaultEntry{ display_name: "test".to_string()}, &server_key_pair.public ).unwrap();
 
@@ -616,8 +625,6 @@ mod test {
         info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
         server_to_client_sender.send_one(test_reply.clone()).unwrap();
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
         {
             let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait()).await.unwrap().unwrap();
             let (peer_ident, out) = out.first().unwrap().clone();
@@ -628,8 +635,8 @@ mod test {
             assert_eq!(out.message, test_reply.message);
         }
 
-        message::START_QUIT.send_one(()).unwrap(); 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        quit_game(Duration::from_millis(500)).await.unwrap();
+
         let _ = join_handle_s.abort();
         let _ = join_handle_c.abort();
         let _ = join_handle_s.await;
