@@ -7,7 +7,6 @@ use tokio::{time::MissedTickBehavior, sync::mpsc};
 
 use crate::{
     net::{
-        MessageCounter, 
         DISCONNECT_RESERVED, 
         InboundNetMsg, 
         NetMsgId}, 
@@ -41,7 +40,7 @@ use super::{
         InboundMsgSender
     },
     NetMsgDomain, 
-    netmsg::MessageSidedness
+    netmsg::{MessageSidedness, CiphertextMessage, EnvelopeBody, CiphertextEnvelope}, MessageCounter
 };
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -143,7 +142,7 @@ pub struct Session {
     
     pub session_id: SessionId,
     /// Counter we put on outgoing `OuterEnvelope`s, should increase monotonically.
-    pub local_counter: u32,
+    pub local_counter: MessageCounter,
     pub transport_cryptography: snow::StatelessTransportState, 
     
     /// Channel the Session uses to send packets to the UDP socket
@@ -177,10 +176,10 @@ impl Session {
             let (id, info) = v;
             if local_role.should_we_ingest(&info.sidedness) { 
                 Some(*id)
-            } else { 
+            } else {
                 None
             }
-        }) { 
+        }) {
             valid_incoming_messages.insert(id);
         }
 
@@ -191,7 +190,7 @@ impl Session {
             peer_identity: connection.peer_identity,
             peer_address,
             session_id: connection.session_id,
-            local_counter: connection.transport_counter,
+            local_counter: MessageCounter::new(connection.transport_counter).unwrap(),
             transport_cryptography: connection.transport_cryptography,
             push_channel,
             inbound_channels: new_fast_hash_map(),
@@ -208,37 +207,46 @@ impl Session {
 
     /// Encrypts the raw byte blobs produced by Laminar and encloses them in an OuterEnvelope,  
     fn encrypt_packet<T: AsRef<[u8]>>(&mut self, plaintext: T) -> Result<OuterEnvelope, SessionLayerError> {
-        self.local_counter += 1;
+        self.local_counter.checked_add(1);
         let mut buffer = vec![0u8; ( (plaintext.as_ref().len() as usize) * 3) + 64 ];
-        let len_written = self.transport_cryptography.write_message(self.local_counter as u64, plaintext.as_ref(), &mut buffer)?;
+        let len_written = self.transport_cryptography.write_message(self.local_counter.get() as u64, plaintext.as_ref(), &mut buffer)?;
         buffer.truncate(len_written);
         let full_session_name = self.get_session_name();
         Ok(
             OuterEnvelope {
-                session_id: full_session_name,
-                counter: self.local_counter,
-                ciphertext: buffer,
+                session: full_session_name,
+                body: EnvelopeBody::Ciphertext(
+                    CiphertextMessage {
+                        counter: self.local_counter,
+                        ciphertext: buffer.to_vec(),
+                    }
+                )
             }
         )
     }
 
     /// Called inside process_inbound()
-    fn decrypt_outer_envelope(&mut self, envelope: OuterEnvelope) -> Result<Vec<u8>, SessionLayerError> {
-        let OuterEnvelope{ session_id: _session_id, counter, ciphertext } = envelope;
+    fn decrypt_envelope(&mut self, envelope: CiphertextEnvelope) -> Result<Vec<u8>, SessionLayerError> {
+        let CiphertextEnvelope{ session: _session_id, 
+            body: CiphertextMessage { 
+                counter, 
+                ciphertext 
+            }
+        } = envelope;
 
         let mut buf = vec![0u8; (ciphertext.len() * 3)/2];
-        let len_read = self.transport_cryptography.read_message(counter as u64, &ciphertext, &mut buf)?;
+        let len_read = self.transport_cryptography.read_message(counter.get() as u64, &ciphertext, &mut buf)?;
         buf.truncate(len_read);
         Ok(buf)
     }
 
     /// Ingests a batch of packets coming off the wire.
-    pub fn ingest_packets<T: IntoIterator< Item=OuterEnvelope >>(&mut self, inbound_messages: T, time: Instant) -> Vec<SessionLayerError> {
+    pub fn ingest_packets<T: IntoIterator< Item=CiphertextEnvelope >>(&mut self, inbound_messages: T, time: Instant) -> Vec<SessionLayerError> {
         let mut errors: Vec<SessionLayerError> = Vec::default();
 
         let mut batch: Vec<Vec<u8>> = Vec::default();
         for envelope in inbound_messages.into_iter() {
-            match self.decrypt_outer_envelope(envelope) {
+            match self.decrypt_envelope(envelope) {
                 Ok(packet_contents) => batch.push(packet_contents),
                 Err(e) => errors.push(e),
             }
@@ -375,7 +383,7 @@ impl Session {
     }
 
     /// Adds Laminar connection logic to messages that we are sending. 
-    pub fn process_outbound<T: IntoIterator< Item=laminar::Packet >>(&mut self, outbound_messages: T, time: Instant)  -> Result<(), SessionLayerError> {
+    pub fn process_outbound<T: IntoIterator< Item=laminar::Packet >>(&mut self, outbound_messages: T, time: Instant) -> Result<(), SessionLayerError> {
         let mut errors: Vec<SessionLayerError> = Vec::default();
         match self.laminar.process_outbound(outbound_messages, time) {
             Ok(()) => {},
@@ -430,7 +438,7 @@ impl Session {
 /// * `session_tick` - Interval between times we examine if we should send heartbeat packets, resend lost packets, etc.  
 ///
 pub async fn handle_session(mut session_manager: Session,
-                        mut incoming_packets: mpsc::UnboundedReceiver<Vec<OuterEnvelope>>,
+                        mut incoming_packets: mpsc::UnboundedReceiver<Vec<CiphertextEnvelope>>,
                         mut from_game: BroadcastReceiver<PacketIntermediary>,
                         session_tick: Duration,
                         kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
@@ -508,36 +516,4 @@ pub async fn handle_session(mut session_manager: Session,
         }
     }
     //error!("A session manager for a session between {} (us) and {} (peer) has stopped looping.", session_manager.local_identity.public.to_base64(), session_manager.peer_identity.to_base64());
-}
-
-// Each packet on the wire:
-// [- 4 bytes session ID -------------------------------]  
-// [- 4 bytes message counter --------------------------]
-// [- 1-9 bytes vu64 bytes encoding ciphertext size, n -]
-// [- n bytes ciphertext -------------------------------]
-
-pub fn encode_outer_envelope(message: &OuterEnvelope, send_buf: &mut [u8]) -> usize {
-    const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
-    const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
-    let message_len = message.ciphertext.len();
-    let encoded_len = vu64::encode(message_len as u64);
-
-    let len_tag_bytes: &[u8] = encoded_len.as_ref();
-
-    let mut cursor = 0;
-    let session_id = message.session_id.session_id.clone();
-
-    send_buf[cursor..cursor+SESSION_ID_LEN].copy_from_slice(&session_id);
-    cursor += SESSION_ID_LEN;
-    
-    send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&message.counter.to_le_bytes());
-    cursor += COUNTER_LEN;
-    
-    send_buf[cursor..cursor+len_tag_bytes.len()].copy_from_slice(len_tag_bytes);
-    cursor += len_tag_bytes.len();
-
-    //Header done, now write the data.
-    send_buf[cursor..cursor+message_len].copy_from_slice(&message.ciphertext);
-    cursor += message_len;
-    cursor
 }

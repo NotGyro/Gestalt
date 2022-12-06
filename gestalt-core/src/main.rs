@@ -395,7 +395,7 @@ fn main() {
                 connect_receiver,
                 keys_for_net,
                 laminar_config,
-                Duration::from_millis(25));
+                Duration::from_millis(25)).await.unwrap();
                 sys.run().await
             }
         );
@@ -473,7 +473,7 @@ fn main() {
                     connect_receiver,
                     keys_for_net, 
                     laminar_config,
-                    Duration::from_millis(25) );
+                    Duration::from_millis(25) ).await.unwrap();
                 sys.run().await
             }
         );

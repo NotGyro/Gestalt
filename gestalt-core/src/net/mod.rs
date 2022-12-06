@@ -1,12 +1,18 @@
 use std::fs;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
 use std::collections::HashMap;
+use futures::StreamExt;
+use futures::TryFutureExt;
+use futures::stream::FuturesUnordered;
 use log::error;
 use log::info;
 use log::trace;
@@ -46,10 +52,13 @@ pub use netmsg::InboundNetMsg as InboundNetMsg;
 pub use netmsg::DISCONNECT_RESERVED as DISCONNECT_RESERVED;
 
 use self::net_channels::INBOUND_NET_MESSAGES;
+use self::netmsg::CiphertextEnvelope;
+use self::netmsg::OuterEnvelopeError;
 use self::reliable_udp::*;
 use self::session::*;
 
-pub type MessageCounter = u32;
+pub type MessageCounterInit = u32;
+pub type MessageCounter = NonZeroU32;
 
 const MAX_MESSAGE_SIZE: usize = 8192;
 
@@ -86,9 +95,104 @@ impl SuccessfulConnect {
 const SESSION_ID_LEN: usize = std::mem::size_of::<SessionId>();
 const COUNTER_LEN: usize = std::mem::size_of::<MessageCounter>();
 
+enum SocketSet {
+    /// This node is a server and it has one socket in a listen mode. 
+    Server(UdpSocket),
+    /// This node is a client and it has many sockets, one for each server, 
+    /// in a connect mode. (This shouldn't be terribly different for UDP but
+    /// something about the way the socket is initialized screws it up if
+    /// we try to act as a listen-mode UDP server when we're behind a NAT). 
+    Client(HashMap<SocketAddr, UdpSocket>),
+}
+
+impl SocketSet {
+    pub async fn new(our_role: SelfNetworkRole, our_address: SocketAddr) -> std::io::Result<Self> { 
+        match our_role {
+            SelfNetworkRole::Server => Ok(
+                Self::Server(
+                    UdpSocket::bind(our_address).await?
+                )
+            ),
+            SelfNetworkRole::Client => Ok(Self::Client(HashMap::new())),
+        }
+    }
+    pub async fn add_new_peer<A: ToSocketAddrs>(&mut self, peer: A) -> std::io::Result<()> {
+        match self {
+            SocketSet::Server(_socket) => Ok(()) /* no operation, we should be in listen mode */,
+            SocketSet::Client(servers) => {
+                for server_address in peer.to_socket_addrs()? { 
+                    trace!("Attempting to initialize client socket to connect to server {:?}", &server_address);             
+                    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await?;
+                    socket.connect(server_address).await?;
+                    info!("Connected as a client to server {:?} - our address is {:?}", socket.peer_addr(), socket.local_addr());
+                    servers.insert(server_address, socket);
+                }
+                Ok(())
+            },
+        }
+    }
+    pub async fn send_to<A: ToSocketAddrs>(&self, buf: &[u8], recipient: A) -> std::io::Result<usize> { 
+        let mut running_tally: usize = 0; // Most likely this will only ever be one address but just in case.
+        match self {
+            SocketSet::Server(socket) => {
+                for peer in recipient.to_socket_addrs()? { 
+                    running_tally += socket.send_to(buf, peer).await?;
+                }
+                Ok(running_tally)
+            }
+            SocketSet::Client(servers) => { 
+                for peer in recipient.to_socket_addrs()? { 
+                    match servers.get(&peer) {
+                        Some(socket) => running_tally += socket.send(buf).await?,
+                        None => {
+                            return Err(std::io::Error::from(std::io::ErrorKind::NotConnected));
+                        },
+                    }
+                }
+                Ok(running_tally)
+            },
+        }
+    }
+    pub async fn recv(&self, buf: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> { 
+        match self {
+            SocketSet::Server(socket) => { 
+                socket.recv_from(buf).await
+            },
+            SocketSet::Client(servers) => {
+                if servers.is_empty() { 
+                    return Err(std::io::Error::from(std::io::ErrorKind::NotConnected));
+                }
+                //Here is where things get complicated.
+                //Generate an unordered list of futures finding which socket is currently ready to be read from. 
+                let mut future_set: FuturesUnordered<_> = servers.iter().map( | (addr, socket) | { 
+                    socket.readable().map_ok( |_v| addr.clone() )
+                }).collect();
+                //Grab the first socket we're ready to read from
+                //The future set should not be empty, per the above check, so it's safe to unrwap the option. 
+                let which_ready = future_set.next().await.unwrap()?;
+                // Drop these futures so &servers is no longer borrowed. 
+                drop(future_set);
+                // Actually receive some data. 
+                let socket = servers.get(&which_ready).unwrap();
+                socket.recv(buf).await.map(|bytes_read| (bytes_read, which_ready) )
+            },
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum NetworkError {
+    #[error("Error encountered encoding or decoding an outer envelope: {0:?}")]
+    OuterEnvelope(#[from] OuterEnvelopeError),
+    #[error("IO Error: {0}.")]
+    IoError(#[from] std::io::Error),
+    #[error("Channel for new connections has been closed, cannot receive new connections.")]
+    NoNewConnectionsChannel,
+}
+
 pub struct NetworkSystem {
     pub our_role: SelfNetworkRole,
-    pub address: SocketAddr,
+    socket: SocketSet,
     pub new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
     pub local_identity: IdentityKeyPair,
     pub laminar_config: LaminarConfig,
@@ -97,12 +201,12 @@ pub struct NetworkSystem {
     anticipated_clients: HashMap<PartialSessionName, SuccessfulConnect>,
     recv_buf: Vec<u8>,
     send_buf: Vec<u8>,
-    push_sender: PushSender, 
-    push_receiver: PushReceiver, 
+    push_sender: PushSender,
+    push_receiver: PushReceiver,
     /// One receiver for each session. Messages come into this UDP handler from sessions, and we have to send them.
     /// Remember, "Multiple producer single receiver." This is the single receiver.
     /// Per-session channels for routing incoming UDP packets to sessions.
-    inbound_channels: HashMap<FullSessionName, mpsc::UnboundedSender<Vec<OuterEnvelope>>>,
+    inbound_channels: HashMap<FullSessionName, mpsc::UnboundedSender<Vec<CiphertextEnvelope>>>,
     /// This is how the session objects let us know it's their time to go. 
     kill_from_inside_session_sender: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
     kill_from_inside_session_receiver: mpsc::UnboundedReceiver<(FullSessionName, Vec<SessionLayerError>)>,
@@ -110,22 +214,23 @@ pub struct NetworkSystem {
     session_kill_from_outside: HashMap<FullSessionName, tokio::sync::oneshot::Sender<()>>,
     session_to_identity: HashMap<FullSessionName, NodeIdentity>,
     join_handles: Vec<JoinHandle<()>>,
-    client_to_server_sockets: HashMap<FullSessionName, UdpSocket>, 
 }
 
 impl NetworkSystem {
-    pub fn new(our_role: SelfNetworkRole,
+    pub async fn new(our_role: SelfNetworkRole,
             address: SocketAddr,
             new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
             local_identity: IdentityKeyPair,
             laminar_config: LaminarConfig,
-            session_tick_interval: Duration) -> Self { 
+            session_tick_interval: Duration) -> Result<Self, std::io::Error> { 
         
         let (push_sender, push_receiver): (PushSender, PushReceiver) = mpsc::unbounded_channel(); 
         let (kill_from_inside_session_sender, kill_from_inside_session_receiver) = mpsc::unbounded_channel::<(FullSessionName, Vec<SessionLayerError>)>();
-        Self {
+
+        let socket = SocketSet::new(our_role, address).await?;
+        Ok(Self {
             our_role,
-            address,
+            socket,
             new_connections,
             local_identity,
             laminar_config,
@@ -141,10 +246,13 @@ impl NetworkSystem {
             session_kill_from_outside: HashMap::default(),
             session_to_identity: HashMap::default(),
             join_handles: Vec::default(),
-            client_to_server_sockets: HashMap::default(),
-        }
+        })
     }
-    pub async fn add_new_session(&mut self, session_name: FullSessionName, connection: SuccessfulConnect) {
+    pub async fn add_new_session(&mut self, actual_address: FullSessionName, connection: SuccessfulConnect) -> std::io::Result<()> {
+        trace!("Attempting to add connection for {:?} with transport counter {}", &actual_address.peer_address, &connection.transport_counter);
+        // On a server this will do nothing and on a client this will actually initialize the socket.
+        self.socket.add_new_peer(actual_address.peer_address.clone()).await?;
+
         //Communication with the rest of the engine.
         net_channels::register_peer(&connection.peer_identity);
         match net_send_channel::subscribe_receiver(&connection.peer_identity) { 
@@ -152,29 +260,22 @@ impl NetworkSystem {
                 trace!("Sender channel successfully registered for {}", connection.peer_identity.to_base64());
                 // Construct the session
                 let mut session = Session::new(self.local_identity.clone(), 
-                    self.our_role, 
-                    connection.peer_address, 
-                    connection, 
-                    self.laminar_config.clone(), 
-                    self.push_sender.clone(), 
+                    self.our_role,
+                    actual_address.peer_address,
+                    connection,
+                    self.laminar_config.clone(),
+                    self.push_sender.clone(),
                     Instant::now());
 
                 // Make a channel 
                 let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
-                self.inbound_channels.insert(session_name, from_net_sender);
+                self.inbound_channels.insert(actual_address, from_net_sender);
 
                 let (kill_from_outside_sender, kill_from_outside_receiver) = tokio::sync::oneshot::channel::<()>();
                 self.session_kill_from_outside.insert(session.get_session_name(), kill_from_outside_sender);
 
                 let killer_clone = self.kill_from_inside_session_sender.clone();
                 self.session_to_identity.insert(session.get_session_name(), session.peer_identity.clone());
-
-                if self.our_role == SelfNetworkRole::Client { 
-                    // TODO: Error handling 
-                    let socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).await.unwrap();
-                    socket.connect(session.get_session_name().peer_address.clone()).await.unwrap();
-                    self.client_to_server_sockets.insert(session.get_session_name(), socket);
-                }
 
                 let session_tick_interval = self.session_tick_interval.clone();
                 let our_role = self.our_role.clone();
@@ -203,8 +304,9 @@ impl NetworkSystem {
                 println!("Game-to-session-sender already registered for {}", connection.peer_identity.to_base64());
             }
         }
+        Ok(())
     }
-    pub async fn shutdown(&mut self, socket: &UdpSocket, quit_ready_indicator: QuitReadyNotifier) { 
+    pub async fn shutdown(&mut self, quit_ready_indicator: QuitReadyNotifier) { 
         // Notify sessions we're done.
         for (peer_address, _) in self.inbound_channels.iter() { 
             let peer_ident = self.session_to_identity.get(&peer_address).unwrap();
@@ -214,13 +316,17 @@ impl NetworkSystem {
         // Clear out remaining messages.
         while let Ok(messages) = (&mut self.push_receiver).try_recv() {
             for message in messages {
-                let encoded_len = encode_outer_envelope(&message, &mut self.send_buf);
-
-                //Push
-                match self.our_role {
-                    SelfNetworkRole::Client => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap(),
-                    _ => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await.unwrap()
-                };
+                match message.encode(&mut self.send_buf) {
+                    Ok(len_written) => {
+                        //Push
+                        match self.our_role {
+                            SelfNetworkRole::Client => self.socket.send_to(&self.send_buf[0..len_written], message.session.peer_address).await.unwrap(),
+                            _ => self.socket.send_to(&self.send_buf[0..len_written], message.session.peer_address).await.unwrap()
+                        };
+                    },
+                    Err(e) => error!("Encountered an encoding error while trying to shut shut down the network system: {:?} \n\
+                                                        Since we are shutting down anyway, continuing to flush other remaining messages.", e),
+                }
             }
         }
         let nuke: Vec<_> = self.session_kill_from_outside.drain().collect();
@@ -236,19 +342,35 @@ impl NetworkSystem {
         }
         quit_ready_indicator.notify_ready();
     }
-        
-    pub async fn run(&mut self) {
-        trace!("Initializing network subsystem for {:?}, which is a {:?}. Attempting to bind to socket on {:?}", self.local_identity.public.to_base64(), self.our_role, self.address);
-        let socket = if self.our_role == SelfNetworkRole::Client {
-            let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await.unwrap();
-            self.address = socket.local_addr().unwrap();
-            //socket.connect(self.address).await.unwrap();
-            socket
+    pub async fn wait_for_ready(&mut self) -> Result<(), NetworkError> {
+        match (self.our_role, self.inbound_channels.len()) { 
+            // We're a client (i.e. not listening) and have no connections yet, 
+            // make sure we are connected so we don't try to receive from nobody. 
+            (SelfNetworkRole::Client, 0) => {
+                let connection = match self.new_connections.recv().await { 
+                    Some(conn) => conn, 
+                    None => {
+                        error!("Channel for new connections closed.");
+                        return Err(NetworkError::NoNewConnectionsChannel);
+                    }, 
+                };
+                
+                info!("Setting up reliability-over-UDP and cryptographic session for peer {}", connection.peer_identity.to_base64());
+
+                let session_name = connection.get_full_session_name();
+                
+                self.add_new_session(session_name, connection).await.unwrap();
+
+                Ok(())
+            }
+            // Every other case leads to a normal receive. 
+            _ => { 
+                Ok(())
+            }
         }
-        else {
-            UdpSocket::bind(self.address).await.unwrap()
-        };
-        trace!("Bound network subsystem to a socket at: {:?}. We are a {:?}", socket.local_addr().unwrap(), self.our_role);
+    }
+    pub async fn run(&mut self) {
+        trace!("Initializing network subsystem for {:?}, which is a {:?}.", self.local_identity.public.to_base64(), self.our_role);
 
         // Register all valid NetMsgs. 
         let netmsg_table = generated::get_netmsg_table(); 
@@ -260,131 +382,16 @@ impl NetworkSystem {
         }
 
         info!("Network system initialized.");
-        trace!("Network system init - our role is {:?}, our address is {:?}, and our identity is {}", &self.our_role, &socket.local_addr(), self.local_identity.public.to_base64());
+        trace!("Network system init - our role is {:?}, and our identity is {}", &self.our_role, self.local_identity.public.to_base64());
 
         let mut quit_reciever = QuitReceiver::new();
 
+        //If we are a client, make sure there's at least one session going before polling for anything. 
+        //Otherwise silly things will happen, like attempting to receive on a channel that doesn't exist. 
+        self.wait_for_ready().await.unwrap();
+
         loop {
             tokio::select!{
-                // A packet has been received.
-                received_maybe = (&socket).recv_from(&mut self.recv_buf) => {
-                    // TODO: Better error handling later.
-                    match received_maybe {
-                        Ok((len_read, peer_address)) => {
-                            assert!(len_read >= SESSION_ID_LEN + COUNTER_LEN + 1);
-                            let mut session_id = [0u8; SESSION_ID_LEN];
-                            let mut counter_bytes = [0u8; COUNTER_LEN];
-
-                            // Start by reading the session ID
-                            let mut cursor = 0;
-                            session_id.copy_from_slice(&self.recv_buf[cursor..cursor+SESSION_ID_LEN]);
-                            cursor += SESSION_ID_LEN;
-
-                            // Now, read our sequence number (counter / Noise protocol nonce)
-                            counter_bytes.copy_from_slice(&self.recv_buf[cursor..cursor+COUNTER_LEN]);
-                            cursor += COUNTER_LEN;
-                            
-                            let counter = MessageCounter::from_le_bytes(counter_bytes);
-
-                            let first_length_tag_byte: u8 = self.recv_buf[cursor];
-                            //Get the length of the vu64 length tag from the first byte.
-                            let lenlen = vu64::decoded_len(first_length_tag_byte) as usize;
-                            let message_length = vu64::decode(&self.recv_buf[cursor..cursor+lenlen]).unwrap(); //TODO: Error handling. 
-                            cursor += lenlen;
-
-                            let session_name = FullSessionName {
-                                peer_address,
-                                session_id,
-                            };
-                            match self.inbound_channels.get(&session_name) {
-                                Some(sender) => {
-                                    let ciphertext = if message_length > 0 {
-                                        (&self.recv_buf[cursor..cursor+message_length as usize]).to_vec()
-                                    } else { 
-                                        warn!("Zero-length message on session {:?}", &session_name);
-                                        Vec::new()
-                                    };
-                                    sender.send(vec![OuterEnvelope {
-                                        session_id: session_name.clone(),
-                                        counter,
-                                        ciphertext,
-                                    }]).unwrap()
-                                },
-                                None => {
-                                    if self.our_role == SelfNetworkRole::Server {
-                                        let partial_session_name = PartialSessionName {
-                                            peer_address: peer_address.ip(),
-                                            session_id,
-                                        };
-                                        match self.anticipated_clients.remove(&partial_session_name) {
-                                            Some(connection) => {
-                                                trace!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
-                                                trace!("Addr is {:?}", &session_name.peer_address);
-                                                //Communication with the rest of the engine.
-                                                let peer_identity = connection.peer_identity.clone();
-                                                self.add_new_session(session_name, connection).await;
-
-                                                // Push the message we just got from the rest of the engine out to the network. 
-                                                if let Some(sender) = self.inbound_channels.get(&session_name) {                                                    
-                                                    let ciphertext = if message_length > 0 {
-                                                        (&self.recv_buf[cursor..cursor+message_length as usize]).to_vec()
-                                                    } else {
-                                                        warn!("Zero-length message on session {:?}", &session_name);
-                                                        Vec::new()
-                                                    };
-                                                    sender.send(vec![OuterEnvelope {
-                                                        session_id: FullSessionName { 
-                                                            session_id, 
-                                                            peer_address,
-                                                        },
-                                                        counter,
-                                                        ciphertext,
-                                                    }]).unwrap();
-                                                }
-                                                else {
-                                                    error!("Could not send message to newly-connected peer {}", peer_identity.to_base64());
-                                                }
-                                            },
-                                            None => {
-                                                error!("No session established yet for {:?}", &session_name);
-                                            },
-                                        }
-                                    }
-                                    else {
-                                        // TODO: Retain messages in case we run into problems.
-                                        error!("No session established yet for {:?}", &session_name);
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => { 
-                            if e.raw_os_error() == Some(10054) {
-                                //An existing connection was forcibly closed by the remote host.
-                                //ignore - timeout will catch it.
-                                warn!("Bad disconnect, an existing connection was forcibly closed by the remote host. Our role is: {:?}", &self.our_role);
-                            }
-                            else {
-                                // Do this twice to ensure it gets added to logs, as well as showing up in the panic message.
-                                error!("Error while polling for UDP packets: {:?}", e); 
-                                panic!("Error while polling for UDP packets: {:?}", e); 
-                            }
-                        }
-                    }
-                }
-                send_maybe = (&mut self.push_receiver).recv() => {
-                    let to_send = send_maybe.unwrap();
-                    for message in to_send {
-                        let encoded_len = encode_outer_envelope(&message, &mut self.send_buf);
-                        trace!("Sending {}-byte packet to {:?}", encoded_len, &message.session_id);
-                        //Push
-                        let resl: Result<usize, std::io::Error> = match self.our_role {
-                            SelfNetworkRole::Client => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await,
-                            _ => socket.send_to(&self.send_buf[0..encoded_len], message.session_id.peer_address).await
-                        };
-                        trace!("{:?}", resl);
-                        //TODO: Error handling here.
-                    }
-                }
                 new_connection_maybe = (&mut self.new_connections).recv() => {
                     let connection = match new_connection_maybe { 
                         Some(conn) => conn, 
@@ -407,7 +414,117 @@ impl NetworkSystem {
                         }, connection);
                     }
                     else {
-                        self.add_new_session(session_name, connection).await;
+                        self.add_new_session(session_name, connection).await.unwrap();
+                    }
+                }
+                // A packet has been received.
+                received_maybe = (&mut self.socket).recv(&mut self.recv_buf) => {
+                    match received_maybe {
+                        Ok((len_read, peer_address)) => {
+                            match OuterEnvelope::decode_packet(&self.recv_buf[..len_read], peer_address.clone()) {
+                                Err(OuterEnvelopeError::ZeroLengthCiphertext(addr)) => { 
+                                    warn!("Zero-length ciphertext received on a ciphertext message from {:?}. Possible bug.", peer_address);
+                                },
+                                Err(e) => { 
+                                    error!("Error attempting to decode an OuterEnvelope that just came in off the UDP socket from {:?}: {:?}", peer_address, e);
+                                }
+                                Ok((message, len_message)) => { 
+                                    assert_eq!(len_read, len_message); //TODO: Figure out if the socket will ever act in a way which breaks this assumption. 
+                                    let OuterEnvelope{session: session_name, body: message_body} = message; 
+                                    match self.inbound_channels.get(&message.session) {
+                                        Some(sender) => {
+                                            match message_body {
+                                                netmsg::EnvelopeBody::Ciphertext(ciphertext_message) => {
+                                                    sender.send(vec!(CiphertextEnvelope{ 
+                                                        session: session_name, 
+                                                        body: ciphertext_message
+                                                    })).unwrap()
+                                                },
+                                                netmsg::EnvelopeBody::Protocol(protocol_message) => {
+                                                    //TODO - the switch to having protocol messages at all is pretty new and I'm working on it. 
+                                                },
+                                            }
+                                        },
+                                        None => {
+                                            if self.our_role == SelfNetworkRole::Server {
+                                                // Reconstruct the partial session name so we can do a lookup with it. 
+                                                let partial_session_name = PartialSessionName {
+                                                    peer_address: peer_address.ip(),
+                                                    session_id: session_name.session_id,
+                                                };
+                                                //Did we have an anticipated client with this partial session name?
+                                                match self.anticipated_clients.remove(&partial_session_name) {
+                                                    Some(connection) => {
+                                                        trace!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
+                                                        trace!("Addr is {:?}", &session_name.peer_address);
+                    
+                                                        let peer_identity = connection.peer_identity.clone();
+                                                        match self.add_new_session(session_name, connection).await { 
+                                                            Ok(()) => {
+                                                                // Push the message we just got from the rest of the engine out to the network. 
+                                                                if let Some(sender) = self.inbound_channels.get(&session_name) {         
+                                                                    match message_body {
+                                                                        netmsg::EnvelopeBody::Ciphertext(ciphertext_message) => {
+                                                                            sender.send(vec!(CiphertextEnvelope{ 
+                                                                                session: session_name, 
+                                                                                body: ciphertext_message
+                                                                            })).unwrap()
+                                                                        },
+                                                                        netmsg::EnvelopeBody::Protocol(protocol_message) => {
+                                                                            //TODO - the switch to having protocol messages at all is pretty new and I'm working on it. 
+                                                                        },
+                                                                    }
+                                                                }
+                                                                else {
+                                                                    error!("Could not send message to newly-connected peer {}", peer_identity.to_base64());
+                                                                }
+                                                            },
+                                                            Err(e) => { 
+                                                                error!("Error adding a new session incoming from {:?}: {:?}", peer_address, e);
+                                                            }
+                                                        }
+                                                    },
+                                                    None => {
+                                                        error!("No session established yet for {:?}", &session_name);
+                                                    },
+                                                }
+                                            }
+                                            else {
+                                                // TODO: Retain messages in case we run into problems.
+                                                error!("No session established yet for {:?}", &session_name);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => { 
+                            if e.raw_os_error() == Some(10054) {
+                                //An existing connection was forcibly closed by the remote host.
+                                //ignore - timeout will catch it.
+                                warn!("Bad disconnect, an existing connection was forcibly closed by the remote host. Our role is: {:?}", &self.our_role);
+                            }
+                            else {
+                                error!("Error attempting to read from UDP socket: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                send_maybe = (&mut self.push_receiver).recv() => {
+                    let to_send = send_maybe.unwrap();
+                    for message in to_send {
+                        match message.encode(&mut self.send_buf) {
+                            Ok(encoded_len) => {
+                                trace!("Sending {}-byte packet to {:?}", encoded_len, &message.session);
+                                //Push
+                                let resl: Result<usize, std::io::Error> = match self.our_role {
+                                    SelfNetworkRole::Client => self.socket.send_to(&self.send_buf[0..encoded_len], message.session.peer_address).await,
+                                    _ => self.socket.send_to(&self.send_buf[0..encoded_len], message.session.peer_address).await
+                                };
+                                trace!("{:?}", resl);
+                            },
+                            Err(e) => error!("Error encountered encoding an outer envelope: {:?}", e),
+                        }
                     }
                 }
                 // Has one of our sessions failed or disconnected? 
@@ -428,7 +545,7 @@ impl NetworkSystem {
                 }
                 quit_ready_indicator = quit_reciever.wait_for_quit() => {
                     info!("Shutting down network system.");
-                    self.shutdown(&socket, quit_ready_indicator.clone()).await;
+                    self.shutdown(quit_ready_indicator.clone()).await;
                     break;
                 }
             }
@@ -523,11 +640,12 @@ mod test {
                     serv_completed_receiver,
                     server_key_pair.clone(),
                     LaminarConfig::default(),
-                    Duration::from_millis(50));
+                    Duration::from_millis(50)).await.unwrap();
                 sys.run().await
             }
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
+        //Server's preprotocol listener
         let _join_handle_handshake_listener = tokio::spawn(
             launch_preprotocol_listener(server_key_pair.clone(), 
                 Some(server_socket_addr), 
@@ -547,7 +665,7 @@ mod test {
                     client_completed_receiver,
                     client_key_pair.clone(),
                     LaminarConfig::default(),
-                    Duration::from_millis(50));
+                    Duration::from_millis(50)).await.unwrap();
                 sys.run().await
             }
         );
@@ -570,7 +688,7 @@ mod test {
         };
         let client_to_server_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
         client_to_server_sender.send_one(test.clone()).unwrap();
-        info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
+        info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
 
         {
             let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait()).await.unwrap().unwrap();
@@ -585,9 +703,9 @@ mod test {
         let test_reply = TestNetMsg { 
             message: String::from("Beep!"), 
         };
-        let message_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
-        info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
-        message_sender.send_one(test_reply.clone()).unwrap();
+        let server_to_client_sender: NetSendChannel<TestNetMsg> = net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
+        info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
+        server_to_client_sender.send_one(test_reply.clone()).unwrap();
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 

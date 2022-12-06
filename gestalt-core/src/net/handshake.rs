@@ -14,7 +14,7 @@ use crate::common::{identity::NodeIdentity, Version};
 use crate::message::{BroadcastSender, BroadcastReceiver, MessageSender, MessageReceiverAsync};
 use lazy_static::lazy_static;
 
-use super::{SessionId, MessageCounter};
+use super::{SessionId, MessageCounterInit};
 use super::preprotocol::HandshakeStepMessage;
 
 pub const PROTOCOL_VERSION: Version = version!(1,0,0);
@@ -497,7 +497,7 @@ pub async fn receive_last_noise(mut state: snow::HandshakeState,
         our_gestalt_identity: NodeIdentity,
         report_mismatch: NewProtocolKeyReporter,
         mismatch_approver: NewProtocolKeyApprover)
-        -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter, NodeIdentity, Vec<u8>), HandshakeError> { 
+        -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounterInit, NodeIdentity, Vec<u8>), HandshakeError> { 
     if input.handshake_step == 3 {
         let bytes_input = base64::decode(input.data)?;
         let mut read_buf = [0u8; 1024];
@@ -559,7 +559,7 @@ pub async fn receive_last_noise(mut state: snow::HandshakeState,
     }
 }
 /// Receive step 4 message, produce step 5 message.
-pub fn initiator_sign_buf(state: snow::StatelessTransportState, input: HandshakeStepMessage, their_key: &NodeIdentity, our_keys: &IdentityKeyPair, handshake_hash: &Vec<u8>) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter), HandshakeError> { 
+pub fn initiator_sign_buf(state: snow::StatelessTransportState, input: HandshakeStepMessage, their_key: &NodeIdentity, our_keys: &IdentityKeyPair, handshake_hash: &Vec<u8>) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounterInit), HandshakeError> { 
     if input.handshake_step == 4 {
         let bytes_input = base64::decode(input.data)?;
         let mut read_buf = [0u8; 65535];
@@ -632,7 +632,7 @@ pub fn initiator_sign_buf(state: snow::StatelessTransportState, input: Handshake
     }
 } 
 /// Receive step 5 message, produce step 6 message.
-pub fn responder_sign(state: snow::StatelessTransportState, input: HandshakeStepMessage, our_keys: &IdentityKeyPair, peer_identity: &NodeIdentity, our_challenge: String, handshake_hash: &Vec<u8>) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, MessageCounter), HandshakeError> { 
+pub fn responder_sign(state: snow::StatelessTransportState, input: HandshakeStepMessage, our_keys: &IdentityKeyPair, peer_identity: &NodeIdentity, our_challenge: String, handshake_hash: &Vec<u8>) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, MessageCounterInit), HandshakeError> { 
     if input.handshake_step == 5 {
         let bytes_input = base64::decode(input.data)?;
         let mut read_buf = [0u8; 65535];
@@ -700,7 +700,7 @@ pub fn responder_sign(state: snow::StatelessTransportState, input: HandshakeStep
     }
 }
 /// Receive step 6 message, ending handshake.
-pub fn initiator_final(state: snow::StatelessTransportState, input: HandshakeStepMessage, peer_identity: &NodeIdentity, our_challenge: String) -> Result<(snow::StatelessTransportState, MessageCounter), HandshakeError> { 
+pub fn initiator_final(state: snow::StatelessTransportState, input: HandshakeStepMessage, peer_identity: &NodeIdentity, our_challenge: String) -> Result<(snow::StatelessTransportState, MessageCounterInit), HandshakeError> { 
     if input.handshake_step == 6 {
         let bytes_input = base64::decode(input.data)?;
         let mut read_buf = [0u8; 65535];
@@ -725,8 +725,8 @@ pub enum HandshakeIntitiatorState {
     Init, 
     SentFirstAwaitSecond(snow::HandshakeState),
     SentThirdAwaitFourth(snow::StatelessTransportState, NodeIdentity, Vec<u8>),
-    SentFifthAwaitSixth(snow::StatelessTransportState, String, MessageCounter, NodeIdentity, Vec<u8>),
-    Done(snow::StatelessTransportState, MessageCounter, NodeIdentity, Vec<u8>),
+    SentFifthAwaitSixth(snow::StatelessTransportState, String, MessageCounterInit, NodeIdentity, Vec<u8>),
+    Done(snow::StatelessTransportState, MessageCounterInit, NodeIdentity, Vec<u8>),
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HandshakeIntitiatorStep { 
@@ -843,7 +843,7 @@ impl HandshakeInitiator {
     pub fn is_done(&self) -> bool { 
         matches!(self.last_state.as_ref().unwrap(), HandshakeIntitiatorState::Done(_,_,_,_))
     }
-    pub fn complete(mut self) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), HandshakeError> { 
+    pub fn complete(mut self) -> Result<(snow::StatelessTransportState, MessageCounterInit, NodeIdentity, SessionId), HandshakeError> { 
         if let HandshakeIntitiatorState::Done(transport, counter, peer_id, session_id) = self.last_state.take().unwrap() { 
             Ok((transport, counter, peer_id, truncate_to_session_id(&session_id) ))
         }
@@ -856,8 +856,8 @@ impl HandshakeInitiator {
 pub enum HandshakeReceiverState { 
     Init, 
     SentSecondAwaitThird(snow::HandshakeState),
-    SentFourthAwaitFifth(snow::StatelessTransportState, String, MessageCounter, Vec<u8>),
-    Done(snow::StatelessTransportState, MessageCounter, Vec<u8>),
+    SentFourthAwaitFifth(snow::StatelessTransportState, String, MessageCounterInit, Vec<u8>),
+    Done(snow::StatelessTransportState, MessageCounterInit, Vec<u8>),
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HandshakeReceiverStep { 
@@ -957,7 +957,7 @@ impl HandshakeReceiver {
     pub fn is_done(&self) -> bool { 
         matches!(self.last_state.as_ref().unwrap(), HandshakeReceiverState::Done(_,_,_))
     }
-    pub fn complete(mut self) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), HandshakeError> { 
+    pub fn complete(mut self) -> Result<(snow::StatelessTransportState, MessageCounterInit, NodeIdentity, SessionId), HandshakeError> { 
         if let HandshakeReceiverState::Done(transport, counter, session_id) = self.last_state.take().unwrap() { 
             Ok((transport, 
                 counter, 

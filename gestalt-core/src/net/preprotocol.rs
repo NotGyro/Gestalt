@@ -38,7 +38,7 @@ use tokio::net::{TcpStream, TcpListener};
 use super::handshake::{HandshakeNext, load_noise_local_keys, NewProtocolKeyReporter, NewProtocolKeyApprover, noise_protocol_dir};
 use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, HandshakeError, HandshakeInitiator}};
 
-use super::{MessageCounter, NetworkRole, SelfNetworkRole};
+use super::{NetworkRole, SelfNetworkRole, MessageCounterInit};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -212,7 +212,7 @@ impl PreProtocolReceiver {
             },
         }
     }
-    pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), PreProtocolError> { 
+    pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, MessageCounterInit, NodeIdentity, SessionId), PreProtocolError> { 
         match std::mem::take(&mut self.state) {
             PreProtocolReceiverState::QueryAnswerer => Err(HandshakeError::CompleteBeforeDone.into()),
             PreProtocolReceiverState::Handshake(receiver) => {
@@ -340,6 +340,8 @@ pub async fn preprotocol_receiver_session(our_identity: IdentityKeyPair,
 
                                         match receiver.peer_role { 
                                             Some(peer_role) => {
+                                                
+                                                trace!("Connection to {:?} successful and our cryptographic counter is {}", peer_identity.to_base64(), seq); 
                                             
                                                 let completed = SuccessfulConnect {
                                                     session_id,
@@ -532,6 +534,8 @@ pub async fn preprotocol_connect_inner(stream: &mut TcpStream,
     // We should be done here! Let's go ahead and connect.
 
     let (transport, counter, server_identity, session_id) = handshake_initiator.complete()?;
+
+    trace!("Connection to {:?} successful and our cryptographic counter is {}", server_identity.to_base64(), counter); 
 
     Ok(SuccessfulConnect{
         session_id,
