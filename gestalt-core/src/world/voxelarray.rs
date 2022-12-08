@@ -236,7 +236,7 @@ impl<T, P> VoxelStorageBounded<T, P> for VoxelArray<T, P>
 #[derive(Clone, Debug)]
 pub struct VoxelArrayStatic<T: Voxel + Copy, P: VoxelCoord + USizeAble, const SIZE: usize>
 where
-    [u8; SIZE * SIZE * SIZE]: Sized,
+    [T; SIZE * SIZE * SIZE]: Sized,
 {
     pub(crate) data: [T; SIZE * SIZE * SIZE],
     _phantom_coord: PhantomData<P>
@@ -244,7 +244,7 @@ where
 
 impl<T: Voxel + Copy, P: VoxelCoord + USizeAble, const SIZE: usize> VoxelArrayStatic<T, P, SIZE>
 where
-    [u8; SIZE * SIZE * SIZE]: Sized,
+    [T; SIZE * SIZE * SIZE]: Sized,
 {
     pub fn load_new(data: [T; SIZE * SIZE * SIZE]) -> Self { 
         VoxelArrayStatic {
@@ -280,6 +280,9 @@ where
     }
     pub(crate) fn set_raw_i(&mut self, i: usize, value: T) {
         (*self.data.get_mut(i).unwrap()) = value;
+    }
+    pub(crate) fn get_raw_ref<'a>(&'a self) -> &'a [T; SIZE * SIZE * SIZE] { 
+        &self.data
     }
 }
 
