@@ -813,7 +813,7 @@ fn assignemnts_to_chunk() {
 #[test]
 fn always_le_u16_expectation() { 
     assert_eq!(
-        std::mem::size_of::<[u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]>(),
-        std::mem::size_of::<[AlwaysLeU16; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]>() * 2,
+        std::mem::size_of::<[u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]>() * 2,
+        std::mem::size_of::<[AlwaysLeU16; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]>(),
     )
 }
