@@ -1,3 +1,4 @@
+pub mod chunk;
 pub mod fsworldstorage;
 pub mod voxelarray;
 pub mod voxelstorage;

@@ -234,7 +234,7 @@ impl<T, P> VoxelStorageBounded<T, P> for VoxelArray<T, P>
 /// but statically-sized - this may lead to better performance
 /// due to better compiler optimizations.
 #[derive(Clone, Debug)]
-pub struct VoxelArrayStatic<T: Voxel + Copy, P: VoxelCoord, const SIZE: usize>
+pub struct VoxelArrayStatic<T: Voxel + Copy, P: VoxelCoord + USizeAble, const SIZE: usize>
 where
     [u8; SIZE * SIZE * SIZE]: Sized,
 {
@@ -242,7 +242,7 @@ where
     _phantom_coord: PhantomData<P>
 }
 
-impl<T: Voxel + Copy, P: VoxelCoord, const SIZE: usize> VoxelArrayStatic<T, P, SIZE>
+impl<T: Voxel + Copy, P: VoxelCoord + USizeAble, const SIZE: usize> VoxelArrayStatic<T, P, SIZE>
 where
     [u8; SIZE * SIZE * SIZE]: Sized,
 {
@@ -259,17 +259,17 @@ where
         }
     }
     /// Does not bounds check
-    pub(crate) fn get_raw(&self, coord: VoxelPos<u16>) -> &T {
-        &self.data[chunk_xyz_to_i(coord.x.into(), coord.y.into(), coord.z.into(), SIZE)]
+    pub(crate) fn get_raw(&self, coord: VoxelPos<P>) -> &T {
+        &self.data[chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), SIZE)]
     }
     /// Does not bounds check
-    pub(crate) fn set_raw(&mut self, coord: VoxelPos<u16>, value: T) {
+    pub(crate) fn set_raw(&mut self, coord: VoxelPos<P>, value: T) {
         (*self
             .data
             .get_mut(chunk_xyz_to_i(
-                coord.x.into(),
-                coord.y.into(),
-                coord.z.into(),
+                coord.x.as_usize(),
+                coord.y.as_usize(),
+                coord.z.as_usize(),
                 SIZE,
             ))
             .unwrap()) = value;
