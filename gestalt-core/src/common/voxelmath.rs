@@ -239,14 +239,7 @@ where
         (pos.x, pos.y, pos.z)
     }
 }
-/*
-impl <T> From<Point3<T>> for VoxelPos<T> where T : VoxelCoord + BaseNum {
-    fn from(point: Point3<T>) -> VoxelPos<T> { VoxelPos { x : point.x, y : point.y, z : point.z} }
-}
-impl <T> Into<Point3<T>> for VoxelPos<T> where T : VoxelCoord + BaseNum {
-    fn into(self) -> Point3<T> { Point3::new(self.x, self.y, self.z) }
-}
-*/
+
 macro_rules! vpos {
     ($x:expr, $y:expr, $z:expr) => {
         VoxelPos {
@@ -798,7 +791,7 @@ pub mod axis {
 
         #[inline(always)]
         #[allow(dead_code)]
-        pub const fn from_id(val: usize) -> Self {
+        pub const fn from_id(val: u8) -> Self {
             match val {
                 posi_x_index!() => VoxelSide::PosiX,
                 posi_z_index!() => VoxelSide::PosiY,
@@ -1186,6 +1179,49 @@ where
                 })
             }
         }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Side2D { 
+    // Counterclockwise
+    Right = 0,
+    Up = 1,
+    Left = 2, 
+    Down = 3,
+}
+
+impl From<Side2D> for u8 {
+    fn from(value: Side2D) -> Self {
+        match value {
+            Side2D::Right => 0,
+            Side2D::Up => 1,
+            Side2D::Left => 2,
+            Side2D::Down => 3,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+#[repr(transparent)]
+pub struct CubeOrientation(u8);
+
+impl CubeOrientation { 
+    pub fn get_forward(&self) -> VoxelSide {
+        // "red" side, where negative-z in the ordinary left-hand coordinate system has been turned to face.
+        VoxelSide::from_id(self.0 & 0b00000111)
+    }
+    pub fn get_roll(&self) -> Side2D { 
+        match (self.0 & 0b00011000) >> 5 {
+            0 => Side2D::Right,
+            1 => Side2D::Up,
+            2 => Side2D::Left,
+            3 => Side2D::Down,
+            _ => unreachable!("Should only be 4 possible states in 2 bits."),
+        }
+    }
+    pub fn is_mirrored(&self) -> bool { 
+        ((self.0 & 0b00100000) >> 5) == 1
     }
 }
 

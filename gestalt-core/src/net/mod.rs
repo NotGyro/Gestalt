@@ -476,8 +476,6 @@ mod test {
     use crate::message::MessageReceiverAsync;
     use crate::message::MessageSender;
     use crate::message::ReceiverChannel;
-    use crate::message::ReceiverCount;
-    use crate::message::START_QUIT;
     use crate::message::SenderChannel;
     use crate::message::quit_game;
     use crate::message_types::JoinDefaultEntry;

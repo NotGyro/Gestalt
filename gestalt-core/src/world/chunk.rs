@@ -407,20 +407,20 @@ pub enum ChunkInner<T: Voxel> {
 
 pub struct Chunk<T: Voxel> {
     pub revision: u64,
-    pub inner: ChunkInner<T>,
+    pub tiles: ChunkInner<T>
 }
 
 impl<T: Voxel> Chunk<T> {
     pub fn new(default_voxel: T) -> Self {
         Chunk {
             revision: 0,
-            inner: ChunkInner::Uniform(default_voxel),
+            tiles: ChunkInner::Uniform(default_voxel),
         }
     }
 
     #[inline(always)]
     pub fn get_raw_i(&self, i: usize) -> u16 {
-        match &self.inner {
+        match &self.tiles {
             ChunkInner::Uniform(_) => 0,
             ChunkInner::Small(inner) => *inner.get_raw_i(i) as u16,
             ChunkInner::Large(inner) => inner.get_raw_i(i).get(),
@@ -429,7 +429,7 @@ impl<T: Voxel> Chunk<T> {
 
     #[inline(always)]
     pub fn get_raw(&self, pos: VoxelPos<u8>) -> u16 {
-        match &self.inner {
+        match &self.tiles {
             ChunkInner::Uniform(_) => 0,
             ChunkInner::Small(inner) => *inner.get_raw(pos) as u16,
             ChunkInner::Large(inner) => inner.get_raw(pos).get(),
@@ -437,7 +437,7 @@ impl<T: Voxel> Chunk<T> {
     }
     #[inline(always)]
     pub fn set_raw(&mut self, pos: VoxelPos<u8>, value: AlwaysLeU16) {
-        match &mut self.inner {
+        match &mut self.tiles {
             //TODO: Smarter way of handling this case. Currently, just don't.
             //I don't want to return a result type HERE for performance reasons.
             ChunkInner::Uniform(_) => {
@@ -451,7 +451,7 @@ impl<T: Voxel> Chunk<T> {
     }
     #[inline(always)]
     pub fn index_from_palette(&self, tile: T) -> Option<u16> {
-        match &self.inner {
+        match &self.tiles {
             ChunkInner::Uniform(val) => {
                 if tile == *val {
                     Some(0)
@@ -465,7 +465,7 @@ impl<T: Voxel> Chunk<T> {
     }
     #[inline(always)]
     pub fn tile_from_index(&self, idx: u16) -> Option<&T> {
-        match &self.inner {
+        match &self.tiles {
             ChunkInner::Uniform(val) => {
                 if idx == 0 {
                     Some(val)
@@ -479,7 +479,7 @@ impl<T: Voxel> Chunk<T> {
     }
     #[inline(always)]
     pub fn is_palette_dirty(&self) -> bool {
-        match &self.inner {
+        match &self.tiles {
             ChunkInner::Uniform(_) => false,
             ChunkInner::Small(inner) => inner.palette_dirty,
             ChunkInner::Large(inner) => inner.palette_dirty,
@@ -487,7 +487,7 @@ impl<T: Voxel> Chunk<T> {
     }
     #[inline(always)]
     pub fn mark_palette_dirty_status(&mut self, set_to: bool) {
-        match &mut self.inner {
+        match &mut self.tiles {
             ChunkInner::Uniform(_) => {}
             ChunkInner::Small(ref mut inner) => inner.palette_dirty = set_to,
             ChunkInner::Large(ref mut inner) => inner.palette_dirty = set_to,
@@ -495,7 +495,7 @@ impl<T: Voxel> Chunk<T> {
     }
     #[inline]
     pub fn add_to_palette(&mut self, tile: T) -> AlwaysLeU16 {
-        match &mut self.inner {
+        match &mut self.tiles {
             ChunkInner::Uniform(val) => {
                 if tile == *val {
                     AlwaysLeU16::new(0)
@@ -514,7 +514,7 @@ impl<T: Voxel> Chunk<T> {
                     let mut reverse_palette: HashMap<T, u8> = HashMap::default();
                     reverse_palette.insert(val.clone(), 0);
                     reverse_palette.insert(tile, 1);
-                    self.inner = ChunkInner::Small(Box::new(ChunkTilesSmall {
+                    self.tiles = ChunkInner::Small(Box::new(ChunkTilesSmall {
                         inner: structure,
                         palette,
                         reverse_palette,
@@ -531,7 +531,7 @@ impl<T: Voxel> Chunk<T> {
                         //We need to expand it.
                         let mut new_inner = Box::new(inner.expand());
                         let idx = new_inner.add_to_palette(tile);
-                        self.inner = ChunkInner::Large(new_inner);
+                        self.tiles = ChunkInner::Large(new_inner);
                         idx
                     }
                 }
@@ -545,7 +545,7 @@ impl<T: Voxel> VoxelStorage<T, u8> for Chunk<T> {
     type Error = VoxelArrayError<u8>;
     #[inline(always)]
     fn get(&self, pos: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
-        match &self.inner {
+        match &self.tiles {
             ChunkInner::Uniform(val) => Ok(val),
             ChunkInner::Small(inner) => Ok(inner.get(pos)),
             ChunkInner::Large(inner) => Ok(inner.get(pos)),
@@ -658,7 +658,6 @@ impl LargePaletteEntry {
     }
 }
 
-
 #[test]
 fn chunk_index_reverse() {
     use rand::Rng;
@@ -700,7 +699,7 @@ fn assignemnts_to_chunk() {
     let u2 = String::from("stone");
     let mut test_chunk = Chunk {
         revision: 0,
-        inner: ChunkInner::Uniform(u1.clone()),
+        tiles: ChunkInner::Uniform(u1.clone()),
     };
 
     {
@@ -710,7 +709,7 @@ fn assignemnts_to_chunk() {
     }
 
     let mut valid_result = false;
-    if let ChunkInner::Uniform(_) = test_chunk.inner {
+    if let ChunkInner::Uniform(_) = test_chunk.tiles {
         valid_result = true;
     }
     assert!(valid_result);
@@ -736,7 +735,7 @@ fn assignemnts_to_chunk() {
     }
 
     let mut valid_result = false;
-    if let ChunkInner::Small(_) = test_chunk.inner {
+    if let ChunkInner::Small(_) = test_chunk.tiles {
         valid_result = true;
     }
     assert!(valid_result);
@@ -773,7 +772,7 @@ fn assignemnts_to_chunk() {
     }
 
     let mut valid_result = false;
-    if let ChunkInner::Small(_) = test_chunk.inner {
+    if let ChunkInner::Small(_) = test_chunk.tiles {
         valid_result = true;
     }
     assert!(valid_result);
@@ -804,12 +803,14 @@ fn assignemnts_to_chunk() {
         }
     }
     let mut valid_result = false;
-    if let ChunkInner::Large(_) = test_chunk.inner {
+    if let ChunkInner::Large(_) = test_chunk.tiles {
         valid_result = true;
     }
     assert!(valid_result);
 }
 
+// This exists to ensure #[repr(transparent)] does the thing I think it does, and that this remains the case.
+// Otherwise, some of the code involved in serialization and deserialization would explode dramatically. 
 #[test]
 fn always_le_u16_expectation() { 
     assert_eq!(

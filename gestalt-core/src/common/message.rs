@@ -78,6 +78,13 @@ impl<T> BroadcastReceiver<T> where T: Message {
             broadcast::error::RecvError::Closed => RecvError::NoSenders,
             broadcast::error::RecvError::Lagged(count) => RecvError::Lagged(count),
         }).await?;
+        while resl.is_empty() { 
+            // Keep trying until we get an actual thing.
+            resl = self.inner.recv().map_err(|e| match e { 
+                broadcast::error::RecvError::Closed => RecvError::NoSenders,
+                broadcast::error::RecvError::Lagged(count) => RecvError::Lagged(count),
+            }).await?;
+        }
         // Check to see if there's anything else also waiting for us, but do not block for it.  
         let mut maybe_more = self.recv_poll()?;
         resl.append(&mut maybe_more);
