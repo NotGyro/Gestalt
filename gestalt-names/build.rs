@@ -1,5 +1,3 @@
-extern crate string_cache_codegen;
-
 use std::path::Path;
 
 fn main() {

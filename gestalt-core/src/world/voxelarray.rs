@@ -1,34 +1,33 @@
-extern crate num;
-extern crate std;
+use std::{fmt::Debug, marker::PhantomData};
 
 use super::voxelstorage::*;
 use crate::common::voxelmath::*;
 
 #[allow(unused_variables)]
 #[inline(always)]
-pub const fn chunk_x_to_i_component(x: usize, chunk_size: usize) -> usize {
+pub(crate) const fn chunk_x_to_i_component(x: usize, chunk_size: usize) -> usize {
     x * chunk_size
 }
 #[allow(unused_variables)]
 #[inline(always)]
-pub const fn chunk_y_to_i_component(y: usize, chunk_size: usize) -> usize {
+pub(crate) const fn chunk_y_to_i_component(y: usize, chunk_size: usize) -> usize {
     y
 }
 #[allow(unused_variables)]
 #[inline(always)]
-pub const fn chunk_z_to_i_component(z: usize, chunk_size: usize) -> usize {
+pub(crate) const fn chunk_z_to_i_component(z: usize, chunk_size: usize) -> usize {
     z * (chunk_size * chunk_size)
 }
 
 #[inline(always)]
-pub const fn chunk_xyz_to_i(x: usize, y: usize, z: usize, chunk_size: usize) -> usize {
+pub(crate) const fn chunk_xyz_to_i(x: usize, y: usize, z: usize, chunk_size: usize) -> usize {
     chunk_z_to_i_component(z, chunk_size)
         + chunk_y_to_i_component(y, chunk_size)
         + chunk_x_to_i_component(x, chunk_size)
 }
 
 #[inline(always)]
-pub const fn chunk_i_to_xyz(i: usize, chunk_size: usize) -> (usize, usize, usize) {
+pub(crate) const fn chunk_i_to_xyz(i: usize, chunk_size: usize) -> (usize, usize, usize) {
     let chunk_squared = chunk_size * chunk_size;
     let z = i / (chunk_squared);
     let x = (i - z * chunk_squared) / chunk_size;
@@ -37,7 +36,7 @@ pub const fn chunk_i_to_xyz(i: usize, chunk_size: usize) -> (usize, usize, usize
 }
 
 #[inline(always)]
-pub const fn get_pos_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
+pub(crate) const fn get_pos_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
     let chunk_volume = chunk_size * chunk_size * chunk_size;
     if (i + chunk_x_to_i_component(1, chunk_size) < chunk_volume)
         && (chunk_i_to_xyz(i, chunk_size).0 + 1 < chunk_size)
@@ -49,14 +48,14 @@ pub const fn get_pos_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
 }
 #[inline(always)]
 #[allow(clippy::question_mark)]
-pub const fn get_neg_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
+pub(crate) const fn get_neg_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
     if chunk_i_to_xyz(i, chunk_size).0.checked_sub(1).is_none() {
         return None;
     }
     i.checked_sub(chunk_x_to_i_component(1, chunk_size))
 }
 #[inline(always)]
-pub const fn get_pos_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
+pub(crate) const fn get_pos_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
     let chunk_volume = chunk_size * chunk_size * chunk_size;
     if (i + chunk_y_to_i_component(1, chunk_size) < chunk_volume)
         && (chunk_i_to_xyz(i, chunk_size).1 + 1 < chunk_size)
@@ -68,14 +67,14 @@ pub const fn get_pos_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
 }
 #[inline(always)]
 #[allow(clippy::question_mark)]
-pub const fn get_neg_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
+pub(crate) const fn get_neg_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
     if chunk_i_to_xyz(i, chunk_size).1.checked_sub(1).is_none() {
         return None;
     }
     i.checked_sub(chunk_y_to_i_component(1, chunk_size))
 }
 #[inline(always)]
-pub const fn get_pos_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
+pub(crate) const fn get_pos_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
     let chunk_volume = chunk_size * chunk_size * chunk_size;
     if (i + chunk_z_to_i_component(1, chunk_size) < chunk_volume)
         && (chunk_i_to_xyz(i, chunk_size).2 + 1 < chunk_size)
@@ -87,7 +86,7 @@ pub const fn get_pos_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
 }
 #[inline(always)]
 #[allow(clippy::question_mark)]
-pub const fn get_neg_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
+pub(crate) const fn get_neg_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
     if chunk_i_to_xyz(i, chunk_size).2.checked_sub(1).is_none() {
         return None;
     }
@@ -95,12 +94,12 @@ pub const fn get_neg_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum VoxelArrayError {
+pub enum VoxelArrayError<T> where T: VoxelCoord + Debug {
     #[error("Attempted to access a voxel at position {0}, which is out of bounds on this chunk.")]
-    OutOfBounds(VoxelPos<u16>),
+    OutOfBounds(VoxelPos<T>),
 }
 
-impl VoxelError for VoxelArrayError {
+impl<T> VoxelError for VoxelArrayError<T> where T: VoxelCoord + Debug {
     fn kind(&self) -> VoxelErrorCategory {
         match self {
             VoxelArrayError::OutOfBounds(_) => VoxelErrorCategory::OutOfBounds,
@@ -112,50 +111,53 @@ impl VoxelError for VoxelArrayError {
 /// which is indexed by voxel positions with some math done on them.
 /// Should have a fixed, constant size after creation.
 #[derive(Clone, Debug)]
-pub struct VoxelArray<T: Voxel> {
-    pub(crate) size: u16,
+pub struct VoxelArray<T: Voxel, P: VoxelCoord> {
+    pub(crate) size: usize,
     pub(crate) data: Vec<T>,
-    pub(crate) bounds: VoxelRange<u16>,
+    pub(crate) bounds: VoxelRange<P>,
 }
 
 #[allow(dead_code)]
-impl<T: Voxel> VoxelArray<T> {
-    pub fn load_new(size: u16, dat: Vec<T>) -> VoxelArray<T> {
-        let num_elements = size as usize; 
-        assert!(dat.len() <= (num_elements * num_elements * num_elements) );
-        let bnd = VoxelRange::<u16> {
-            lower: VoxelPos::<u16> { x: 0, y: 0, z: 0 },
+impl<T, P> VoxelArray<T, P> 
+        where T: Voxel,
+        P: VoxelCoord + USizeAble {
+    pub fn load_new(side_length: P, dat: Vec<T>) -> VoxelArray<T, P> {
+        let side_length_usize: usize = side_length.as_usize(); 
+        assert!(dat.len() <= (side_length_usize * side_length_usize * side_length_usize) );
+        let zero = P::from_usize(0usize); 
+        let bnd = VoxelRange::<P> {
+            lower: VoxelPos::<P> { x: zero, y: zero, z: zero },
             upper: VoxelPos {
-                x: size,
-                y: size,
-                z: size,
+                x: side_length,
+                y: side_length,
+                z: side_length,
             },
         };
 
         VoxelArray {
-            size,
+            size: side_length_usize,
             data: dat,
             bounds: bnd,
         }
     }
     /// Does not bounds check
-    pub(crate) fn get_raw(&self, coord: VoxelPos<u16>) -> &T {
+    pub(crate) fn get_raw(&self, coord: VoxelPos<P>) -> &T {
         &self.data[chunk_xyz_to_i(
-            coord.x as usize,
-            coord.y as usize,
-            coord.z as usize,
-            self.size as usize,
+            coord.x.as_usize(),
+            coord.y.as_usize(),
+            coord.z.as_usize(),
+            self.size,
         )]
     }
     /// Does not bounds check
-    pub(crate) fn set_raw(&mut self, coord: VoxelPos<u16>, value: T) {
+    pub(crate) fn set_raw(&mut self, coord: VoxelPos<P>, value: T) {
         (*self
             .data
             .get_mut(chunk_xyz_to_i(
-                coord.x as usize,
-                coord.y as usize,
-                coord.z as usize,
-                self.size as usize,
+                coord.x.as_usize(),
+                coord.y.as_usize(),
+                coord.z.as_usize(),
+                self.size,
             ))
             .unwrap()) = value;
     }
@@ -168,11 +170,14 @@ impl<T: Voxel> VoxelArray<T> {
     }
 }
 
-impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
-    type Error = VoxelArrayError;
-    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, Self::Error> {
+impl<T, P> VoxelStorage<T, P> for VoxelArray<T,P>
+        where T: Voxel,
+        P: VoxelCoord + USizeAble {
+    type Error = VoxelArrayError<P>;
+    fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error> {
+        let size = P::from_usize(self.size); 
         //Bounds-check.
-        if (coord.x >= self.size) || (coord.y >= self.size) || (coord.z >= self.size) {
+        if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
             return Err(Self::Error::OutOfBounds(VoxelPos {
                 x: coord.x,
                 y: coord.y,
@@ -181,20 +186,21 @@ impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
         }
         //Packed array access
         let result: Option<&T> = self.data.get(chunk_xyz_to_i(
-            coord.x as usize,
-            coord.y as usize,
-            coord.z as usize,
-            self.size as usize,
+            coord.x.as_usize(),
+            coord.y.as_usize(),
+            coord.z.as_usize(),
+            self.size,
         ));
         Ok(result.unwrap())
     }
 
     fn set(
         &mut self,
-        coord: VoxelPos<u16>,
+        coord: VoxelPos<P>,
         value: T,
     ) -> Result<(), Self::Error> {
-        if (coord.x >= self.size) || (coord.y >= self.size) || (coord.z >= self.size) {
+        let size = P::from_usize(self.size); 
+        if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
             return Err(Self::Error::OutOfBounds(VoxelPos {
                 x: coord.x,
                 y: coord.y,
@@ -205,10 +211,10 @@ impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
         *self
             .data
             .get_mut(chunk_xyz_to_i(
-                coord.x as usize,
-                coord.y as usize,
-                coord.z as usize,
-                self.size as usize,
+                coord.x.as_usize(),
+                coord.y.as_usize(),
+                coord.z.as_usize(),
+                self.size,
             ))
             .unwrap() = value;
 
@@ -216,8 +222,10 @@ impl<T: Voxel> VoxelStorage<T, u16> for VoxelArray<T> {
     }
 }
 
-impl<T: Voxel> VoxelStorageBounded<T, u16> for VoxelArray<T> {
-    fn get_bounds(&self) -> VoxelRange<u16> {
+impl<T, P> VoxelStorageBounded<T, P> for VoxelArray<T, P>
+        where T: Voxel,
+        P: VoxelCoord + USizeAble {
+    fn get_bounds(&self) -> VoxelRange<P> {
         self.bounds
     }
 }
@@ -226,39 +234,42 @@ impl<T: Voxel> VoxelStorageBounded<T, u16> for VoxelArray<T> {
 /// but statically-sized - this may lead to better performance
 /// due to better compiler optimizations.
 #[derive(Clone, Debug)]
-pub struct VoxelArrayStatic<T: Voxel + Copy, const SIZE: usize>
+pub struct VoxelArrayStatic<T: Voxel + Copy, P: VoxelCoord + USizeAble, const SIZE: usize>
 where
-    [u8; SIZE * SIZE * SIZE]: Sized,
+    [T; SIZE * SIZE * SIZE]: Sized,
 {
     pub(crate) data: [T; SIZE * SIZE * SIZE],
+    _phantom_coord: PhantomData<P>
 }
 
-impl<T: Voxel + Copy, const SIZE: usize> VoxelArrayStatic<T, SIZE>
+impl<T: Voxel + Copy, P: VoxelCoord + USizeAble, const SIZE: usize> VoxelArrayStatic<T, P, SIZE>
 where
-    [u8; SIZE * SIZE * SIZE]: Sized,
+    [T; SIZE * SIZE * SIZE]: Sized,
 {
     pub fn load_new(data: [T; SIZE * SIZE * SIZE]) -> Self { 
         VoxelArrayStatic {
             data,
+            _phantom_coord: PhantomData::default(),
         }
     }
     pub fn new(default_value: T) -> Self {
         VoxelArrayStatic {
             data: [default_value; SIZE * SIZE * SIZE],
+            _phantom_coord: PhantomData::default(),
         }
     }
     /// Does not bounds check
-    pub(crate) fn get_raw(&self, coord: VoxelPos<u16>) -> &T {
-        &self.data[chunk_xyz_to_i(coord.x as usize, coord.y as usize, coord.z as usize, SIZE)]
+    pub(crate) fn get_raw(&self, coord: VoxelPos<P>) -> &T {
+        &self.data[chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), SIZE)]
     }
     /// Does not bounds check
-    pub(crate) fn set_raw(&mut self, coord: VoxelPos<u16>, value: T) {
+    pub(crate) fn set_raw(&mut self, coord: VoxelPos<P>, value: T) {
         (*self
             .data
             .get_mut(chunk_xyz_to_i(
-                coord.x as usize,
-                coord.y as usize,
-                coord.z as usize,
+                coord.x.as_usize(),
+                coord.y.as_usize(),
+                coord.z.as_usize(),
                 SIZE,
             ))
             .unwrap()) = value;
@@ -270,16 +281,21 @@ where
     pub(crate) fn set_raw_i(&mut self, i: usize, value: T) {
         (*self.data.get_mut(i).unwrap()) = value;
     }
+    pub(crate) fn get_raw_ref<'a>(&'a self) -> &'a [T; SIZE * SIZE * SIZE] { 
+        &self.data
+    }
 }
 
-impl<T: Voxel + Copy, const SIZE: usize> VoxelStorage<T, u16> for VoxelArrayStatic<T, SIZE>
-where
-    [u8; SIZE * SIZE * SIZE]: Sized,
-{
-    type Error = VoxelArrayError;
-    fn get(&self, coord: VoxelPos<u16>) -> Result<&T, Self::Error> {
+impl<T, P, const SIZE: usize> VoxelStorage<T, P> for VoxelArrayStatic<T, P, SIZE>
+        where
+            [u8; SIZE * SIZE * SIZE]: Sized,
+            T: Voxel + Copy,
+            P: VoxelCoord + USizeAble {
+    type Error = VoxelArrayError<P>;
+    fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error> {
+        let size = P::from_usize(SIZE);
         //Bounds-check.
-        if (coord.x >= SIZE as u16) || (coord.y >= SIZE as u16) || (coord.z >= SIZE as u16) {
+        if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
             return Err(Self::Error::OutOfBounds(VoxelPos {
                 x: coord.x,
                 y: coord.y,
@@ -288,9 +304,9 @@ where
         }
         //Packed array access
         let result: Option<&T> = self.data.get(chunk_xyz_to_i(
-            coord.x as usize,
-            coord.y as usize,
-            coord.z as usize,
+            coord.x.as_usize(),
+            coord.y.as_usize(),
+            coord.z.as_usize(),
             SIZE,
         ));
         Ok(result.unwrap())
@@ -298,10 +314,11 @@ where
 
     fn set(
         &mut self,
-        coord: VoxelPos<u16>,
+        coord: VoxelPos<P>,
         value: T,
     ) -> Result<(), Self::Error> {
-        if (coord.x >= SIZE as u16) || (coord.y >= SIZE as u16) || (coord.z >= SIZE as u16) {
+        let size = P::from_usize(SIZE);
+        if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
             return Err(Self::Error::OutOfBounds(VoxelPos {
                 x: coord.x,
                 y: coord.y,
@@ -312,9 +329,9 @@ where
         (*self
             .data
             .get_mut(chunk_xyz_to_i(
-                coord.x as usize,
-                coord.y as usize,
-                coord.z as usize,
+                coord.x.as_usize(),
+                coord.y.as_usize(),
+                coord.z.as_usize(),
                 SIZE,
             ))
             .unwrap()) = value;
@@ -323,17 +340,20 @@ where
     }
 }
 
-impl<T: Voxel + Copy, const SIZE: usize> VoxelStorageBounded<T, u16> for VoxelArrayStatic<T, SIZE>
-where
-    [u8; SIZE * SIZE * SIZE]: Sized,
-{
-    fn get_bounds(&self) -> VoxelRange<u16> {
+impl<T, P, const SIZE: usize> VoxelStorageBounded<T, P> for VoxelArrayStatic<T, P, SIZE>
+    where
+        [u8; SIZE * SIZE * SIZE]: Sized,
+        T: Voxel + Copy,
+        P: VoxelCoord + USizeAble {
+    fn get_bounds(&self) -> VoxelRange<P> {
+        let zero = P::from_usize(0usize);
+        let size = P::from_usize(SIZE);
         VoxelRange {
-            lower: VoxelPos { x: 0, y: 0, z: 0 },
+            lower: VoxelPos { x: zero, y: zero, z: zero },
             upper: VoxelPos {
-                x: SIZE as u16,
-                y: SIZE as u16,
-                z: SIZE as u16,
+                x: size,
+                y: size,
+                z: size,
             },
         }
     }
@@ -347,7 +367,7 @@ fn test_array_raccess() {
         test_chunk.push(i as u16);
     }
 
-    let mut test_va: VoxelArray<u16> = VoxelArray::load_new(16, test_chunk);
+    let mut test_va: VoxelArray<u16, u16> = VoxelArray::load_new(16, test_chunk);
 
     assert!(*test_va.get(vpos!(14, 14, 14)).unwrap() == 3822);
     test_va.set(vpos!(14, 14, 14), 9).unwrap();
@@ -362,7 +382,7 @@ fn test_array_iterative() {
         test_chunk.push(16);
     }
 
-    let mut test_va: VoxelArray<u16> = VoxelArray::load_new(16, test_chunk);
+    let mut test_va: VoxelArray<u16, u16> = VoxelArray::load_new(16, test_chunk);
     let xsz: u16 = test_va.get_bounds().upper.x;
     let ysz: u16 = test_va.get_bounds().upper.y;
     let zsz: u16 = test_va.get_bounds().upper.z;

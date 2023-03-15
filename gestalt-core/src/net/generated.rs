@@ -12,10 +12,10 @@ pub(crate) fn get_netmsg_table() -> &'static HashMap<NetMsgId, NetMsgType> {
         msgs.insert(crate::message_types::JoinAnnounce::net_msg_id(), crate::message_types::JoinAnnounce::net_msg_type());
         msgs.insert(crate::message_types::voxel::VoxelChangeRequest::net_msg_id(), crate::message_types::voxel::VoxelChangeRequest::net_msg_type());
         msgs.insert(crate::message_types::voxel::VoxelChangeAnnounce::net_msg_id(), crate::message_types::voxel::VoxelChangeAnnounce::net_msg_type());
-        msgs.insert(crate::net::DisconnectMsg::net_msg_id(), crate::net::DisconnectMsg::net_msg_type());
         #[cfg(test)] {
                 msgs.insert(crate::net::test::TestNetMsg::net_msg_id(), crate::net::test::TestNetMsg::net_msg_type());
         }
+        msgs.insert(crate::net::session::DisconnectMsg::net_msg_id(), crate::net::session::DisconnectMsg::net_msg_type());
         msgs
     }).unwrap()
 }

@@ -1,12 +1,10 @@
-// ! This funges your tokens. 
-// ! I stole your apes lmao 
 use std::{path::PathBuf, fs::OpenOptions, io::{BufReader, BufWriter}};
 
 use log::trace;
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 
-use super::{WorldId, ChunkCoord, ChunkPos, chunk::{Chunk, ChunkIoError, deserialize_chunk}, TileId};
+use super::{WorldId, ChunkCoord, ChunkPos, TileId};
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum StoredWorldRole { 
@@ -20,9 +18,9 @@ pub enum StoredWorldRole {
     RemoteBackup
 }
 
-pub fn path_local_worlds() -> PathBuf {
+pub fn path_worlds(base_dir: &PathBuf) -> PathBuf {
     const WORLD_DIR: &str = "worlds/";
-    let world_root = PathBuf::from(WORLD_DIR);
+    let world_root = base_dir.join(WORLD_DIR);
     if !world_root.exists() { 
         std::fs::create_dir(&world_root).unwrap();
     }
@@ -30,10 +28,10 @@ pub fn path_local_worlds() -> PathBuf {
 }
 
 /// Gets the path to the root directory for per-world data (voxel chunks, entities, etc)
-pub fn path_for_world(world_id: &WorldId, role: StoredWorldRole) -> PathBuf {
+pub fn path_for_world(base_dir: &PathBuf, world_id: &WorldId, role: StoredWorldRole) -> PathBuf {
     match role {
         StoredWorldRole::Local => {
-            let world_root = path_local_worlds();
+            let world_root = path_worlds(base_dir);
             let result = world_root.join(format!("{}/", world_id.uuid ) );
             if !result.exists() {
                 std::fs::create_dir(&result).unwrap();
@@ -47,8 +45,8 @@ pub fn path_for_world(world_id: &WorldId, role: StoredWorldRole) -> PathBuf {
 
 /// Gets the path to the directory where voxel chunks are stored
 /// Helper function that just calls path_for_world() internally.
-pub fn path_for_terrain(world_id: &WorldId, role: StoredWorldRole) -> PathBuf { 
-    let path = path_for_world(world_id, role).join("terrain/");
+pub fn path_for_terrain(base_dir: &PathBuf, world_id: &WorldId, role: StoredWorldRole) -> PathBuf { 
+    let path = path_for_world(base_dir, world_id, role).join("terrain/");
     if !path.exists() {
         std::fs::create_dir_all(&path).unwrap();
     }
@@ -57,7 +55,7 @@ pub fn path_for_terrain(world_id: &WorldId, role: StoredWorldRole) -> PathBuf {
 
 #[inline]
 fn chunk_coord_to_str(coord: &ChunkCoord) -> String { 
-    if *coord >= 0 { 
+    if *coord >= 0 {
         format!("+{}", coord)
     }
     else {
@@ -74,11 +72,11 @@ pub fn filename_for_chunk(pos: &ChunkPos) -> String {
 }
 
 #[inline]
-pub fn path_for_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos) -> PathBuf {
-    std::fs::create_dir_all(path_for_terrain(world_id, role)).unwrap();
-    path_for_terrain(world_id, role).join(filename_for_chunk(pos))
+pub fn path_for_chunk(base_dir: &PathBuf, world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos) -> PathBuf {
+    path_for_terrain(base_dir, world_id, role).join(filename_for_chunk(pos))
 }
 
+/*
 pub fn load_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos) -> std::result::Result<Chunk<TileId>, ChunkIoError> {
     let path = path_for_chunk(world_id, role, pos);
     let file = OpenOptions::new()
@@ -110,7 +108,7 @@ pub fn save_chunk(world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos, chu
     //This should be an atomic operation, so world state won't get corrupted here.
     std::fs::rename(&in_progress_path, target_path)?;
     Ok(())
-}
+}*/
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorldDefaults { 

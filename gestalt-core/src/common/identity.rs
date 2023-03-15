@@ -40,13 +40,16 @@ impl NodeIdentity {
     pub fn from_base64(b64: &str) -> Result<Self, DecodeIdentityError> { 
         let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
         let buf = base64::decode_config(b64, config)?;
-        match buf.len() == PUBLIC_KEY_LENGTH { 
-            true => { 
-                let mut smaller_buf = [0u8; PUBLIC_KEY_LENGTH];
-                smaller_buf.copy_from_slice(&buf[0..PUBLIC_KEY_LENGTH]);
-                Ok(NodeIdentity(smaller_buf))
-            },
-            false => Err(DecodeIdentityError::WrongLength(buf.len())),
+        Self::from_bytes(&buf)
+    }
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeIdentityError> { 
+        if bytes.len() == PUBLIC_KEY_LENGTH {
+            let mut smaller_buf = [0u8; PUBLIC_KEY_LENGTH];
+            smaller_buf.copy_from_slice(&bytes[0..PUBLIC_KEY_LENGTH]);
+            Ok(NodeIdentity(smaller_buf))
+        }
+        else {
+            Err(DecodeIdentityError::WrongLength(bytes.len()))
         }
     }
     pub fn verify_signature(&self, message: &[u8], signature: &[u8]) -> Result<(), SignatureError> {
