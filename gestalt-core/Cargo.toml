@@ -46,7 +46,7 @@ vu64 = "0.1.5"
 
 # Network
 laminar = { version = "0.5.2", git = "https://github.com/NotGyro/laminar", rev = "23290f37605b52dfde7f1e84a74a4255c8358f4a" } 
-tokio = { version = "1.19.2", features = ["full", "sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
+tokio = { version = "1.20.4", features = ["full", "sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
 
 # Rendering
 wgpu = { version = "0.12", features = ["spirv"] }
