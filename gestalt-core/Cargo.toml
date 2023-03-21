@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 #Internal
-gestalt_names = { path = "../gestalt-names" }
+# This will be used later. gestalt_names = { path = "../gestalt-names" }
 gestalt_proc_macros = { path = "../gestalt-proc-macros" }
 
 toolbelt = { git = "https://github.com/trashbyte/toolbelt" }
@@ -48,12 +48,7 @@ vu64 = "0.1.5"
 laminar = { version = "0.5.2", git = "https://github.com/NotGyro/laminar", rev = "23290f37605b52dfde7f1e84a74a4255c8358f4a" } 
 tokio = { version = "1.19.2", features = ["full", "sync", "rt", "rt-multi-thread", "net", "io-util", "macros", "time"] }
 
-# Scripting
-mlua = { version = "0.7.1", features = ["luajit", "luajit52", "vendored", "serialize"] }
-
 # Rendering
-rend3 = { version = "^0.2.0", git = "https://github.com/BVE-Reborn/rend3", rev = "c42f758d07e1d9c650d2d5239527bd97f7111cb8" }
-rend3-routine = { version = "^0.2.0", git = "https://github.com/BVE-Reborn/rend3", rev = "c42f758d07e1d9c650d2d5239527bd97f7111cb8" }
 wgpu = { version = "0.12", features = ["spirv"] }
 winit = "0.26.1"
 

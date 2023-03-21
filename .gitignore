@@ -61,5 +61,5 @@ latest.log
 todo.md
 
 # Generated code
-
 /gestalt-names/src/generated/
+/gestalt-core/src/net/generated.rs

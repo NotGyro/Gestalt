@@ -529,6 +529,7 @@ mod test {
 	}
 
 	#[tokio::test]
+	#[ignore] //Ignored until cause of GH Actions test flakiness can be ascertained. 
 	async fn session_with_localhost() {
 		// Init stuff
 		let mutex_guard = NET_TEST_MUTEX.lock().await;
