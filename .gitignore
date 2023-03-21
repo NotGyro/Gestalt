@@ -57,9 +57,6 @@ latest.log
 .idea
 *.iml
 
-# Ignore Cargo lock
-Cargo.lock
-
 # Informal notes (I should use Github tasks soon)
 todo.md
 
