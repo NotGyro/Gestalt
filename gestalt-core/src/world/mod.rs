@@ -26,16 +26,16 @@ pub type ChunkPos = VoxelPos<ChunkCoord>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorldId {
-    pub uuid: Uuid,
-    /// Either us or the server we're mirroring this from. 
-    pub host: NodeIdentity,
+	pub uuid: Uuid,
+	/// Either us or the server we're mirroring this from.
+	pub host: NodeIdentity,
 }
 #[derive(Default, Debug, Clone)]
 pub struct WorldInfo {
-    pub name: String,
+	pub name: String,
 }
 
 pub struct World {
-    pub world_id: WorldId,
-    pub world_info: WorldInfo,
+	pub world_id: WorldId,
+	pub world_info: WorldInfo,
 }
