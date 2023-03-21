@@ -1,0 +1,7 @@
+edition = "2021"
+max_width = 120
+comment_width  = 120
+fn_call_width = 80
+# For accessibility
+hard_tabs = true
+use_try_shorthand = true
