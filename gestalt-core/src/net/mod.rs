@@ -1,7 +1,6 @@
 use std::fs;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
-use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -52,8 +51,7 @@ use self::netmsg::OuterEnvelopeError;
 use self::reliable_udp::*;
 use self::session::*;
 
-pub type MessageCounterInit = u32;
-pub type MessageCounter = NonZeroU32;
+pub type MessageCounter = u32;
 
 const MAX_MESSAGE_SIZE: usize = 8192;
 
@@ -346,17 +344,10 @@ impl NetworkSystem {
                                     let OuterEnvelope{session: session_name, body: message_body} = message; 
                                     match self.inbound_channels.get(&message.session) {
                                         Some(sender) => {
-                                            match message_body {
-                                                netmsg::EnvelopeBody::Ciphertext(ciphertext_message) => {
-                                                    sender.send(vec!(CiphertextEnvelope{ 
-                                                        session: session_name, 
-                                                        body: ciphertext_message
-                                                    })).unwrap()
-                                                },
-                                                netmsg::EnvelopeBody::Protocol(_protocol_message) => {
-                                                    //TODO - the switch to having protocol messages at all is pretty new and I'm working on it. 
-                                                },
-                                            }
+                                            sender.send(vec!(CiphertextEnvelope{
+                                                session: session_name, 
+                                                body: message_body
+                                            })).expect("Unable to send ciphertext envelope on session.");
                                         },
                                         None => {
                                             if self.our_role == SelfNetworkRole::Server {
@@ -375,18 +366,11 @@ impl NetworkSystem {
                                                         match self.add_new_session(session_name, connection).await { 
                                                             Ok(()) => {
                                                                 // Push the message we just got from the rest of the engine out to the network. 
-                                                                if let Some(sender) = self.inbound_channels.get(&session_name) {         
-                                                                    match message_body {
-                                                                        netmsg::EnvelopeBody::Ciphertext(ciphertext_message) => {
-                                                                            sender.send(vec!(CiphertextEnvelope{ 
-                                                                                session: session_name, 
-                                                                                body: ciphertext_message
-                                                                            })).unwrap()
-                                                                        },
-                                                                        netmsg::EnvelopeBody::Protocol(_protocol_message) => {
-                                                                            //TODO - the switch to having protocol messages at all is pretty new and I'm working on it. 
-                                                                        },
-                                                                    }
+                                                                if let Some(sender) = self.inbound_channels.get(&session_name) {
+                                                                    sender.send(vec!(CiphertextEnvelope{ 
+                                                                        session: session_name, 
+                                                                        body: message_body
+                                                                    })).unwrap()
                                                                 }
                                                                 else {
                                                                     error!("Could not send message to newly-connected peer {}", peer_identity.to_base64());

@@ -40,7 +40,7 @@ use super::{
         InboundMsgSender
     },
     NetMsgDomain, 
-    netmsg::{MessageSidedness, CiphertextMessage, EnvelopeBody, CiphertextEnvelope}, MessageCounter
+    netmsg::{MessageSidedness, CiphertextMessage, CiphertextEnvelope}, MessageCounter
 };
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -192,7 +192,7 @@ impl Session {
             peer_identity: connection.peer_identity,
             peer_address,
             session_id: connection.session_id,
-            local_counter: MessageCounter::new(connection.transport_counter).unwrap(),
+            local_counter: connection.transport_counter,
             transport_cryptography: connection.transport_cryptography,
             push_channel,
             inbound_channels: new_fast_hash_map(),
@@ -211,18 +211,16 @@ impl Session {
     fn encrypt_packet<T: AsRef<[u8]>>(&mut self, plaintext: T) -> Result<OuterEnvelope, SessionLayerError> {
         self.local_counter.checked_add(1).ok_or(SessionLayerError::ExhaustedCounter(self.peer_address.clone()))?;
         let mut buffer = vec![0u8; ( (plaintext.as_ref().len() as usize) * 3) + 64 ];
-        let len_written = self.transport_cryptography.write_message(self.local_counter.get() as u64, plaintext.as_ref(), &mut buffer)?;
+        let len_written = self.transport_cryptography.write_message(self.local_counter as u64, plaintext.as_ref(), &mut buffer)?;
         buffer.truncate(len_written);
         let full_session_name = self.get_session_name();
         Ok(
             OuterEnvelope {
                 session: full_session_name,
-                body: EnvelopeBody::Ciphertext(
-                    CiphertextMessage {
-                        counter: self.local_counter,
-                        ciphertext: buffer.to_vec(),
-                    }
-                )
+                body: CiphertextMessage {
+                    counter: self.local_counter,
+                    ciphertext: buffer.to_vec(),
+                }
             }
         )
     }
@@ -237,7 +235,7 @@ impl Session {
         } = envelope;
 
         let mut buf = vec![0u8; (ciphertext.len() * 3)/2];
-        let len_read = self.transport_cryptography.read_message(counter.get() as u64, &ciphertext, &mut buf)?;
+        let len_read = self.transport_cryptography.read_message(counter as u64, &ciphertext, &mut buf)?;
         buf.truncate(len_read);
         Ok(buf)
     }

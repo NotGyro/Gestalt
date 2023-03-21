@@ -38,7 +38,7 @@ use tokio::net::{TcpStream, TcpListener};
 use super::handshake::{HandshakeNext, load_noise_local_keys, NewProtocolKeyReporter, NewProtocolKeyApprover, noise_protocol_dir};
 use super::{SessionId, SuccessfulConnect, handshake::{HandshakeReceiver, HandshakeError, HandshakeInitiator}};
 
-use super::{NetworkRole, SelfNetworkRole, MessageCounterInit};
+use super::{NetworkRole, SelfNetworkRole, MessageCounter};
 
 // TODO/NOTE - Cryptography should behave differently on known long-term static public key and unknown long-term static public key. 
 
@@ -210,7 +210,7 @@ impl PreProtocolReceiver {
             },
         }
     }
-    pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, MessageCounterInit, NodeIdentity, SessionId), PreProtocolError> { 
+    pub fn complete_handshake(&mut self) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), PreProtocolError> { 
         match std::mem::take(&mut self.state) {
             PreProtocolReceiverState::QueryAnswerer => Err(HandshakeError::CompleteBeforeDone.into()),
             PreProtocolReceiverState::Handshake(receiver) => {
