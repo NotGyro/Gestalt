@@ -3,9 +3,22 @@ use std::net::SocketAddr;
 use log::warn;
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
-use crate::{message::{ChannelDomain, MessageWithDomain, RecvError}, common::{identity::NodeIdentity, growable_buffer::GrowableBuf}, net::{session::SessionId, MessageCounterInit}};
-
-use super::{FullSessionName, MessageCounter};
+use crate::{
+    message::{
+        ChannelDomain, 
+        MessageWithDomain, 
+        RecvError
+    }, 
+    common::{
+        identity::NodeIdentity, 
+        growable_buffer::GrowableBuf
+    }, 
+    net::{
+        FullSessionName,
+        MessageCounter,
+        session::SessionId
+    }
+};
 
 pub const UNKNOWN_ROLE: u8 = 0;
 pub const SERVER_ROLE: u8 = 1;
@@ -189,16 +202,9 @@ impl ProtocolMessage {
         }
     }
 }
-#[derive(Debug, Clone)]
-pub enum EnvelopeBody {
-    Ciphertext(CiphertextMessage), 
-    Protocol(ProtocolMessage)
-}
 
 #[derive(thiserror::Error, Debug)]
 pub enum OuterEnvelopeError {
-    #[error("Error encountered encoding or decoding protocol message: {0:?}")]
-    ProtocolMsg(#[from] ProtocolMessageError),
     #[error("Attempted to encode an OuterEnvelope to a buffer not large enough to contain it - {0} bytes were provided and we need {1}.")]
     NotEnoughBuffer(usize, usize),
     #[error("Attempted to encode or decode an OuterEnvelope to/from a buffer {0} bytes in size. The minimum outer envelope size is {1} bytes.")]
@@ -215,7 +221,7 @@ pub enum OuterEnvelopeError {
 #[derive(Debug, Clone)]
 pub struct OuterEnvelope {
     pub session: FullSessionName,
-    pub body: EnvelopeBody, 
+    pub body: CiphertextMessage, 
 }
 
 impl OuterEnvelope { 
@@ -246,47 +252,32 @@ impl OuterEnvelope {
         send_buf[cursor..cursor+SESSION_ID_LEN].copy_from_slice(&session_id);
         cursor += SESSION_ID_LEN;
 
-        match &self.body {
-            EnvelopeBody::Ciphertext(CiphertextMessage{ 
-                counter,
-                ciphertext
-            }) => {
-                //Write counter 
-                send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&counter.get().to_le_bytes());
-                cursor += COUNTER_LEN;
-    
-                //Write ciphertext len. 
-                let message_len = ciphertext.len();
-                let encoded_len = vu64::encode(message_len as u64);
-                let len_tag_bytes: &[u8] = encoded_len.as_ref();
-                let len_len_tag = len_tag_bytes.len();
-                
-                let body_len = len_len_tag + message_len;
-                
-                // Sanity-check now that we know how much we have to write 
-                let remaining_len = send_buf[cursor..].len();
-                if remaining_len < body_len { 
-                    return Err(OuterEnvelopeError::NotEnoughBuffer(remaining_len, body_len));
-                }
+        //Write counter 
+        send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&self.body.counter.to_le_bytes());
+        cursor += COUNTER_LEN;
 
-                //Write the cursor
-                send_buf[cursor..cursor+len_len_tag].copy_from_slice(len_tag_bytes);
-                cursor += len_len_tag;
-
-                //Header done, now write the ciphertext.
-                send_buf[cursor..cursor+message_len].copy_from_slice(&ciphertext);
-                cursor += message_len;
-                Ok(cursor)
-            },
-            EnvelopeBody::Protocol(protocol_message) => { 
-                let not_counter: u32 = 0;
-                //Write "counter"
-                send_buf[cursor..cursor+COUNTER_LEN].copy_from_slice(&not_counter.to_le_bytes());
-                cursor += COUNTER_LEN;
-                let protocol_message_len = protocol_message.encode(send_buf)?;
-                Ok(cursor + protocol_message_len)
-            },
+        //Write ciphertext len. 
+        let message_len = self.body.ciphertext.len();
+        let encoded_len = vu64::encode(message_len as u64);
+        let len_tag_bytes: &[u8] = encoded_len.as_ref();
+        let len_len_tag = len_tag_bytes.len();
+        
+        let body_len = len_len_tag + message_len;
+        
+        // Sanity-check now that we know how much we have to write 
+        let remaining_len = send_buf[cursor..].len();
+        if remaining_len < body_len { 
+            return Err(OuterEnvelopeError::NotEnoughBuffer(remaining_len, body_len));
         }
+
+        //Write the cursor
+        send_buf[cursor..cursor+len_len_tag].copy_from_slice(len_tag_bytes);
+        cursor += len_len_tag;
+
+        //Header done, now write the ciphertext.
+        send_buf[cursor..cursor+message_len].copy_from_slice(&self.body.ciphertext);
+        cursor += message_len;
+        Ok(cursor)
     }
 
     pub fn decode_packet(recv_buf: &[u8], peer_address: SocketAddr ) -> Result<(OuterEnvelope, usize), OuterEnvelopeError> {
@@ -309,46 +300,32 @@ impl OuterEnvelope {
         counter_bytes.copy_from_slice(&recv_buf[cursor..cursor+COUNTER_LEN]);
         cursor += COUNTER_LEN;
 
-        let counter_maybe = MessageCounterInit::from_le_bytes(counter_bytes);
+        let counter = MessageCounter::from_le_bytes(counter_bytes);
 
         let session_name = FullSessionName {
             peer_address,
             session_id,
         };
 
-        // Is this a protocol message or a ciphertext message? Should compile to a simple, fast JNZ.
-        match MessageCounter::new(counter_maybe) {
-            Some(counter) => {
-                let first_length_tag_byte: u8 = recv_buf[cursor];
-                //Get the length of the vu64 length tag from the first byte.
-                let lenlen = vu64::decoded_len(first_length_tag_byte) as usize;
-                let message_length = vu64::decode(&recv_buf[cursor..cursor+lenlen])?;
-                cursor += lenlen;
+        let first_length_tag_byte: u8 = recv_buf[cursor];
+        //Get the length of the vu64 length tag from the first byte.
+        let lenlen = vu64::decoded_len(first_length_tag_byte) as usize;
+        let message_length = vu64::decode(&recv_buf[cursor..cursor+lenlen])?;
+        cursor += lenlen;
 
-                let ciphertext = if message_length > 0 {
-                    (&recv_buf[cursor..cursor+message_length as usize]).to_vec()
-                } else { 
-                    // I intend to write it such that the network layer throws a warning and not an error in response to this. 
-                    return Err(OuterEnvelopeError::ZeroLengthCiphertext(peer_address));
-                };
-                Ok((OuterEnvelope {
-                    session: session_name.clone(),
-                    body: EnvelopeBody::Ciphertext( 
-                        CiphertextMessage{ 
-                            counter,
-                            ciphertext,
-                        }
-                    )
-                }, cursor + message_length as usize))
-            }, 
-            None => {
-                let (protocol_message, protocol_message_len) = ProtocolMessage::decode(&recv_buf[cursor..])?; 
-                Ok((OuterEnvelope {
-                    session: session_name.clone(),
-                    body: EnvelopeBody::Protocol(protocol_message)
-                }, cursor + protocol_message_len as usize))
+        let ciphertext = if message_length > 0 {
+            (&recv_buf[cursor..cursor+message_length as usize]).to_vec()
+        } else { 
+            // I intend to write it such that the network layer throws a warning and not an error in response to this. 
+            return Err(OuterEnvelopeError::ZeroLengthCiphertext(peer_address));
+        };
+        Ok((OuterEnvelope {
+            session: session_name.clone(),
+            body: CiphertextMessage{ 
+                counter,
+                ciphertext,
             }
-        }
+        }, cursor + message_length as usize))
     }
 }
 

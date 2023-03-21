@@ -33,7 +33,7 @@ client.ron
 /logs/
 /protocol/
 /worlds/
-#Running tests form inside of VSCodium does this sometimes. 
+#Running tests from inside of VSCodium does this sometimes. 
 /gestalt-core/protocol/
 /gestalt-core/keys/
 /gestalt-core/logs/
