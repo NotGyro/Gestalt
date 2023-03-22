@@ -33,7 +33,7 @@ client.ron
 /logs/
 /protocol/
 /worlds/
-#Running tests form inside of VSCodium does this sometimes. 
+#Running tests from inside of VSCodium does this sometimes. 
 /gestalt-core/protocol/
 /gestalt-core/keys/
 /gestalt-core/logs/
@@ -57,12 +57,9 @@ latest.log
 .idea
 *.iml
 
-# Ignore Cargo lock
-Cargo.lock
-
 # Informal notes (I should use Github tasks soon)
 todo.md
 
 # Generated code
-
 /gestalt-names/src/generated/
+/gestalt-core/src/net/generated.rs

@@ -405,8 +405,7 @@ impl<'a> MesherState<'a> {
         tiles_to_art: &A,
         atlas: &mut TileAtlasLayout,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let (inner, mut textures_needed): (ArtCacheHolder, HashSet<ResourceId>) = match &chunk.inner
-        {
+        let (inner, mut textures_needed): (ArtCacheHolder, HashSet<ResourceId>) = match &chunk.inner {
             ChunkInner::Uniform(val) => {
                 let missing_texture = art_cache_missing_texture(atlas);
                 let mut textures_needed = HashSet::new();
