@@ -123,7 +123,6 @@ impl DevImageLoader {
 			kind: ResourceKind::PlainOldData,
 			signature: creator_identity.sign(&buf)?,
 		};
-
 		update_global_resource_metadata(&rid, metadata.clone());
 
 		self.images.insert(rid, image.into_rgba8());
@@ -341,6 +340,8 @@ pub fn run_client(
 
 	camera.set_aspect_ratio(renderer.get_aspect_ratio());
 
+	//camera.look_at(glam::Vec3::new(0.0, 0.0, 0.0));
+
 	//Set up some test art assets.
 	let air_id = 0;
 	let stone_id = 1;
@@ -416,11 +417,10 @@ pub fn run_client(
 	let mut has_focus = true;
 
 	let mut entity_world = crate::entity::EcsWorld::default();
-	let _test_entity = entity_world.spawn((
-		EntityPos::default(), 
+	let test_entity = entity_world.spawn((
+		EntityPos::new(EntityVec3::new(0.0, 0.0, 0.0)), 
 		BillboardDrawable::new(testlet_image_id.clone())
 	));
-	let mut entity_world = crate::entity::EcsWorld::default();
 	let test_entity_2 = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)), 
 		BillboardDrawable::new(testlet_2_image_id.clone())
@@ -489,6 +489,7 @@ pub fn run_client(
 				let adjusted_dy = dy * elapsed_secs * config.mouse_sensitivity_y;
 				if has_focus {
 					camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);
+					println!("{:?}", camera.get_front());
 				}
 			}
 			/*
@@ -677,6 +678,14 @@ pub fn run_client(
 					for dir in current_down.iter() {
 						camera.key_interact(*dir, elapsed_time);
 					}
+				}
+				match entity_world.query_one_mut::<&mut EntityPos>(test_entity_2) {
+					Ok(position) => {
+						let mut inner = position.get();
+						inner.y = game_start_time.elapsed().as_secs_f32().sin(); 
+						position.set(inner);
+					},
+					Err(_) => todo!(),
 				}
 
 				/*

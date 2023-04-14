@@ -13,7 +13,7 @@ use wgpu::util::DeviceExt;
 use std::collections::{HashMap, HashSet};
 use wgpu::{
 	Adapter, AdapterInfo, CreateSurfaceError, Device, DeviceDescriptor,
-	InstanceDescriptor, Queue, Surface,
+	InstanceDescriptor, Queue, Surface, PushConstantRange, ShaderStages,
 };
 use winit::window::Window;
 
@@ -121,7 +121,7 @@ const VERTICES: &[Vertex] = &[
     Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
     Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
 ];
-		
+
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: Mat4 = glam::mat4(
     Vec4::new(1.0, 0.0, 0.0, 0.0),
@@ -133,16 +133,29 @@ pub const OPENGL_TO_WGPU_MATRIX: Mat4 = glam::mat4(
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
-    mvp: [[f32; 4]; 4],
+    view_proj: [[f32; 4]; 4],
 }
 impl CameraUniform { 
 	pub fn new() -> Self { 
 		Self {
-			mvp: Mat4::IDENTITY.to_cols_array_2d()
+			view_proj: Mat4::IDENTITY.to_cols_array_2d()
 		}
 	}
 	pub fn update(&mut self, matrix: Mat4) {
-		self.mvp = matrix.to_cols_array_2d();
+		self.view_proj = matrix.to_cols_array_2d();
+	}
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct ModelPush {
+    matrix: [[f32; 4]; 4],
+}
+impl ModelPush {
+	pub fn new(matrix: Mat4) -> Self { 
+		Self {
+			matrix: matrix.to_cols_array_2d()
+		}
 	}
 }
 
@@ -167,9 +180,9 @@ pub struct Renderer {
     pending_texture: InternalImage,
     error_texture: InternalImage,
 
-    mvp_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
+    camera_uniform: CameraUniform,
+    camera_matrix_buffer: wgpu::Buffer,
+    camera_matrix_bind_group: wgpu::BindGroup,
 }
 
 impl Renderer {
@@ -215,12 +228,15 @@ impl Renderer {
 				.ok_or(InitRenderError::CannotRequestAdapter)?,
 		};
 
+		let features = wgpu::Features::default().union(wgpu::Features::PUSH_CONSTANTS);
+		let mut limits = wgpu::Limits::default(); 
+		limits.max_push_constant_size = std::mem::size_of::<ModelPush>() as u32; 
 		let (device, queue) = adapter
 			.request_device(
 				&DeviceDescriptor {
 					label: None,
-					features: wgpu::Features::default(),
-					limits: wgpu::Limits::default(),
+					features,
+					limits,
 				},
 				None,
 			)
@@ -327,7 +343,10 @@ impl Renderer {
 					&texture_bind_group_layout,
 					&camera_bind_group_layout,
 				],
-				push_constant_ranges: &[],
+				push_constant_ranges: &[PushConstantRange{ 
+					stages: ShaderStages::VERTEX,
+					range: 0..(std::mem::size_of::<ModelPush>() as u32),
+				}],
 			});
 
 		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -404,9 +423,9 @@ impl Renderer {
             texture_bind_group_layout,
 			vertex_buffer, 
 
-			mvp_uniform: camera_uniform,
-			camera_buffer,
-			camera_bind_group,
+			camera_uniform,
+			camera_matrix_buffer: camera_buffer,
+			camera_matrix_bind_group: camera_bind_group,
 
             pending_texture,
             missing_texture,
@@ -428,42 +447,46 @@ impl Renderer {
 		let view_projection_matrix = camera.build_view_projection_matrix();
 		let output = self.surface.get_current_texture()?;
 
+		let camera_matrix = OPENGL_TO_WGPU_MATRIX * view_projection_matrix;
+		self.camera_uniform.update(camera_matrix);
+		
+		self.queue.write_buffer(
+			&self.camera_matrix_buffer,
+			0,
+			bytemuck::cast_slice(&[self.camera_uniform]),
+		);
+
 		let view = output
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
 
-		for (_entity, (position, drawable)) in ecs_world.query::<(&EntityPos, &BillboardDrawable)>().iter() {
-			let mut encoder = self
-				.device
-				.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-					label: Some("Render Encoder"),
-				});
-			{
-				let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-					label: Some("Render Pass"),
-					color_attachments: &[
-						Some(wgpu::RenderPassColorAttachment {
-							view: &view,
-							resolve_target: None,
-							ops: wgpu::Operations {
-								load: wgpu::LoadOp::Clear(wgpu::Color {
-									r: 0.35,
-									g: 0.4,
-									b: 0.8,
-									a: 1.0,
-								}),
-								store: true,
-							},
-						}),
-					],
-					depth_stencil_attachment: None,
-				});
+		let mut encoder = self
+			.device
+			.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+				label: Some("Render Encoder"),
+			});
+		{
+			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				label: Some("Render Pass"),
+				color_attachments: &[
+					Some(wgpu::RenderPassColorAttachment {
+						view: &view,
+						resolve_target: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Clear(wgpu::Color {
+								r: 0.35,
+								g: 0.4,
+								b: 0.8,
+								a: 1.0,
+							}),
+							store: true,
+						},
+					}),
+				],
+				depth_stencil_attachment: None,
+			});
 
-				let model_matrix = Mat4::from_translation(position.get().into());
-				let mvp_matrix = OPENGL_TO_WGPU_MATRIX * view_projection_matrix * model_matrix;
-				self.mvp_uniform.update(mvp_matrix);
-				self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.mvp_uniform]));
-
+			for (entity, (position, drawable)) in ecs_world.query::<(&EntityPos, &BillboardDrawable)>().iter() {
 				let texture_maybe = match &drawable.texture_handle {
 					Some(handle) => self.loaded_textures.get(handle),
 					None => {
@@ -479,14 +502,20 @@ impl Renderer {
 				};
 				let texture = texture_maybe.unwrap();
 				render_pass.set_pipeline(&self.render_pipeline);
+
+				let model_matrix = Mat4::from_translation(position.get().into());
+				render_pass.set_push_constants(ShaderStages::VERTEX, 
+					0,
+					&bytemuck::cast_slice(&[ModelPush::new(model_matrix)]));
+
 				render_pass.set_bind_group(0, &texture.bind_group, &[]);
-				render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
+				render_pass.set_bind_group(1, &self.camera_matrix_bind_group, &[]);
 				render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 				render_pass.draw(0..(VERTICES.len() as u32), 0..1);
 			}
-
-			self.queue.submit(iter::once(encoder.finish()));
 		}
+
+		self.queue.submit(iter::once(encoder.finish()));
 		output.present();
 
 		Ok(())

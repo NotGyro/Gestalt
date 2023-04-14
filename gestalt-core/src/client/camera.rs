@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4, EulerRot};
 use winit::event::VirtualKeyCode;
 
 //TODO - here for testing, better input system needed.
@@ -145,9 +145,17 @@ impl Camera {
 		}
 	}
 
+	pub fn look_at(&mut self, target: Vec3) { 
+		let mat = glam::Mat4::look_at_rh(self.position, /*center*/ target, Vec3::new(0.0, 1.0, 0.0));
+		let (_, rot, _) = mat.to_scale_rotation_translation();
+		let (yaw, pitch, _roll) = rot.to_euler(EulerRot::YXZ);
+		self.yaw = yaw.to_degrees(); 
+		self.pitch = pitch.to_degrees();
+	}
+
 	pub fn mouse_interact(&mut self, dx: f32, dy: f32) {
-		self.yaw -= dx;
-		self.pitch = (self.pitch - dy).max(-89.0).min(89.0);
+		self.yaw = self.yaw - dx;
+		self.pitch = (self.pitch + dy).max(-89.0).min(89.0);
 
 		self.front = Camera::calc_front(self.yaw, self.pitch);
 		self.right = Camera::calc_right(&self.front, &self.world_up);
@@ -161,10 +169,11 @@ impl Camera {
 	}
 
 	fn calc_front(yaw: f32, pitch: f32) -> Vec3 {
-		let ya = yaw.to_radians();
-		let pa = pitch.to_radians();
-
-		Vec3::new(ya.cos() * pa.cos(), pa.sin(), ya.sin() * pa.cos()).normalize()
+        let sin_pitch = pitch.to_radians().sin();
+		let cos_pitch = pitch.to_radians().cos();
+        let sin_yaw = yaw.to_radians().sin();
+		let cos_yaw = yaw.to_radians().cos();
+		Vec3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize()
 	}
 
 	fn calc_right(front: &Vec3, world_up: &Vec3) -> Vec3 {
@@ -172,7 +181,8 @@ impl Camera {
 	}
 
 	fn calc_up(right: &Vec3, front: &Vec3) -> Vec3 {
-		right.cross(*front).normalize()
+		//right.cross(*front).normalize()
+		Vec3::new(0.0, 1.0, 0.0)
 	}
 
     pub fn build_view_projection_matrix(&self) -> glam::Mat4 {
