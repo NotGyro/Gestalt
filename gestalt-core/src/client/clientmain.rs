@@ -37,7 +37,7 @@ use crate::{
 		chunk::ChunkInner, fsworldstorage::WorldDefaults,
 		/*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/
 		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId,
-	}, entity::{EntityPos, EntityVec3, EntityRot},
+	}, entity::{EntityPos, EntityVec3, EntityRot, EntityScale},
 };
 use crate::{
 	//client::render::CubeArt,
@@ -372,6 +372,9 @@ pub fn run_client(
 	let testlet_2_image_id = image_loader
 		.preload_image_file("testvesaria.png", identity_keys)
 		.unwrap();
+	let testlet_3_image_id = image_loader
+		.preload_image_file("testpoak.png", identity_keys)
+		.unwrap();
 	/*
 	let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
@@ -427,12 +430,15 @@ pub fn run_client(
 		EntityRot::new_from_euler(DegreeAngle(30.0), DegreeAngle(0.0), DegreeAngle(0.0)),
 		BillboardDrawable::new(testlet_2_image_id.clone())
 	));
+	let test_entity_3 = entity_world.spawn((
+		EntityPos::new(EntityVec3::new(0.0, 0.0, -10.0)),
+		EntityScale::new(EntityVec3::new(8.0, 8.0, 8.0)),
+		BillboardDrawable::new(testlet_3_image_id.clone())
+	));
 
-	let texture_handle = renderer.ingest_image(&testlet_image_id, &mut image_loader);
-	println!("texture_handle: {}", texture_handle);
-
-	let texture_handle = renderer.ingest_image(&testlet_2_image_id, &mut image_loader);
-	println!("texture_handle: {}", texture_handle);
+	renderer.ingest_image(&testlet_image_id, &mut image_loader);
+	renderer.ingest_image(&testlet_2_image_id, &mut image_loader);
+	renderer.ingest_image(&testlet_3_image_id, &mut image_loader);
 
 	window.focus_window();
 

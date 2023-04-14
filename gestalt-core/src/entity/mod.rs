@@ -86,6 +86,32 @@ impl EntityRot {
 	}
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct EntityScale {
+	scale: EntityVec3,
+}
+impl EntityScale {
+	pub fn new(scale: EntityVec3) -> Self {
+		Self { scale }
+	}
+	#[inline(always)]
+	pub fn set(&mut self, new_scale: EntityVec3) {
+		self.scale = new_scale
+	}
+	#[inline(always)]
+	pub fn get(&self) -> EntityVec3 {
+		self.scale
+	}
+	pub fn grow_by(&mut self, change: EntityVec3) {
+		self.scale += change
+	}
+}
+impl Default for EntityScale {
+    fn default() -> Self {
+        Self { scale: EntityVec3::new(1.0, 1.0, 1.0) }
+    }
+}
+
 #[derive(Copy, Clone, Default, Debug)]
 pub struct EntityVelocity {
 	change_per_tick: EntityVec3,

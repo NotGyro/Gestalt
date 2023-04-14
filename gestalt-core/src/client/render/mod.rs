@@ -18,7 +18,7 @@ use wgpu::{
 use winit::window::Window;
 
 use crate::client::client_config::{ClientConfig, DisplaySize};
-use crate::entity::{EcsWorld, EntityPos, EntityRot};
+use crate::entity::{EcsWorld, EntityPos, EntityRot, EntityScale};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
 use crate::resource::{ResourceId, ResourceStatus};
 
@@ -68,7 +68,7 @@ pub(in crate::client::render) struct LoadedTextureRef {
     pub cell: u16,
 }*/
 
-struct LoadedTexture { 
+struct LoadedTexture {
     pub buffer_handle: wgpu::Texture,
     pub texture_view: wgpu::TextureView,
     pub bind_group: wgpu::BindGroup,
@@ -108,18 +108,16 @@ impl Vertex {
     }
 }
 
-const VERTICES: &[Vertex] = &[
-	Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
+// Not indexed because there are only 2 overlaps so it's not really worth it 
+// (reconsider if seams appear)
+const UNIT_BILLBOARD: &[Vertex] = &[
+	Vertex { position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 1.0], },
+	Vertex { position: [0.5, 0.5, 0.0], tex_coords: [1.0, 0.0], },
+	Vertex { position: [-0.5, 0.5, 0.0], tex_coords: [0.0, 0.0], },
 	
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
-	
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
+	Vertex { position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 1.0], },
+	Vertex { position: [0.5, -0.5, 0.0], tex_coords: [1.0, 1.0], },
+	Vertex { position: [0.5, 0.5, 0.0], tex_coords: [1.0, 0.0], },
 ];
 
 #[rustfmt::skip]
@@ -377,7 +375,7 @@ impl Renderer {
 				topology: wgpu::PrimitiveTopology::TriangleList,
 				strip_index_format: None,
 				front_face: wgpu::FrontFace::Ccw,
-				cull_mode: None, //Some(wgpu::Face::Back)
+				cull_mode: Some(wgpu::Face::Back),
 				polygon_mode: wgpu::PolygonMode::Fill,
 				unclipped_depth: false,
 				conservative: false,
@@ -407,7 +405,7 @@ impl Renderer {
 		let vertex_buffer = device.create_buffer_init(
 			&wgpu::util::BufferInitDescriptor {
 				label: Some("Vertex Buffer"),
-				contents: bytemuck::cast_slice(VERTICES),
+				contents: bytemuck::cast_slice(UNIT_BILLBOARD),
 				usage: wgpu::BufferUsages::VERTEX,
 			}
 		);
@@ -508,12 +506,14 @@ impl Renderer {
 			for (_entity, (
 					position, 
 					drawable,
-					rot_maybe
+					rot_maybe,
+					scale_maybe
 				)
 			) in ecs_world.query::<
 					(&EntityPos, 
 					&BillboardDrawable,
-					Option<&EntityRot>)
+					Option<&EntityRot>,
+					Option<&EntityScale>)
 				>().iter() {
 				let texture_maybe = match &drawable.texture_handle {
 					Some(handle) => self.loaded_textures.get(handle),
@@ -531,15 +531,27 @@ impl Renderer {
 				let texture = texture_maybe.unwrap();
 				render_pass.set_pipeline(&self.render_pipeline);
 
-				
-				let model_matrix = match rot_maybe { 
-					Some(rot ) => { 
+				let model_matrix = match (rot_maybe, scale_maybe) {
+					(Some(rot), Some(scale)) => {
+						Mat4::from_scale_rotation_translation(
+							scale.get().into(), 
+							rot.get(), 
+							position.get().into())
+					}, 
+					(Some(rot), None) => { 
 						Mat4::from_rotation_translation(rot.get(), position.get().into())
 					}
-					None => { 
+					(None, Some(scale)) => {
+						Mat4::from_scale_rotation_translation(
+							scale.get().into(), 
+							Quat::IDENTITY, 
+							position.get().into())
+					},
+					(None, None) => { 
 						Mat4::from_translation(position.get().into())
 					}
 				};
+
 				render_pass.set_push_constants(ShaderStages::VERTEX, 
 					0,
 					&bytemuck::cast_slice(&[ModelPush::new(model_matrix)]));
@@ -547,7 +559,7 @@ impl Renderer {
 				render_pass.set_bind_group(0, &texture.bind_group, &[]);
 				render_pass.set_bind_group(1, &self.camera_matrix_bind_group, &[]);
 				render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-				render_pass.draw(0..(VERTICES.len() as u32), 0..1);
+				render_pass.draw(0..(UNIT_BILLBOARD.len() as u32), 0..1);
 			}
 		}
 

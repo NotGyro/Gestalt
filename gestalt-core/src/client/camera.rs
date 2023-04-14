@@ -61,7 +61,7 @@ impl Default for Perspective {
         Self { 
 			aspect_ratio: 16.0 / 9.0,
 			fov_y: 80.0,
-			near_clip_z: 0.1,
+			near_clip_z: 0.001,
 			far_clip_z: 1000.0 }
     }
 }
