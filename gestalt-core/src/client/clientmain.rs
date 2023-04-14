@@ -21,7 +21,7 @@ use winit::{
 };
 
 use crate::{
-	client::{client_config::ClientConfig, render::Renderer},
+	client::{client_config::ClientConfig, render::{Renderer, drawable::BillboardDrawable}},
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
 		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide},
@@ -37,7 +37,7 @@ use crate::{
 		chunk::ChunkInner, fsworldstorage::WorldDefaults,
 		/*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/
 		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId,
-	},
+	}, entity::{EntityPos, EntityVec3},
 };
 use crate::{
 	//client::render::CubeArt,
@@ -320,6 +320,14 @@ pub fn run_client(
 
 	//let world_id = get_lobby_world_id(&identity_keys.public);
 
+	// Set up camera and view.
+	const FAST_CAMERA_SPEED: f32 = 16.0;
+	const SLOW_CAMERA_SPEED: f32 = 4.0;
+	let view_location = glam::Vec3::new(0.0, 1.0, 2.0);
+	let mut camera = camera::Camera::new(view_location, 16.0 / 9.0);
+
+	camera.speed = SLOW_CAMERA_SPEED;
+
 	// Set up window and event loop.
 	let window_builder = config.display_properties.to_window_builder();
 	let window = window_builder.build(&event_loop).unwrap();
@@ -328,8 +336,10 @@ pub fn run_client(
 	//let mut resolution = glam::UVec2::new(window_size.width, window_size.height);
 
 	let mut renderer = async_runtime
-		.block_on(Renderer::new(&window, &config))
+		.block_on(Renderer::new(&window, &camera, &config))
 		.unwrap();
+
+	camera.set_aspect_ratio(renderer.get_aspect_ratio());
 
 	//Set up some test art assets.
 	let air_id = 0;
@@ -353,6 +363,13 @@ pub fn run_client(
 		.unwrap();
 	let test_dirt_image_id = image_loader
 		.preload_image_file("testdirt.png", identity_keys)
+		.unwrap();
+
+	let testlet_image_id = image_loader
+		.preload_image_file("testlet.png", identity_keys)
+		.unwrap();
+	let testlet_2_image_id = image_loader
+		.preload_image_file("testvesaria.png", identity_keys)
 		.unwrap();
 	/*
 	let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
@@ -382,13 +399,6 @@ pub fn run_client(
 
 	let mut last_remesh_time = Instant::now();
 	*/
-	// Set up camera and view
-	const FAST_CAMERA_SPEED: f32 = 16.0;
-	const SLOW_CAMERA_SPEED: f32 = 4.0;
-	let view_location = glam::Vec3::new(3.0, 3.0, -5.0);
-	let mut camera = camera::Camera::new(view_location);
-
-	camera.speed = SLOW_CAMERA_SPEED;
 
 	let mut current_down = HashSet::new();
 
@@ -404,6 +414,23 @@ pub fn run_client(
 	let mut is_tab_down = false;
 
 	let mut has_focus = true;
+
+	let mut entity_world = crate::entity::EcsWorld::default();
+	let _test_entity = entity_world.spawn((
+		EntityPos::default(), 
+		BillboardDrawable::new(testlet_image_id.clone())
+	));
+	let mut entity_world = crate::entity::EcsWorld::default();
+	let test_entity_2 = entity_world.spawn((
+		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)), 
+		BillboardDrawable::new(testlet_2_image_id.clone())
+	));
+
+	let texture_handle = renderer.ingest_image(&testlet_image_id, &mut image_loader);
+	println!("texture_handle: {}", texture_handle);
+
+	let texture_handle = renderer.ingest_image(&testlet_2_image_id, &mut image_loader);
+	println!("texture_handle: {}", texture_handle);
 
 	window.focus_window();
 
@@ -636,6 +663,7 @@ pub fn run_client(
 						window_top_left.y + (window_size.height as i32 / 2),
 					)
 				};
+				camera.set_aspect_ratio(renderer.get_aspect_ratio());
 			}
 			// Render!
 			winit::event::Event::MainEventsCleared => {
@@ -669,7 +697,7 @@ pub fn run_client(
 				//Tell us some about it.
 				let draw_time = draw_start.elapsed();
 
-				renderer.render_frame().unwrap();
+				renderer.render_frame(&camera,&entity_world).unwrap();
 
 				let total_time = game_start_time.elapsed();
 				let current_fps = (total_frames as f64) / (total_time.as_secs_f64());

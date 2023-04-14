@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 use winit::event::VirtualKeyCode;
 
 //TODO - here for testing, better input system needed.
@@ -29,6 +29,44 @@ impl Directions {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Perspective {
+    pub aspect_ratio: f32,
+	/// fov_y in radians
+    pub fov_y: f32,
+    pub near_clip_z: f32,
+    pub far_clip_z: f32,
+}
+impl Perspective { 
+	pub fn new(aspect_ratio: f32) -> Self { 
+		Self { 
+			aspect_ratio,
+			..Default::default()
+		}
+	}
+	pub fn set_fov_y_degrees(&mut self, fov_y_degrees: f32) { 
+		self.fov_y = fov_y_degrees.to_radians()
+	}
+	/// Make a left-handed coordinate system perspective matrix
+	pub fn make_matrix(&self) -> Mat4 {
+		glam::Mat4::perspective_rh(
+			self.fov_y,
+			self.aspect_ratio,
+			self.near_clip_z,
+			self.far_clip_z)
+	}
+}
+
+impl Default for Perspective {
+    fn default() -> Self {
+        Self { 
+			aspect_ratio: 16.0 / 9.0,
+			fov_y: 80.0,
+			near_clip_z: 0.1,
+			far_clip_z: 1000.0 }
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Camera {
 	position: Vec3,
 	front: Vec3,
@@ -40,11 +78,12 @@ pub struct Camera {
 	pitch: f32,
 	pub speed: f32,
 	pub zoom: f32,
+	pub perspective: Perspective,
 }
 
 impl Camera {
-	pub fn new(pos: Vec3) -> Self {
-		let yaw = -90.0;
+	pub fn new(pos: Vec3, aspect_ratio: f32) -> Self {
+		let yaw = 0.0;
 		let pitch = 0.0;
 		let world_up = Vec3::new(0.0, 1.0, 0.0);
 		let front = Camera::calc_front(yaw, pitch);
@@ -60,7 +99,8 @@ impl Camera {
 			yaw,
 			pitch,
 			speed: 2.5,
-			zoom: 45.0,
+			zoom: 1.0,
+			perspective: Perspective::new(aspect_ratio),
 		}
 	}
 
@@ -75,7 +115,11 @@ impl Camera {
 	}
 
 	pub fn get_view_matrix(&self) -> Mat4 {
-		glam::Mat4::look_at_lh(self.position, /*center*/ self.position + self.front, self.up)
+		glam::Mat4::look_at_rh(self.position, /*center*/ self.position + self.front, self.up)
+	}
+
+	pub fn set_aspect_ratio(&mut self, aspect_ratio: f32) { 
+		self.perspective.aspect_ratio = aspect_ratio;
 	}
 
 	pub fn key_interact(&mut self, direction: Directions, time_elapsed: Duration) {
@@ -130,4 +174,11 @@ impl Camera {
 	fn calc_up(right: &Vec3, front: &Vec3) -> Vec3 {
 		right.cross(*front).normalize()
 	}
+
+    pub fn build_view_projection_matrix(&self) -> glam::Mat4 {
+        let view = self.get_view_matrix();
+        let proj = self.perspective.make_matrix();
+
+        return proj * view;
+    }
 }

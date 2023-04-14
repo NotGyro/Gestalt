@@ -39,6 +39,7 @@ xxhash-rust = { version = "0.8.5", features = ["xxh3", "const_xxh3"] }
 # This is what I consider the short-list of "I'm pulling in too many deps, 
 # let's rewrite this and have fewer deps when we have the energy." 
 # enum_variant_macros = "0.2.0"
+bytemuck = { version = "1.13", features = ["derive"] }
 base64 = "0.21"
 simplelog = "0.12"
 uuid = { version = "1.0.0", features = ["serde", "v4"] }
@@ -53,7 +54,7 @@ wgpu = { version = "0.15", features = ["spirv"] } # Add renderdoc when it gets s
 winit = "0.28"
 
 # Image loading
-image = "0.24.1"
+image = "0.24"
 
 # Cryptography
 ed25519-dalek = { version = "1.0.1", features = ["serde", "alloc", "batch"]}
