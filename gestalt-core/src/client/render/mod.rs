@@ -133,35 +133,16 @@ pub const OPENGL_TO_WGPU_MATRIX: Mat4 = glam::mat4(
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
+    mvp: [[f32; 4]; 4],
 }
 impl CameraUniform { 
 	pub fn new() -> Self { 
-		Self { 
-			view_proj: Mat4::IDENTITY.to_cols_array_2d()
+		Self {
+			mvp: Mat4::IDENTITY.to_cols_array_2d()
 		}
 	}
-	pub fn update_view_proj(&mut self, camera: &Camera) {
-		self.view_proj = (
-				OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()
-			).to_cols_array_2d();
-	}
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-    pub model: [[f32; 4]; 4],
-}
-
-impl InstanceRaw { 
-	pub fn new(&self, position: glam::Vec3, rotation: glam::Quat) -> Self { 
-		InstanceRaw { 
-			model: glam::Mat4::from_rotation_translation(
-				rotation, 
-				position
-			).to_cols_array_2d()
-		}
+	pub fn update(&mut self, matrix: Mat4) {
+		self.mvp = matrix.to_cols_array_2d();
 	}
 }
 
@@ -186,11 +167,9 @@ pub struct Renderer {
     pending_texture: InternalImage,
     error_texture: InternalImage,
 
-    camera_uniform: CameraUniform,
+    mvp_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-
-    instance_buffer: wgpu::Buffer,
 }
 
 impl Renderer {
@@ -303,7 +282,7 @@ impl Renderer {
 
 		// Set up the uniform for our camera. 
 		let mut camera_uniform = CameraUniform::new();
-		camera_uniform.update_view_proj(&camera);
+		camera_uniform.update(OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix());
 
 		let camera_buffer = device.create_buffer_init(
 			&wgpu::util::BufferInitDescriptor {
@@ -425,7 +404,7 @@ impl Renderer {
             texture_bind_group_layout,
 			vertex_buffer, 
 
-			camera_uniform,
+			mvp_uniform: camera_uniform,
 			camera_buffer,
 			camera_bind_group,
 
@@ -446,42 +425,45 @@ impl Renderer {
 		}
 	}
 	pub fn render_frame(&mut self, camera: &Camera, ecs_world: &EcsWorld) -> Result<(), DrawFrameError> {
-		self.camera_uniform.update_view_proj(camera);
+		let view_projection_matrix = camera.build_view_projection_matrix();
 		let output = self.surface.get_current_texture()?;
-		self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
 		let view = output
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
 
-		let mut encoder = self
-			.device
-			.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-				label: Some("Render Encoder"),
-			});
+		for (_entity, (position, drawable)) in ecs_world.query::<(&EntityPos, &BillboardDrawable)>().iter() {
+			let mut encoder = self
+				.device
+				.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+					label: Some("Render Encoder"),
+				});
+			{
+				let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+					label: Some("Render Pass"),
+					color_attachments: &[
+						Some(wgpu::RenderPassColorAttachment {
+							view: &view,
+							resolve_target: None,
+							ops: wgpu::Operations {
+								load: wgpu::LoadOp::Clear(wgpu::Color {
+									r: 0.35,
+									g: 0.4,
+									b: 0.8,
+									a: 1.0,
+								}),
+								store: true,
+							},
+						}),
+					],
+					depth_stencil_attachment: None,
+				});
 
-		{
-			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-				label: Some("Render Pass"),
-				color_attachments: &[
-					Some(wgpu::RenderPassColorAttachment {
-						view: &view,
-						resolve_target: None,
-						ops: wgpu::Operations {
-							load: wgpu::LoadOp::Clear(wgpu::Color {
-								r: 0.35,
-								g: 0.4,
-								b: 0.8,
-								a: 1.0,
-							}),
-							store: true,
-						},
-					}),
-				],
-				depth_stencil_attachment: None,
-			});
+				let model_matrix = Mat4::from_translation(position.get().into());
+				let mvp_matrix = OPENGL_TO_WGPU_MATRIX * view_projection_matrix * model_matrix;
+				self.mvp_uniform.update(mvp_matrix);
+				self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.mvp_uniform]));
 
-			for (_entity, (position, drawable)) in ecs_world.query::<(&EntityPos, &BillboardDrawable)>().iter() { 
 				let texture_maybe = match &drawable.texture_handle {
 					Some(handle) => self.loaded_textures.get(handle),
 					None => {
@@ -502,9 +484,9 @@ impl Renderer {
 				render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 				render_pass.draw(0..(VERTICES.len() as u32), 0..1);
 			}
-		}
 
-		self.queue.submit(iter::once(encoder.finish()));
+			self.queue.submit(iter::once(encoder.finish()));
+		}
 		output.present();
 
 		Ok(())
