@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use futures::executor::block_on;
-use glam::{Quat, Vec3, Mat4, Vec4};
+use glam::{Quat, Vec3, Mat4, Vec4, EulerRot};
 use image::{Rgba, RgbaImage};
 use log::info;
 use wgpu::util::DeviceExt;
@@ -506,13 +506,11 @@ impl Renderer {
 			for (_entity, (
 					position, 
 					drawable,
-					rot_maybe,
 					scale_maybe
 				)
 			) in ecs_world.query::<
 					(&EntityPos, 
 					&BillboardDrawable,
-					Option<&EntityRot>,
 					Option<&EntityScale>)
 				>().iter() {
 				let texture_maybe = match &drawable.texture_handle {
@@ -531,6 +529,7 @@ impl Renderer {
 				let texture = texture_maybe.unwrap();
 				render_pass.set_pipeline(&self.render_pipeline);
 
+				/*
 				let model_matrix = match (rot_maybe, scale_maybe) {
 					(Some(rot), Some(scale)) => {
 						Mat4::from_scale_rotation_translation(
@@ -549,6 +548,34 @@ impl Renderer {
 					},
 					(None, None) => { 
 						Mat4::from_translation(position.get().into())
+					}
+				};*/
+				let billboard_look_back = match drawable.style {
+					drawable::BillboardStyle::Spherical => { 
+						let look_matrix = Mat4::look_at_lh(
+							position.get().into(), 
+							*camera.get_position(), 
+							Vec3::new(0.0, 1.0, 0.0));
+						look_matrix.to_scale_rotation_translation().1
+					},
+					drawable::BillboardStyle::Cylindrical => {
+						let look_matrix = Mat4::look_at_lh(
+							position.get().into(), 
+							*camera.get_position(), 
+							Vec3::new(0.0, 1.0, 0.0));
+						let yaw = look_matrix.to_scale_rotation_translation().1.to_euler(EulerRot::YXZ).1; 
+						Quat::from_euler(EulerRot::YXZ, 0.0, yaw, 0.0)
+					},
+				};
+				let model_matrix = match scale_maybe {
+					Some(scale) => {
+						Mat4::from_scale_rotation_translation(
+							scale.get().into(), 
+							billboard_look_back, 
+							position.get().into())
+					}, 
+					None => { 
+						Mat4::from_rotation_translation(billboard_look_back, position.get().into())
 					}
 				};
 
