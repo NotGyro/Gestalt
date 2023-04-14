@@ -18,7 +18,7 @@ use wgpu::{
 use winit::window::Window;
 
 use crate::client::client_config::{ClientConfig, DisplaySize};
-use crate::entity::{EcsWorld, EntityPos};
+use crate::entity::{EcsWorld, EntityPos, EntityRot};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
 use crate::resource::{ResourceId, ResourceStatus};
 
@@ -183,6 +183,8 @@ pub struct Renderer {
     camera_uniform: CameraUniform,
     camera_matrix_buffer: wgpu::Buffer,
     camera_matrix_bind_group: wgpu::BindGroup,
+
+	depth_texture: (wgpu::Texture, wgpu::TextureView, wgpu::Sampler),
 }
 
 impl Renderer {
@@ -380,7 +382,13 @@ impl Renderer {
 				unclipped_depth: false,
 				conservative: false,
 			},
-			depth_stencil: None,
+			depth_stencil: Some(wgpu::DepthStencilState {
+				format: Self::DEPTH_FORMAT,
+				depth_write_enabled: true,
+				depth_compare: wgpu::CompareFunction::Less,
+				stencil: wgpu::StencilState::default(),
+				bias: wgpu::DepthBiasState::default(),
+			}),
 			multisample: wgpu::MultisampleState {
 				count: 1,
 				mask: !0,
@@ -403,6 +411,8 @@ impl Renderer {
 				usage: wgpu::BufferUsages::VERTEX,
 			}
 		);
+
+		let depth_texture = Self::create_depth_texture(&device, &surface_config, "depth_texture");
 
 		Ok(Self {
 			aspect_ratio,
@@ -430,6 +440,7 @@ impl Renderer {
             pending_texture,
             missing_texture,
             error_texture,
+			depth_texture,
 		})
 	}
 	/// Resize the display area
@@ -441,6 +452,7 @@ impl Renderer {
 			self.surface_config.height = new_size.height;
 			self.surface.configure(&self.device, &self.surface_config);
 			self.aspect_ratio = (new_size.width as f32) / (new_size.height as f32);
+			self.depth_texture = Self::create_depth_texture(&self.device, &self.surface_config, "depth_texture");
 		}
 	}
 	pub fn render_frame(&mut self, camera: &Camera, ecs_world: &EcsWorld) -> Result<(), DrawFrameError> {
@@ -483,10 +495,26 @@ impl Renderer {
 						},
 					}),
 				],
-				depth_stencil_attachment: None,
+				depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+					view: &self.depth_texture.1,
+					depth_ops: Some(wgpu::Operations {
+						load: wgpu::LoadOp::Clear(1.0),
+						store: true,
+					}),
+					stencil_ops: None,
+				}),
 			});
 
-			for (entity, (position, drawable)) in ecs_world.query::<(&EntityPos, &BillboardDrawable)>().iter() {
+			for (_entity, (
+					position, 
+					drawable,
+					rot_maybe
+				)
+			) in ecs_world.query::<
+					(&EntityPos, 
+					&BillboardDrawable,
+					Option<&EntityRot>)
+				>().iter() {
 				let texture_maybe = match &drawable.texture_handle {
 					Some(handle) => self.loaded_textures.get(handle),
 					None => {
@@ -503,7 +531,15 @@ impl Renderer {
 				let texture = texture_maybe.unwrap();
 				render_pass.set_pipeline(&self.render_pipeline);
 
-				let model_matrix = Mat4::from_translation(position.get().into());
+				
+				let model_matrix = match rot_maybe { 
+					Some(rot ) => { 
+						Mat4::from_rotation_translation(rot.get(), position.get().into())
+					}
+					None => { 
+						Mat4::from_translation(position.get().into())
+					}
+				};
 				render_pass.set_push_constants(ShaderStages::VERTEX, 
 					0,
 					&bytemuck::cast_slice(&[ModelPush::new(model_matrix)]));
@@ -631,6 +667,46 @@ impl Renderer {
 	pub fn get_aspect_ratio(&self) -> f32 { 
 		self.aspect_ratio
 	}
+	
+    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    
+    fn create_depth_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, label: &str) -> (wgpu::Texture, wgpu::TextureView, wgpu::Sampler) {
+        let size = wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        };
+        let desc = wgpu::TextureDescriptor {
+            label: Some(label),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[Self::DEPTH_FORMAT],
+        };
+        let texture = device.create_texture(&desc);
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                compare: Some(wgpu::CompareFunction::LessEqual),
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            }
+        );
+
+        (texture, view, sampler)
+    }
 }
 
 pub fn generate_engine_texture_image(

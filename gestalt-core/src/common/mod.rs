@@ -18,6 +18,61 @@ use xxhash_rust::xxh3::Xxh3Builder;
 
 pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
 
+pub trait Angle {
+	fn get_degrees(&self) -> f32;
+	fn get_radians(&self) -> f32;
+	fn from_degrees(value: f32) -> Self;
+	fn from_radians(value: f32) -> Self;
+}
+
+pub struct RadianAngle(pub f32);
+
+pub struct DegreeAngle(pub f32);
+
+impl Angle for RadianAngle {
+	#[inline(always)]
+    fn get_degrees(&self) -> f32 {
+        self.0.to_degrees()
+    }
+
+	#[inline(always)]
+    fn get_radians(&self) -> f32 {
+        self.0
+    }
+
+	#[inline(always)]
+	fn from_degrees(value: f32) -> Self {
+        RadianAngle(value.to_radians())
+    }
+
+	#[inline(always)]
+	fn from_radians(value: f32) -> Self {
+        RadianAngle(value)
+    }
+}
+
+impl Angle for DegreeAngle {
+	#[inline(always)]
+    fn get_degrees(&self) -> f32 {
+        self.0
+    }
+
+	#[inline(always)]
+    fn get_radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+
+	#[inline(always)]
+	fn from_degrees(value: f32) -> Self {
+        DegreeAngle(value)
+    }
+
+	#[inline(always)]
+	fn from_radians(value: f32) -> Self {
+        DegreeAngle(value.to_degrees())
+    }
+}
+
 /// Non-cryptographic hashmap for internally-generated structures.
 pub type FastHashMap<K, V> = std::collections::HashMap<K, V, Xxh3Builder>;
 /// Non-cryptographic hashset for internally-generated structures.

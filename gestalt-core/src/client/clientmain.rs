@@ -24,7 +24,7 @@ use crate::{
 	client::{client_config::ClientConfig, render::{Renderer, drawable::BillboardDrawable}},
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
-		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide},
+		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, DegreeAngle,
 	},
 	message::{self, MessageSender},
 	message_types::{
@@ -37,7 +37,7 @@ use crate::{
 		chunk::ChunkInner, fsworldstorage::WorldDefaults,
 		/*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/
 		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId,
-	}, entity::{EntityPos, EntityVec3},
+	}, entity::{EntityPos, EntityVec3, EntityRot},
 };
 use crate::{
 	//client::render::CubeArt,
@@ -419,10 +419,12 @@ pub fn run_client(
 	let mut entity_world = crate::entity::EcsWorld::default();
 	let test_entity = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(0.0, 0.0, 0.0)), 
+		EntityRot::new_from_euler(DegreeAngle(90.0), DegreeAngle(0.0), DegreeAngle(0.0)),
 		BillboardDrawable::new(testlet_image_id.clone())
 	));
 	let test_entity_2 = entity_world.spawn((
-		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)), 
+		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)),
+		EntityRot::new_from_euler(DegreeAngle(30.0), DegreeAngle(0.0), DegreeAngle(0.0)),
 		BillboardDrawable::new(testlet_2_image_id.clone())
 	));
 
@@ -489,7 +491,6 @@ pub fn run_client(
 				let adjusted_dy = dy * elapsed_secs * config.mouse_sensitivity_y;
 				if has_focus {
 					camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);
-					println!("{:?}", camera.get_front());
 				}
 			}
 			/*
