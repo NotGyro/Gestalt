@@ -486,11 +486,11 @@ fn main() {
 
 		std::thread::sleep(Duration::from_millis(50));
 
-		let _voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
+		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
 			net_send_channel::subscribe_sender(&server_identity).unwrap();
 
 		let mut client_join_receiver_from_server = net_recv_channel::subscribe::<JoinAnnounce>().unwrap();
-		let _client_voxel_receiver_from_server = net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
+		let client_voxel_receiver_from_server = net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
 
 		async_runtime.spawn(async move {
 			loop {
@@ -514,16 +514,14 @@ fn main() {
 			net_system_join_handle.await; //This is why quit_ready_sender exists. Make sure that's all done.
 			quit_ready.notify_ready();
 		});
-		/*
+		
 		client::clientmain::run_client(keys,
 				voxel_event_sender,
 				client_voxel_receiver_from_server,
 				Some(server_identity),
 				async_runtime,
 			);
-		*/
 	} else {
-		/*
 		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
 		let voxel_event_sender = NetSendChannel::new(voxel_event_sender);
 
@@ -541,6 +539,6 @@ fn main() {
 			None,
 			async_runtime,
 			);
-		*/
+		
 	}
 }

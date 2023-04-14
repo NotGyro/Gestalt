@@ -1,3 +1,5 @@
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE as BASE_64;
 use signature::{Signer, Verifier};
 
 use serde::{Deserialize, Serialize};
@@ -37,12 +39,10 @@ impl NodeIdentity {
 		&self.0
 	}
 	pub fn to_base64(&self) -> String {
-		let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
-		base64::encode_config(&self.0, config)
+		BASE_64.encode(&self.0)
 	}
 	pub fn from_base64(b64: &str) -> Result<Self, DecodeIdentityError> {
-		let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
-		let buf = base64::decode_config(b64, config)?;
+		let buf = BASE_64.decode(b64)?;
 		Self::from_bytes(&buf)
 	}
 	pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeIdentityError> {

@@ -9,7 +9,7 @@ use std::{
 	collections::{HashMap, HashSet},
 	fmt::Display,
 	future::Future,
-	pin::Pin,
+	pin::Pin, marker::PhantomData,
 };
 
 use serde::{Deserialize, Serialize};
@@ -230,6 +230,52 @@ pub mod version_string {
 		D: Deserializer<'de>,
 	{
 		deserializer.deserialize_string(VersionVisitor {})
+	}
+}
+
+/// Option-like semantics entirely within the type system.
+/// The compiler MAY optimize to this anyway, but this is a way to be sure if you'd
+/// prefer to have, for example, two different methods emitted by codegen for the Some
+/// case and for the None case, and give the optimization absolute knowledge of if the
+/// input is a Some or a None ahead of time. Useful in certain tight loops, for example
+/// in systems for the ECS.
+pub trait CompileTimeOption<T> {
+	const IS_SOME: bool;
+	fn unwrap(self) -> T;
+	fn to_option(self) -> Option<T>;
+}
+
+pub struct CompileTimeNone<T> {
+	_phantom: PhantomData<T>,
+}
+impl<T> CompileTimeOption<T> for CompileTimeNone<T> {
+	const IS_SOME: bool = false;
+	
+	#[inline(always)]
+    fn unwrap(self) -> T {
+		panic!("Cannot unwrap a CompileTimeNone!"); 
+    }
+
+	#[inline(always)]
+	fn to_option(self) -> Option<T> { 
+		None
+	}
+}
+
+#[repr(transparent)]
+pub struct CompileTimeSome<T>(T);
+
+impl<T> CompileTimeOption<T> for CompileTimeSome<T> {
+	const IS_SOME: bool = true;
+	
+	#[inline(always)]
+    fn unwrap(self) -> T {
+		self.0
+    }
+
+	#[inline(always)]
+	fn to_option(self) -> Option<T> { 
+		Some(self.0)
 	}
 }
 

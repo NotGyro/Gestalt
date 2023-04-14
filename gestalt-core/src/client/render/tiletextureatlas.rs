@@ -7,7 +7,7 @@ use glam::Vec2;
 use std::collections::HashMap;
 use image::{GenericImage, ImageError};
 
-use super::{generate_missing_texture_image, generate_pending_texture_image};
+use crate::client::render::{generate_missing_texture_image, generate_pending_texture_image};
 
 const INDEX_MISSING_TEXTURE: usize = 0;
 const INDEX_PENDING_TEXTURE: usize = 1;

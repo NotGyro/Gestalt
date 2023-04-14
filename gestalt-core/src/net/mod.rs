@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
+use base64::Engine;
 use log::error;
 use log::info;
 use log::trace;
@@ -23,8 +24,7 @@ use crate::message::QuitReceiver;
 use crate::net::net_channels::net_send_channel;
 use crate::net::net_channels::CONNECTED;
 
-//pub const PREPROTCOL_PORT: u16 = 54134;
-//pub const GESTALT_PORT: u16 = 54134;
+use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
 pub mod handshake;
 pub mod net_channels;
@@ -348,7 +348,7 @@ impl NetworkSystem {
 					let session_name = connection.get_full_session_name();
 
 					if self.our_role == SelfNetworkRole::Server {
-						trace!("Adding anticipated client entry for session {:?}", &base64::encode(connection.session_id));
+						trace!("Adding anticipated client entry for session {:?}", &BASE_64.encode(connection.session_id));
 						net_channels::register_peer(&connection.peer_identity);
 						self.anticipated_clients.insert( PartialSessionName{
 							session_id: connection.session_id.clone(),
@@ -390,7 +390,7 @@ impl NetworkSystem {
 												//Did we have an anticipated client with this partial session name?
 												match self.anticipated_clients.remove(&partial_session_name) {
 													Some(connection) => {
-														trace!("Popping anticipated client entry for session {:?} and establishing a session.", &base64::encode(connection.session_id));
+														trace!("Popping anticipated client entry for session {:?} and establishing a session.", &BASE_64.encode(connection.session_id));
 														trace!("Addr is {:?}", &session_name.peer_address);
 
 														let peer_identity = connection.peer_identity.clone();

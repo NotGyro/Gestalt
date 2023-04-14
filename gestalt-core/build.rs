@@ -2,7 +2,7 @@ use regex::Regex;
 use walkdir::WalkDir;
 
 fn main() {
-	// collect all NetMsgs and add them to a lookup table. here be jank.
+	// Collect all NetMsgs and add them to a lookup table. here be jank.
 	// NOTE: does not work with nested modules inside files (`mod inner { some stuff }`)
 	// NOTE: works properly with #[cfg(test)], but ONLY if it's annotating a module, e.g.
 	// #[cfg(test)]

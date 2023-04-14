@@ -1,3 +1,5 @@
+//! This needs a refactor more than life iteself.
+
 use std::{
     error::Error,
     io::{BufReader, Read, Write},
@@ -13,12 +15,14 @@ use uuid::Uuid;
 use winit::{
     event::{DeviceEvent, ElementState, VirtualKeyCode},
     event_loop::ControlFlow,
-    window::Fullscreen, dpi::PhysicalPosition,
+    window::{Fullscreen, CursorGrabMode}, dpi::PhysicalPosition,
 };
 
-use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole}, voxelstorage::VoxelSpace, WorldId, TilePos}, client::render::{TerrainRenderer, Renderer}, net::{net_channels::{NetSendChannel, net_send_channel, net_recv_channel::NetMsgReceiver},}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{SenderAccepts, MessageSender, self}};
+use crate::{common::{voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, identity::{IdentityKeyPair, NodeIdentity}}, resource::ResourceKind, world::{ChunkPos, chunk::ChunkInner, 
+    /*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/ voxelstorage::VoxelSpace, WorldId, TilePos, fsworldstorage::WorldDefaults}, 
+    client::{render::{/*TerrainRenderer,*/ Renderer}, client_config::ClientConfig}, net::{net_channels::{NetSendChannel, net_send_channel, net_recv_channel::NetMsgReceiver},}, message_types::{voxel::{VoxelChangeRequest, VoxelChangeAnnounce}, JoinDefaultEntry}, message::{MessageSender, self}};
 use crate::{
-    client::render::CubeArt,
+    //client::render::CubeArt,
     resource::{
         image::{ImageProvider, InternalImage, RetrieveImageError},
         update_global_resource_metadata, ResourceInfo, ResourceId, ResourceStatus,
@@ -38,111 +42,6 @@ pub const CLIENT_CONFIG_FILENAME: &str = "client_config.ron";
 // Input events come in through here.
 // Very important that input does not live on the same thread as any heavy compute tasks!
 // We need to still be able to read input when the weird stuff is happening.
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum WindowMode {
-    Windowed {
-        /// If windowed, can this be resized with the OS' drag-and-drop controls?
-        resizable: bool,
-        /// Maximized upon creation?
-        maximized: bool,
-    },
-    BorderlessFullscreen,
-    ExclusiveFullscreen,
-}
-impl Default for WindowMode {
-    fn default() -> Self {
-        WindowMode::Windowed {
-            resizable: true,
-            maximized: false,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-pub struct DisplaySize {
-    pub width: u32,
-    pub height: u32,
-}
-impl Default for DisplaySize {
-    fn default() -> Self {
-        DisplaySize {
-            width: 1024,
-            height: 768,
-        }
-    }
-}
-impl From<DisplaySize> for winit::dpi::Size {
-    fn from(size: DisplaySize) -> Self {
-        winit::dpi::Size::Physical(winit::dpi::PhysicalSize {
-            width: size.width,
-            height: size.height,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DisplayConfig {
-    pub size: DisplaySize,
-    pub window_mode: WindowMode,
-    ///Corresponds to winit::MonitorHandle.name()
-    pub monitor: Option<String>,
-    /// Which graphics card?
-    pub device: Option<String>,
-}
-
-impl DisplayConfig {
-    pub fn to_window_builder(&self) -> winit::window::WindowBuilder {
-        //TODO: Select device
-        let builder = winit::window::WindowBuilder::new()
-            .with_title(WINDOW_TITLE)
-            .with_inner_size(self.size);
-        match self.window_mode {
-            WindowMode::Windowed {
-                resizable,
-                maximized,
-            } => builder
-                .with_resizable(resizable)
-                .with_maximized(maximized)
-                .with_fullscreen(None),
-            WindowMode::BorderlessFullscreen => {
-                builder.with_fullscreen(Some(Fullscreen::Borderless(None)))
-            }
-            WindowMode::ExclusiveFullscreen => {
-                todo!()
-            }
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ClientConfig {
-    pub your_display_name: String, 
-    pub display_properties: DisplayConfig,
-    pub mouse_sensitivity_x: f32,
-    pub mouse_sensitivity_y: f32,
-}
-
-impl Default for ClientConfig {
-    fn default() -> Self {
-        Self {
-            your_display_name: String::from("player"),
-            display_properties: Default::default(),
-            mouse_sensitivity_x: 64.0,
-            mouse_sensitivity_y: 64.0,
-        }
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum StartClientError {
-    #[error("Could not read client config file, i/o error: {0:?}")]
-    CouldntOpenConfig(#[from] std::io::Error),
-    #[error("Could not parse server config file due to: {0}")]
-    CouldntParseConfig(#[from] ron::Error),
-    #[error("Could not initialize display: {0:?}")]
-    CreateWindowError(#[from] winit::error::OsError),
-}
 
 // Loads images for the purposes of testing in development.
 pub struct DevImageLoader {
@@ -217,8 +116,18 @@ impl Default for DevImageLoader {
     }
 }
 
-/// Dirt simple worldgen for the sake of early testing / development
-pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
+#[derive(thiserror::Error, Debug)]
+pub enum StartClientError {
+    #[error("Could not read client config file, i/o error: {0:?}")]
+    CouldntOpenConfig(#[from] std::io::Error),
+    #[error("Could not parse server config file due to: {0}")]
+    CouldntParseConfig(#[from] ron::error::SpannedError),
+    #[error("Could not initialize display: {0:?}")]
+    CreateWindowError(#[from] winit::error::OsError),
+}
+
+// Dirt simple worldgen for the sake of early testing / development
+/*pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
     const AIR_ID: TileId = 0; 
     const STONE_ID: TileId = 1; 
     const DIRT_ID: TileId = 2; 
@@ -261,8 +170,8 @@ pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], 
         raycast.step();
     }
     todo!()
-}
-
+}*/
+/*
 pub fn get_lobby_world_id(pubkey: &NodeIdentity) -> WorldId { 
 
     // Figure out lobby world ID
@@ -343,7 +252,7 @@ pub fn load_or_generate_dev_world(world: &mut TileSpace, world_id: &WorldId, chu
     let worldgen_elapsed_millis = worldgen_start.elapsed().as_micros() as f32 / 1000.0; 
     info!("Took {} milliseconds to do worldgen", worldgen_elapsed_millis);
     Ok(())
-}
+}*/
 
 // Never returns. Unfortunately the event loop's exit functionality does not just destroy the event loop, it closes the program.
 pub fn run_client(identity_keys: IdentityKeyPair, 
@@ -388,7 +297,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
         net_send_channel::send_to(join_msg, &server).unwrap(); 
     }
 
-    let world_id = get_lobby_world_id(&identity_keys.public);
+    //let world_id = get_lobby_world_id(&identity_keys.public);
 
     // Set up window and event loop.
     let window_builder = config.display_properties.to_window_builder();
@@ -397,7 +306,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     //let window_size = window.inner_size();
     //let mut resolution = glam::UVec2::new(window_size.width, window_size.height);
 
-    let mut renderer = async_runtime.block_on(Renderer::init(&window, &config)).unwrap(); 
+    let mut renderer = async_runtime.block_on(Renderer::new(&window, &config)).unwrap(); 
     
     //Set up some test art assets.
     let air_id = 0;
@@ -414,7 +323,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     let test_grass_image_id = image_loader.preload_image_file("testgrass.png", identity_keys).unwrap();
     let test_stone_image_id = image_loader.preload_image_file("teststone.png", identity_keys).unwrap();
     let test_dirt_image_id = image_loader.preload_image_file("testdirt.png", identity_keys).unwrap();
-
+    /*
     let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
 
     tiles_to_art.insert(air_id, CubeArt::airlike());
@@ -441,7 +350,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
 
     let mut last_remesh_time = Instant::now();
-
+    */
     // Set up camera and view 
     const FAST_CAMERA_SPEED: f32 = 16.0;
     const SLOW_CAMERA_SPEED: f32 = 4.0;
@@ -475,7 +384,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
 
     event_loop.run(move |event, _, control| {
         let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
-        if let Ok(events) = voxel_event_receiver.recv_poll() { 
+        /*if let Ok(events) = voxel_event_receiver.recv_poll() { 
             for (_ident, announce) in events { 
                 let old_value = world_space.get(announce.pos).unwrap();
                 if announce.new_tile != *old_value { 
@@ -483,7 +392,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     terrain_renderer.notify_changed(&announce.pos);
                 }
             }
-        }
+        }*/ 
         match event {
             //WindowEvent::MouseInput is more useful for GUI input 
             winit::event::Event::WindowEvent {
@@ -523,6 +432,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);
                 }
             },
+            /*
             winit::event::Event::DeviceEvent {
                 event: DeviceEvent::Button { 
                     button: 1, // Left-click
@@ -610,13 +520,18 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                         }
                     }
                 }
-            },
+            },*/
             winit::event::Event::WindowEvent{
                 event: winit::event::WindowEvent::Focused(focus_status),
                 ..
             } => {
                 has_focus = focus_status; 
-                window.set_cursor_grab(focus_status).unwrap();
+                if focus_status { 
+                    window.set_cursor_grab(CursorGrabMode::Confined).unwrap();
+                }
+                else { 
+                    window.set_cursor_grab(CursorGrabMode::None).unwrap();
+                }
                 window.set_cursor_visible(!focus_status);
             },
             winit::event::Event::WindowEvent{
@@ -644,7 +559,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
 
                     if is_alt_down && is_tab_down && has_focus { 
                         window.set_cursor_visible(true);
-                        window.set_cursor_grab(false).unwrap();
+                        window.set_cursor_grab(CursorGrabMode::None).unwrap();
                     }
                 }
                 else if input.state == ElementState::Released {
@@ -680,7 +595,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                 ..
             } => {
                 //resolution = glam::UVec2::new(physical_size.width, physical_size.height);
-                renderer.resize(physical_size);
+                renderer.resize(physical_size.into());
                 window_center = { 
                     let window_top_left = window.inner_position().unwrap(); 
                     let window_size = window.inner_size();
@@ -701,6 +616,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     }
                 }
 
+                /*
                 // Remesh if it's not too spammy. 
                 if last_remesh_time.elapsed().as_millis() > 64 { 
                     let meshing_start = Instant::now();
@@ -711,12 +627,14 @@ pub fn run_client(identity_keys: IdentityKeyPair,
     
                         last_remesh_time = Instant::now();
                     }
-                }
+                }*/
 
                 let draw_start = Instant::now();
                 
-                //Tell us some about it. 
+                //Tell us some about it.
                 let draw_time = draw_start.elapsed();
+
+                renderer.render_frame().unwrap();
 
                 let total_time = game_start_time.elapsed(); 
                 let current_fps = (total_frames as f64)/(total_time.as_secs_f64());
@@ -750,7 +668,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                     }
                 }
                 // Save world files
-
+                /*
                 let chunks = world_space.get_loaded_chunks();
                 for chunk_pos in chunks { 
                     let chunk = world_space.borrow_chunk(chunk_pos).unwrap();
@@ -758,7 +676,7 @@ pub fn run_client(identity_keys: IdentityKeyPair,
                         StoredWorldRole::Local, 
                         chunk_pos, 
                         chunk).unwrap();
-                };
+                };*/
             },
             // Other events we don't care about
             _ => {}

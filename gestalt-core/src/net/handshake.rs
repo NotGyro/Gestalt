@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use base64::Engine;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -16,6 +17,8 @@ use lazy_static::lazy_static;
 
 use super::preprotocol::HandshakeStepMessage;
 use super::{MessageCounter, SessionId};
+
+use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
 pub const PROTOCOL_VERSION: Version = version!(1, 0, 0);
 pub const PROTOCOL_NAME: &str = "gestalt_noise_laminar_udp";
@@ -390,7 +393,7 @@ pub fn initiate_handshake(
 	// Encode
 	let msg = HandshakeStepMessage {
 		handshake_step: 1,
-		data: base64::encode(&first_message_buf[0..wrote_len]),
+		data: BASE_64.encode(&first_message_buf[0..wrote_len]),
 	};
 
 	Ok((noise, msg))
@@ -408,7 +411,7 @@ pub fn receive_initial(
 	input: HandshakeStepMessage,
 ) -> Result<(snow::HandshakeState, HandshakeStepMessage), HandshakeError> {
 	if input.handshake_step == 1 {
-		let bytes_input = base64::decode(input.data)?;
+		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 1024];
 
 		let builder: snow::Builder<'_> = snow::Builder::new(NOISE_PARAMS.clone());
@@ -424,7 +427,7 @@ pub fn receive_initial(
 		// Encode
 		let msg = HandshakeStepMessage {
 			handshake_step: 2,
-			data: base64::encode(&write_buf[0..wrote_len]),
+			data: BASE_64.encode(&write_buf[0..wrote_len]),
 		};
 
 		Ok((state, msg))
@@ -443,7 +446,7 @@ pub async fn initiator_reply(
 	mismatch_approver: NewProtocolKeyApprover,
 ) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, NodeIdentity, Vec<u8>), HandshakeError> {
 	if input.handshake_step == 2 {
-		let bytes_input = base64::decode(input.data)?;
+		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 1024];
 
 		// Read their message.
@@ -459,7 +462,7 @@ pub async fn initiator_reply(
 		// Format it
 		let output = HandshakeStepMessage {
 			handshake_step: 3,
-			data: base64::encode(&send_buf[0..wrote_len]),
+			data: BASE_64.encode(&send_buf[0..wrote_len]),
 		};
 
 		// Get Noise key.
@@ -539,7 +542,7 @@ pub async fn receive_last_noise(
 	HandshakeError,
 > {
 	if input.handshake_step == 3 {
-		let bytes_input = base64::decode(input.data)?;
+		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 1024];
 
 		// Read their message.
@@ -574,12 +577,12 @@ pub async fn receive_last_noise(
 
 		// Build a HandshakeMessage asking for a signature.
 		let nonce = make_signing_nonce();
-		let base64_nonce = base64::encode(&nonce);
+		let base64_nonce = BASE_64.encode(&nonce);
 		let challenge = KeyChallenge {
 			static_challenge_name: CHALLENGE_NAME.to_string(),
 			sender_ident: our_gestalt_identity.to_base64(),
 			receiver_ident: peer_gestalt_identity.to_base64(),
-			session_id: base64::encode(&handshake_hash),
+			session_id: BASE_64.encode(&handshake_hash),
 			challenge: base64_nonce,
 		};
 		let json_challenge = serde_json::to_string(&challenge)?;
@@ -591,7 +594,7 @@ pub async fn receive_last_noise(
 		let mut buf = vec![0u8; 65535];
 		let encoded_length = transport.write_message(0, json_message.as_bytes(), &mut buf)?;
 		let buf_bytes = &buf[0..encoded_length];
-		let encoded_message = base64::encode(&buf_bytes);
+		let encoded_message = BASE_64.encode(&buf_bytes);
 
 		let step = HandshakeStepMessage {
 			handshake_step: 4,
@@ -612,7 +615,7 @@ pub fn initiator_sign_buf(
 	handshake_hash: &Vec<u8>,
 ) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter), HandshakeError> {
 	if input.handshake_step == 4 {
-		let bytes_input = base64::decode(input.data)?;
+		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 65535];
 
 		// Read their message.
@@ -625,7 +628,7 @@ pub fn initiator_sign_buf(
 			.sign(challenge_string.as_bytes())
 			.map_err(HandshakeError::CannotSign)?;
 		let our_signature_bytes = our_signature.as_bytes();
-		let our_signature_b64 = base64::encode(our_signature_bytes);
+		let our_signature_b64 = BASE_64.encode(our_signature_bytes);
 
 		// Validate header
 		let challenge: KeyChallenge =
@@ -647,18 +650,18 @@ pub fn initiator_sign_buf(
 		}
 		// Does it sign over the handshake hash?
 		let decoded_session_id =
-			base64::decode(&challenge.session_id).map_err(|_| HandshakeError::BadChallengeHeader)?;
+			BASE_64.decode(&challenge.session_id).map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &decoded_session_id != handshake_hash {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 
 		// Build a HandshakeMessage asking for a signature.
 		let nonce = make_signing_nonce();
-		let base64_nonce = base64::encode(&nonce);
+		let base64_nonce = BASE_64.encode(&nonce);
 		let challenge = KeyChallenge {
 			static_challenge_name: CHALLENGE_NAME.to_string(),
 			sender_ident: our_keys.public.to_base64(),
-			session_id: base64::encode(handshake_hash),
+			session_id: BASE_64.encode(handshake_hash),
 			challenge: base64_nonce,
 			receiver_ident: their_key.to_base64(),
 		};
@@ -672,7 +675,7 @@ pub fn initiator_sign_buf(
 		let mut buf = vec![0u8; 65535];
 		let encoded_length = state.write_message(0, json_message.as_bytes(), &mut buf)?;
 		let buf_bytes = &buf[0..encoded_length];
-		let encoded_message = base64::encode(&buf_bytes);
+		let encoded_message = BASE_64.encode(&buf_bytes);
 
 		let step = HandshakeStepMessage {
 			handshake_step: 5,
@@ -694,7 +697,7 @@ pub fn responder_sign(
 	handshake_hash: &Vec<u8>,
 ) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, MessageCounter), HandshakeError> {
 	if input.handshake_step == 5 {
-		let bytes_input = base64::decode(input.data)?;
+		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 65535];
 
 		// Read their message.
@@ -704,7 +707,7 @@ pub fn responder_sign(
 		let msg: HandshakeMessage5 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
 
 		// Validate their signature
-		let their_sig = base64::decode(msg.initiator_signature.as_bytes())?;
+		let their_sig = BASE_64.decode(msg.initiator_signature.as_bytes())?;
 		peer_identity
 			.verify_signature(our_challenge.as_bytes(), &their_sig)
 			.map_err(HandshakeError::BadSignature)?;
@@ -715,7 +718,7 @@ pub fn responder_sign(
 			.sign(challenge_string.as_bytes())
 			.map_err(HandshakeError::CannotSign)?;
 		let our_signature_bytes = our_signature.as_bytes();
-		let our_signature_b64 = base64::encode(our_signature_bytes);
+		let our_signature_b64 = BASE_64.encode(our_signature_bytes);
 
 		// Validate their header
 		let challenge: KeyChallenge =
@@ -737,7 +740,7 @@ pub fn responder_sign(
 		}
 		// Does it sign over the handshake hash?
 		let decoded_session_id =
-			base64::decode(&challenge.session_id).map_err(|_| HandshakeError::BadChallengeHeader)?;
+			BASE_64.decode(&challenge.session_id).map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &decoded_session_id != handshake_hash {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
@@ -751,7 +754,7 @@ pub fn responder_sign(
 		let mut buf = vec![0u8; 65535];
 		let encoded_length = state.write_message(1, json_message.as_bytes(), &mut buf)?;
 		let buf_bytes = &buf[0..encoded_length];
-		let encoded_message = base64::encode(&buf_bytes);
+		let encoded_message = BASE_64.encode(&buf_bytes);
 
 		let step = HandshakeStepMessage {
 			handshake_step: 6,
@@ -771,7 +774,7 @@ pub fn initiator_final(
 	our_challenge: String,
 ) -> Result<(snow::StatelessTransportState, MessageCounter), HandshakeError> {
 	if input.handshake_step == 6 {
-		let bytes_input = base64::decode(input.data)?;
+		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 65535];
 
 		// Read their message.
@@ -780,7 +783,7 @@ pub fn initiator_final(
 		// Get the inner message.
 		let msg: HandshakeMessage6 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
 		// Validate their signature
-		let their_sig = base64::decode(msg.responder_signature)?;
+		let their_sig = BASE_64.decode(msg.responder_signature)?;
 		peer_identity
 			.verify_signature(our_challenge.as_bytes(), &their_sig)
 			.map_err(HandshakeError::BadSignature)?;
