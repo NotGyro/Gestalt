@@ -13,10 +13,14 @@ fn main() {
 	// (The mod block must be at the end of the file)
 
 	let attr_regex = Regex::new(r#"#\[netmsg\([^\)]+\)\]"#).unwrap();
-	let struct_regex =
-		Regex::new(r#"(?:pub(?:\(crate\))?)?[[:space:]]+struct[[:space:]]+([A-Za-z0-9]+)[[:space:]]*\{"#).unwrap();
-	let test_regex =
-		Regex::new(r#"#\[cfg\(test\)\][[:space:]]+(?:pub[[:space:]]+)?mod[[:space:]]+([A-Za-z0-9_]+)"#).unwrap();
+	let struct_regex = Regex::new(
+		r#"(?:pub(?:\(crate\))?)?[[:space:]]+struct[[:space:]]+([A-Za-z0-9]+)[[:space:]]*\{"#,
+	)
+	.unwrap();
+	let test_regex = Regex::new(
+		r#"#\[cfg\(test\)\][[:space:]]+(?:pub[[:space:]]+)?mod[[:space:]]+([A-Za-z0-9_]+)"#,
+	)
+	.unwrap();
 
 	let mut output = r#"use std::collections::HashMap;
 use toolbelt::once::InitOnce;

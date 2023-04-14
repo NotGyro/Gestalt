@@ -53,7 +53,8 @@ impl LaminarConnectionManager {
 			outbox: VecDeque::default(),
 			inbox: VecDeque::default(),
 		};
-		let connection_state = VirtualConnection::create_connection(&mut messenger, peer_address, time);
+		let connection_state =
+			VirtualConnection::create_connection(&mut messenger, peer_address, time);
 
 		LaminarConnectionManager {
 			peer_address,
@@ -74,7 +75,8 @@ impl LaminarConnectionManager {
 			//at_least_one = true;
 			//let was_est = self.connection_state.is_established();
 			//Processing inbound
-			self.connection_state.process_packet(messenger, payload.as_ref(), time);
+			self.connection_state
+				.process_packet(messenger, payload.as_ref(), time);
 			//if !was_est && self.connection_state.is_established() {
 			//    info!("Connection established with {:?}", self.peer_address);
 			//}

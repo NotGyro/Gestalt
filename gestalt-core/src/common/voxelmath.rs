@@ -151,8 +151,14 @@ where
 	}
 }
 
-pub trait VoxelCoord: 'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default {}
-impl<T> VoxelCoord for T where T: 'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default {}
+pub trait VoxelCoord:
+	'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default
+{
+}
+impl<T> VoxelCoord for T where
+	T: 'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default
+{
+}
 
 /// A point in Voxel space. (A cell.)
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,7 +242,11 @@ where
 
 macro_rules! vpos {
 	($x:expr, $y:expr, $z:expr) => {
-		VoxelPos { x: $x, y: $y, z: $z }
+		VoxelPos {
+			x: $x,
+			y: $y,
+			z: $z,
+		}
 	};
 }
 
@@ -1110,7 +1120,10 @@ where
 	/// Returns the cell adjacent to this one in the direction passed
 	#[inline]
 	#[allow(dead_code)]
-	pub fn get_neighbor_unsigned(&self, direction: VoxelSide) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
+	pub fn get_neighbor_unsigned(
+		&self,
+		direction: VoxelSide,
+	) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
 		match direction {
 			VoxelSide::PosiX => Ok(VoxelPos {
 				x: self.x + T::one(),
@@ -1207,7 +1220,7 @@ impl CubeOrientation {
 #[derive(Clone, Debug)]
 pub struct VoxelRaycast {
 	pub pos: VoxelPos<i32>,
-	t_max: glam::Vec3,       //Where does the ray cross the first voxel boundary? (in all directions)
+	t_max: glam::Vec3, //Where does the ray cross the first voxel boundary? (in all directions)
 	t_delta: glam::Vec3, //How far along do we need to move for the length of that movement to equal the width of a voxel?
 	step_dir: VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
 	last_direction: VoxelAxis,
@@ -1586,8 +1599,16 @@ fn test_get_neighbor() {
 
 #[test]
 fn test_contains() {
-	let low: VoxelPos<i32> = VoxelPos { x: -40, y: -40, z: -40 };
-	let high: VoxelPos<i32> = VoxelPos { x: -10, y: -10, z: -10 };
+	let low: VoxelPos<i32> = VoxelPos {
+		x: -40,
+		y: -40,
+		z: -40,
+	};
+	let high: VoxelPos<i32> = VoxelPos {
+		x: -10,
+		y: -10,
+		z: -10,
+	};
 	let ran: VoxelRange<i32> = VoxelRange {
 		lower: low,
 		upper: high,

@@ -114,8 +114,10 @@ pub struct NetworkSystem {
 	/// Per-session channels for routing incoming UDP packets to sessions.
 	inbound_channels: HashMap<FullSessionName, mpsc::UnboundedSender<Vec<CiphertextEnvelope>>>,
 	/// This is how the session objects let us know it's their time to go.
-	kill_from_inside_session_sender: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
-	kill_from_inside_session_receiver: mpsc::UnboundedReceiver<(FullSessionName, Vec<SessionLayerError>)>,
+	kill_from_inside_session_sender:
+		mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
+	kill_from_inside_session_receiver:
+		mpsc::UnboundedReceiver<(FullSessionName, Vec<SessionLayerError>)>,
 	/// This is how we shoot the other task in the head.
 	session_kill_from_outside: HashMap<FullSessionName, tokio::sync::oneshot::Sender<()>>,
 	session_to_identity: HashMap<FullSessionName, NodeIdentity>,
@@ -137,7 +139,9 @@ impl NetworkSystem {
 
 		let socket = match our_role {
 			SelfNetworkRole::Server => UdpSocket::bind(address).await?,
-			SelfNetworkRole::Client => UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).await?,
+			SelfNetworkRole::Client => {
+				UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).await?
+			}
 		};
 
 		Ok(Self {
@@ -190,9 +194,11 @@ impl NetworkSystem {
 
 				// Make a channel
 				let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
-				self.inbound_channels.insert(actual_address, from_net_sender);
+				self.inbound_channels
+					.insert(actual_address, from_net_sender);
 
-				let (kill_from_outside_sender, kill_from_outside_receiver) = tokio::sync::oneshot::channel::<()>();
+				let (kill_from_outside_sender, kill_from_outside_receiver) =
+					tokio::sync::oneshot::channel::<()>();
 				self.session_kill_from_outside
 					.insert(session.get_session_name(), kill_from_outside_sender);
 
@@ -295,7 +301,9 @@ impl NetworkSystem {
 
 				let session_name = connection.get_full_session_name();
 
-				self.add_new_session(session_name, connection).await.unwrap();
+				self.add_new_session(session_name, connection)
+					.await
+					.unwrap();
 
 				Ok(())
 			}
@@ -529,7 +537,7 @@ mod test {
 	}
 
 	#[tokio::test]
-	#[ignore] //Ignored until cause of GH Actions test flakiness can be ascertained. 
+	#[ignore] //Ignored until cause of GH Actions test flakiness can be ascertained.
 	async fn session_with_localhost() {
 		// Init stuff
 		let mutex_guard = NET_TEST_MUTEX.lock().await;
@@ -549,7 +557,8 @@ mod test {
 
 		// Mismatch approver stuff.
 		let mismatch_report_channel: BroadcastChannel<NodeIdentity> = BroadcastChannel::new(1024);
-		let mismatch_approve_channel: BroadcastChannel<(NodeIdentity, bool)> = BroadcastChannel::new(1024);
+		let mismatch_approve_channel: BroadcastChannel<(NodeIdentity, bool)> =
+			BroadcastChannel::new(1024);
 		let mismatch_report_receiver = mismatch_report_channel.receiver_subscribe();
 		let mismatch_approve_sender = mismatch_approve_channel.sender_subscribe();
 		// Spawn our little "explode if the key isn't new" system.
@@ -619,7 +628,9 @@ mod test {
 		)
 		.await
 		.unwrap();
-		client_completed_sender.send(client_completed_connection).unwrap();
+		client_completed_sender
+			.send(client_completed_connection)
+			.unwrap();
 
 		let connected_peer = connected_notifier.recv_wait().await.unwrap();
 		assert!(connected_peer.contains(&server_key_pair.public));
@@ -661,7 +672,9 @@ mod test {
 		let server_to_client_sender: NetSendChannel<TestNetMsg> =
 			net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
 		info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
-		server_to_client_sender.send_one(test_reply.clone()).unwrap();
+		server_to_client_sender
+			.send_one(test_reply.clone())
+			.unwrap();
 
 		{
 			let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait())

@@ -38,7 +38,8 @@ pub(crate) const fn chunk_i_to_xyz(i: usize, chunk_size: usize) -> (usize, usize
 #[inline(always)]
 pub(crate) const fn get_pos_x_offset(i: usize, chunk_size: usize) -> Option<usize> {
 	let chunk_volume = chunk_size * chunk_size * chunk_size;
-	if (i + chunk_x_to_i_component(1, chunk_size) < chunk_volume) && (chunk_i_to_xyz(i, chunk_size).0 + 1 < chunk_size)
+	if (i + chunk_x_to_i_component(1, chunk_size) < chunk_volume)
+		&& (chunk_i_to_xyz(i, chunk_size).0 + 1 < chunk_size)
 	{
 		Some(i + chunk_x_to_i_component(1, chunk_size))
 	} else {
@@ -56,7 +57,8 @@ pub(crate) const fn get_neg_x_offset(i: usize, chunk_size: usize) -> Option<usiz
 #[inline(always)]
 pub(crate) const fn get_pos_y_offset(i: usize, chunk_size: usize) -> Option<usize> {
 	let chunk_volume = chunk_size * chunk_size * chunk_size;
-	if (i + chunk_y_to_i_component(1, chunk_size) < chunk_volume) && (chunk_i_to_xyz(i, chunk_size).1 + 1 < chunk_size)
+	if (i + chunk_y_to_i_component(1, chunk_size) < chunk_volume)
+		&& (chunk_i_to_xyz(i, chunk_size).1 + 1 < chunk_size)
 	{
 		Some(i + chunk_y_to_i_component(1, chunk_size))
 	} else {
@@ -74,7 +76,8 @@ pub(crate) const fn get_neg_y_offset(i: usize, chunk_size: usize) -> Option<usiz
 #[inline(always)]
 pub(crate) const fn get_pos_z_offset(i: usize, chunk_size: usize) -> Option<usize> {
 	let chunk_volume = chunk_size * chunk_size * chunk_size;
-	if (i + chunk_z_to_i_component(1, chunk_size) < chunk_volume) && (chunk_i_to_xyz(i, chunk_size).2 + 1 < chunk_size)
+	if (i + chunk_z_to_i_component(1, chunk_size) < chunk_volume)
+		&& (chunk_i_to_xyz(i, chunk_size).2 + 1 < chunk_size)
 	{
 		Some(i + chunk_z_to_i_component(1, chunk_size))
 	} else {
@@ -151,7 +154,8 @@ where
 	}
 	/// Does not bounds check
 	pub(crate) fn get_raw(&self, coord: VoxelPos<P>) -> &T {
-		&self.data[chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), self.size)]
+		&self.data
+			[chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), self.size)]
 	}
 	/// Does not bounds check
 	pub(crate) fn set_raw(&mut self, coord: VoxelPos<P>, value: T) {
@@ -270,7 +274,12 @@ where
 	pub(crate) fn set_raw(&mut self, coord: VoxelPos<P>, value: T) {
 		(*self
 			.data
-			.get_mut(chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), SIZE))
+			.get_mut(chunk_xyz_to_i(
+				coord.x.as_usize(),
+				coord.y.as_usize(),
+				coord.z.as_usize(),
+				SIZE,
+			))
 			.unwrap()) = value;
 	}
 
@@ -303,9 +312,12 @@ where
 			}));
 		}
 		//Packed array access
-		let result: Option<&T> =
-			self.data
-				.get(chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), SIZE));
+		let result: Option<&T> = self.data.get(chunk_xyz_to_i(
+			coord.x.as_usize(),
+			coord.y.as_usize(),
+			coord.z.as_usize(),
+			SIZE,
+		));
 		Ok(result.unwrap())
 	}
 
@@ -321,7 +333,12 @@ where
 		//packed array access
 		(*self
 			.data
-			.get_mut(chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), SIZE))
+			.get_mut(chunk_xyz_to_i(
+				coord.x.as_usize(),
+				coord.y.as_usize(),
+				coord.z.as_usize(),
+				SIZE,
+			))
 			.unwrap()) = value;
 
 		Ok(())

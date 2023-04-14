@@ -23,7 +23,8 @@ use super::{
 	net_channels::{InboundMsgSender, INBOUND_NET_MESSAGES},
 	netmsg::{CiphertextEnvelope, CiphertextMessage, MessageSidedness},
 	reliable_udp::{LaminarConfig, LaminarConnectionManager, LaminarWrapperError},
-	MessageCounter, NetMsgDomain, OuterEnvelope, PacketIntermediary, SelfNetworkRole, SuccessfulConnect,
+	MessageCounter, NetMsgDomain, OuterEnvelope, PacketIntermediary, SelfNetworkRole,
+	SuccessfulConnect,
 };
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -85,7 +86,9 @@ pub enum SessionLayerError {
 	CryptographicError(#[from] snow::Error),
 	#[error("A packet was given to the wrong session state to decrypt! Our session is {0} and the session ID on the packet is {1}")]
 	WrongChannel(String, String),
-	#[error("Laminar asked to send a packet to {0:?} but this session is a communicating with {1:?}")]
+	#[error(
+		"Laminar asked to send a packet to {0:?} but this session is a communicating with {1:?}"
+	)]
 	WrongIpSend(SocketAddr, SocketAddr),
 	#[error("Mutliple errors were detected while handling inbound packets: {0:?}")]
 	ErrorBatch(Vec<SessionLayerError>),
@@ -97,7 +100,9 @@ pub enum SessionLayerError {
 	LaminarTimeout(SocketAddr),
 	#[error("Peer {0:?} disconnected.")]
 	LaminarDisconnect(SocketAddr),
-	#[error("Peer {0:?} sent a Laminar \"connect\" message after the session was already started!")]
+	#[error(
+		"Peer {0:?} sent a Laminar \"connect\" message after the session was already started!"
+	)]
 	ConnectAfterStarted(SocketAddr),
 	#[error("Variable-length integer could not be decoded: {0:?}")]
 	VarIntError(#[from] vu64::Error),
@@ -105,7 +110,9 @@ pub enum SessionLayerError {
 	UnrecognizedMsg(NetMsgId, String),
 	#[error("A NetMessage of type {0} has been receved from {1}, but we are a {2:?} and this message's sidedness is a {3:?}.")]
 	WrongSidedness(NetMsgId, String, SelfNetworkRole, MessageSidedness),
-	#[error("Counter for a session with {0:?} is at the maximum value for a 4-byte unsized integer!")]
+	#[error(
+		"Counter for a session with {0:?} is at the maximum value for a 4-byte unsized integer!"
+	)]
 	ExhaustedCounter(SocketAddr),
 }
 
@@ -160,7 +167,8 @@ impl Session {
 		push_channel: PushSender,
 		time: Instant,
 	) -> Self {
-		let mut laminar_layer = LaminarConnectionManager::new(connection.peer_address, &laminar_config, time);
+		let mut laminar_layer =
+			LaminarConnectionManager::new(connection.peer_address, &laminar_config, time);
 		laminar_layer.connection_state.last_heard = time;
 
 		let mut valid_incoming_messages = new_fast_hash_set();
@@ -198,14 +206,19 @@ impl Session {
 	}
 
 	/// Encrypts the raw byte blobs produced by Laminar and encloses them in an OuterEnvelope,  
-	fn encrypt_packet<T: AsRef<[u8]>>(&mut self, plaintext: T) -> Result<OuterEnvelope, SessionLayerError> {
+	fn encrypt_packet<T: AsRef<[u8]>>(
+		&mut self,
+		plaintext: T,
+	) -> Result<OuterEnvelope, SessionLayerError> {
 		self.local_counter
 			.checked_add(1)
 			.ok_or(SessionLayerError::ExhaustedCounter(self.peer_address.clone()))?;
 		let mut buffer = vec![0u8; ((plaintext.as_ref().len() as usize) * 3) + 64];
-		let len_written =
-			self.transport_cryptography
-				.write_message(self.local_counter as u64, plaintext.as_ref(), &mut buffer)?;
+		let len_written = self.transport_cryptography.write_message(
+			self.local_counter as u64,
+			plaintext.as_ref(),
+			&mut buffer,
+		)?;
 		buffer.truncate(len_written);
 		let full_session_name = self.get_session_name();
 		Ok(OuterEnvelope {
@@ -218,16 +231,22 @@ impl Session {
 	}
 
 	/// Called inside process_inbound()
-	fn decrypt_envelope(&mut self, envelope: CiphertextEnvelope) -> Result<Vec<u8>, SessionLayerError> {
+	fn decrypt_envelope(
+		&mut self,
+		envelope: CiphertextEnvelope,
+	) -> Result<Vec<u8>, SessionLayerError> {
 		let CiphertextEnvelope {
 			session: _session_id,
-			body: CiphertextMessage { counter, ciphertext },
+			body: CiphertextMessage {
+				counter,
+				ciphertext,
+			},
 		} = envelope;
 
 		let mut buf = vec![0u8; (ciphertext.len() * 3) / 2];
-		let len_read = self
-			.transport_cryptography
-			.read_message(counter as u64, &ciphertext, &mut buf)?;
+		let len_read =
+			self.transport_cryptography
+				.read_message(counter as u64, &ciphertext, &mut buf)?;
 		buf.truncate(len_read);
 		Ok(buf)
 	}
@@ -265,7 +284,10 @@ impl Session {
 					// How long is our varint?
 					let message_type_first_byte = pkt.payload()[0];
 					let message_type_len = vu64::decoded_len(message_type_first_byte);
-					match vu64::decode_with_length(message_type_len, &pkt.payload()[0..message_type_len as usize]) {
+					match vu64::decode_with_length(
+						message_type_len,
+						&pkt.payload()[0..message_type_len as usize],
+					) {
 						Ok(message_type_id) => {
 							let message_type_id = message_type_id as NetMsgId;
 							trace!(
@@ -281,12 +303,17 @@ impl Session {
 							if finished_packets.get(&message_type_id).is_none() {
 								finished_packets.insert(message_type_id, Vec::default());
 							}
-							finished_packets.get_mut(&message_type_id).unwrap().push(message);
+							finished_packets
+								.get_mut(&message_type_id)
+								.unwrap()
+								.push(message);
 						}
 						Err(e) => errors.push(e.into()),
 					}
 				}
-				laminar::SocketEvent::Timeout(addr) => errors.push(SessionLayerError::LaminarTimeout(addr.clone())),
+				laminar::SocketEvent::Timeout(addr) => {
+					errors.push(SessionLayerError::LaminarTimeout(addr.clone()))
+				}
 				laminar::SocketEvent::Disconnect(addr) => {
 					errors.push(SessionLayerError::LaminarDisconnect(addr.clone()))
 				}
@@ -331,7 +358,10 @@ impl Session {
 						self.local_role,
 						info.sidedness.clone(),
 					),
-					None => SessionLayerError::UnrecognizedMsg(message_type, self.peer_identity.to_base64()),
+					None => SessionLayerError::UnrecognizedMsg(
+						message_type,
+						self.peer_identity.to_base64(),
+					),
 				});
 			}
 		}

@@ -56,7 +56,7 @@ pub enum ParseResourceIdError {
 	#[error("could not parse {0} as a resource ID, did not recognize ResourceId format {1}. Most likely this was sent by a newer version of the Gestalt Engine")]
 	UnrecognizedVersion(String, u8),
 }
-const SEP: char = '.'; 
+const SEP: char = '.';
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum VerifyResourceError {
@@ -134,7 +134,11 @@ impl ResourceId {
 
 		let mut hash: [u8; 32] = [0; 32];
 		hash.copy_from_slice(&bytes[0..32]);
-		Ok(ResourceId { version, length, hash })
+		Ok(ResourceId {
+			version,
+			length,
+			hash,
+		})
 	}
 }
 

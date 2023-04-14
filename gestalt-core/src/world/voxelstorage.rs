@@ -76,9 +76,13 @@ pub trait VoxelSpace<T: Voxel>: VoxelStorage<T, TileCoord> {
 	fn is_loaded(&self, voxel: TilePos) -> bool;
 
 	/// Try to borrow a chunk immutably. If it isn't loaded yet, returns None.
-	fn borrow_chunk(&self, chunk: &VoxelPos<Self::ChunkCoord>) -> Result<&Self::Chunk, Self::Error>;
+	fn borrow_chunk(&self, chunk: &VoxelPos<Self::ChunkCoord>)
+		-> Result<&Self::Chunk, Self::Error>;
 	/// Try to borrow a chunk mutably. If it isn't loaded yet, returns None.
-	fn borrow_chunk_mut(&mut self, chunk: &VoxelPos<Self::ChunkCoord>) -> Result<&mut Self::Chunk, Self::Error>;
+	fn borrow_chunk_mut(
+		&mut self,
+		chunk: &VoxelPos<Self::ChunkCoord>,
+	) -> Result<&mut Self::Chunk, Self::Error>;
 	/// Get a chunk cell per every currently-loaded chunk (which can be used to look them up).
 	fn get_loaded_chunk_cells(&self) -> Vec<&VoxelPos<Self::ChunkCoord>>;
 }
@@ -167,7 +171,10 @@ pub mod voxel_bulk_ops {
 		/// Iterate over each neighborhood. The value returned from `func` will replace the center cell.
 		fn map_neighborhood<F: FnOnce(Self::Neighborhood) -> T>(&mut self, func: F);
 		/// Iterate over each neighborhood. The value returned from `func` will replace the center cell which is at the given position.
-		fn map_neighborhood_enumerate<F: FnOnce(Self::Neighborhood, VoxelPos<P>) -> T>(&mut self, func: F);
+		fn map_neighborhood_enumerate<F: FnOnce(Self::Neighborhood, VoxelPos<P>) -> T>(
+			&mut self,
+			func: F,
+		);
 	}
 
 	/// Operations to set entire Y-axis-aligned columns in a VoxelStorage. Intended for worldgen.
@@ -191,9 +198,17 @@ pub mod voxel_bulk_ops {
 	/// Operations to set entire Y-axis-aligned columns in a VoxelStorage. Intended for worldgen.
 	pub trait BoundedVoxelColumns<T: Voxel, P: VoxelCoord>: VoxelStorageBounded<T, P> {
 		/// Sets all voxels, until we hit the boundary, along the Y axis at our given (X,Z) position from the top down to `value`
-		fn set_whole_vertical_column_down(&mut self, top: &VoxelPos<P>, value: &T) -> Result<(), Self::Error>;
+		fn set_whole_vertical_column_down(
+			&mut self,
+			top: &VoxelPos<P>,
+			value: &T,
+		) -> Result<(), Self::Error>;
 		/// Sets all voxels, until we hit the boundary, along the Y axis at our given (X,Z) position from the bottom up to `value`
-		fn set_whole_vertical_column_up(&mut self, bottom: &VoxelPos<P>, value: &T) -> Result<(), Self::Error>;
+		fn set_whole_vertical_column_up(
+			&mut self,
+			bottom: &VoxelPos<P>,
+			value: &T,
+		) -> Result<(), Self::Error>;
 	}
 
 	/// Operations to set entire rectangular cuboid regions to a value in a voxel storage.
@@ -203,7 +218,12 @@ pub mod voxel_bulk_ops {
 
 	/// Copy voxels from one storage to another. Naive implementation, just uses Set and Get. Not optimized.
 	#[allow(dead_code)]
-	pub fn naive_voxel_blit<T: Voxel, P: VoxelCoord, VA: VoxelStorage<T, P>, VB: VoxelStorage<T, P>>(
+	pub fn naive_voxel_blit<
+		T: Voxel,
+		P: VoxelCoord,
+		VA: VoxelStorage<T, P>,
+		VB: VoxelStorage<T, P>,
+	>(
 		source_range: VoxelRange<P>,
 		source: &VA,
 		dest_origin: VoxelPos<P>,
@@ -212,7 +232,8 @@ pub mod voxel_bulk_ops {
 		for pos in source_range {
 			let voxel = source.get(pos).map_err(FusedError::ErrorA)?;
 			let offset_pos = (pos - source_range.lower) + dest_origin;
-			dest.set(offset_pos, voxel.clone()).map_err(FusedError::ErrorB)?;
+			dest.set(offset_pos, voxel.clone())
+				.map_err(FusedError::ErrorB)?;
 		}
 		Ok(())
 	}

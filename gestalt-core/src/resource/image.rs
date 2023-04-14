@@ -31,6 +31,9 @@ pub type InternalImage = RgbaImage;
 
 /// Anything from which we can load images.
 pub trait ImageProvider {
-	fn load_image(&mut self, image: &ResourceId) -> ResourceStatus<&InternalImage, RetrieveImageError>;
+	fn load_image(
+		&mut self,
+		image: &ResourceId,
+	) -> ResourceStatus<&InternalImage, RetrieveImageError>;
 	fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceInfo>;
 }

@@ -9,7 +9,8 @@ use std::{
 	collections::{HashMap, HashSet},
 	fmt::Display,
 	future::Future,
-	pin::Pin, marker::PhantomData,
+	marker::PhantomData,
+	pin::Pin,
 };
 
 use serde::{Deserialize, Serialize};
@@ -136,10 +137,13 @@ impl Version {
 		}
 
 		//Internal method to convert a field of the string to a version field, to avoid repetition.
-		fn number_from_field(field: &str, original_string: String) -> Result<u32, ParseVersionError> {
-			let big_number = field
-				.parse::<u128>()
-				.map_err(|_e| ParseVersionError::NotNumber(field.to_string(), original_string.clone()))?;
+		fn number_from_field(
+			field: &str,
+			original_string: String,
+		) -> Result<u32, ParseVersionError> {
+			let big_number = field.parse::<u128>().map_err(|_e| {
+				ParseVersionError::NotNumber(field.to_string(), original_string.clone())
+			})?;
 			if big_number > (u32::MAX as u128) {
 				return Err(ParseVersionError::TooBig(original_string, big_number));
 			}
@@ -250,14 +254,14 @@ pub struct CompileTimeNone<T> {
 }
 impl<T> CompileTimeOption<T> for CompileTimeNone<T> {
 	const IS_SOME: bool = false;
-	
-	#[inline(always)]
-    fn unwrap(self) -> T {
-		panic!("Cannot unwrap a CompileTimeNone!"); 
-    }
 
 	#[inline(always)]
-	fn to_option(self) -> Option<T> { 
+	fn unwrap(self) -> T {
+		panic!("Cannot unwrap a CompileTimeNone!");
+	}
+
+	#[inline(always)]
+	fn to_option(self) -> Option<T> {
 		None
 	}
 }
@@ -267,14 +271,14 @@ pub struct CompileTimeSome<T>(T);
 
 impl<T> CompileTimeOption<T> for CompileTimeSome<T> {
 	const IS_SOME: bool = true;
-	
-	#[inline(always)]
-    fn unwrap(self) -> T {
-		self.0
-    }
 
 	#[inline(always)]
-	fn to_option(self) -> Option<T> { 
+	fn unwrap(self) -> T {
+		self.0
+	}
+
+	#[inline(always)]
+	fn to_option(self) -> Option<T> {
 		Some(self.0)
 	}
 }

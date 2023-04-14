@@ -1,6 +1,6 @@
+use base64::Engine;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use base64::Engine;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -53,7 +53,9 @@ pub enum HandshakeError {
 	#[error("could not write peer keys as a MessagePack message: {0:?}")]
 	ProtocolStoreEncodeError(#[from] rmp_serde::encode::Error),
 	/// Expected, received.
-	#[error("Unexpected step in handshake process - expected {0}, got a handshake step message at {1}")]
+	#[error(
+		"Unexpected step in handshake process - expected {0}, got a handshake step message at {1}"
+	)]
 	UnexpectedStep(u8, u8),
 	#[error(
 		"Attempted to send a Gestalt handshake message on the Handshake channel before the Noise handshake was done"
@@ -71,7 +73,9 @@ pub enum HandshakeError {
 	BadSignature(ed25519_dalek::SignatureError),
 	#[error("Handshake messages were sent in the wrong order")]
 	WrongOrder,
-	#[error("Called send_first() on a handshake initiator more than once, or after calling advance()")]
+	#[error(
+		"Called send_first() on a handshake initiator more than once, or after calling advance()"
+	)]
 	FirstAfterInit,
 	#[error("Attempted to advance a handshake after it was already done.")]
 	AdvanceAfterDone,
@@ -171,7 +175,9 @@ pub async fn load_noise_local_keys(
 		file.write_all(&keypair.public)
 			.await
 			.map_err(HandshakeError::ProtocolStoreIoError)?;
-		file.flush().await.map_err(HandshakeError::ProtocolStoreIoError)?;
+		file.flush()
+			.await
+			.map_err(HandshakeError::ProtocolStoreIoError)?;
 		drop(file);
 		keypair
 	};
@@ -256,12 +262,18 @@ async fn load_validate_noise_peer_key(
 		file.write_all(&writebuf)
 			.await
 			.map_err(HandshakeError::ProtocolStoreIoError)?;
-		file.flush().await.map_err(HandshakeError::ProtocolStoreIoError)?;
+		file.flush()
+			.await
+			.map_err(HandshakeError::ProtocolStoreIoError)?;
 		Ok(())
 	}
-	async fn write_changed_peer_key_file(peer_filepath: PathBuf, keys: PeerKeyFile) -> Result<(), HandshakeError> {
+	async fn write_changed_peer_key_file(
+		peer_filepath: PathBuf,
+		keys: PeerKeyFile,
+	) -> Result<(), HandshakeError> {
 		// Convert to msgpack
-		let writebuf = rmp_serde::to_vec_named(&keys).map_err(HandshakeError::ProtocolStoreEncodeError)?;
+		let writebuf =
+			rmp_serde::to_vec_named(&keys).map_err(HandshakeError::ProtocolStoreEncodeError)?;
 		let temp_filepath = peer_filepath.with_extension(".pending");
 
 		let mut file = OpenOptions::new()
@@ -275,7 +287,9 @@ async fn load_validate_noise_peer_key(
 		file.write_all(&writebuf)
 			.await
 			.map_err(HandshakeError::ProtocolStoreIoError)?;
-		file.flush().await.map_err(HandshakeError::ProtocolStoreIoError)?;
+		file.flush()
+			.await
+			.map_err(HandshakeError::ProtocolStoreIoError)?;
 
 		// Swap our pending file in
 		let bkfile = peer_filepath.with_extension(".bk");
@@ -302,7 +316,9 @@ async fn load_validate_noise_peer_key(
 						// Check with the rest of the engine - are we okay with this new Noise protocol key?
 						report_mismatch.send_one(peer_identity.clone()).unwrap();
 						// I really really do hate having to implement it like this.
-						match await_key_approver_response(peer_identity.clone(), mismatch_approver).await? {
+						match await_key_approver_response(peer_identity.clone(), mismatch_approver)
+							.await?
+						{
 							true => {
 								info!(
 									"New peer key accepted for {}, adding to their list of recognized keys.",
@@ -311,7 +327,8 @@ async fn load_validate_noise_peer_key(
 								// Actually adding the key is such a tiny operation compared to all of the serialization and file i/o surrounding it!
 								key_struct.keys.insert(received_noise_key);
 
-								let write_change_resl = write_changed_peer_key_file(peer_filepath, key_struct).await;
+								let write_change_resl =
+									write_changed_peer_key_file(peer_filepath, key_struct).await;
 								if let Err(e) = write_change_resl {
 									// This one is special - we have a new key, the user approved it, but also we cannot
 									// write it to the file for some reason. So, log that we cannot write it, but allow
@@ -320,7 +337,9 @@ async fn load_validate_noise_peer_key(
 								}
 								Ok(())
 							}
-							false => Err(HandshakeError::IdentityChanged(peer_identity.to_base64())),
+							false => {
+								Err(HandshakeError::IdentityChanged(peer_identity.to_base64()))
+							}
 						}
 					}
 				}
@@ -384,7 +403,9 @@ pub fn initiate_handshake(
 	local_noise_keys: snow::Keypair,
 ) -> Result<(snow::HandshakeState, HandshakeStepMessage), HandshakeError> {
 	let builder: snow::Builder<'_> = snow::Builder::new(NOISE_PARAMS.clone());
-	let mut noise = builder.local_private_key(&local_noise_keys.private).build_initiator()?;
+	let mut noise = builder
+		.local_private_key(&local_noise_keys.private)
+		.build_initiator()?;
 
 	// Generate "-> e" message
 	let mut first_message_buf = [0u8; 1024];
@@ -415,7 +436,9 @@ pub fn receive_initial(
 		let mut read_buf = [0u8; 1024];
 
 		let builder: snow::Builder<'_> = snow::Builder::new(NOISE_PARAMS.clone());
-		let mut state = builder.local_private_key(&local_noise_keys.private).build_responder()?;
+		let mut state = builder
+			.local_private_key(&local_noise_keys.private)
+			.build_responder()?;
 
 		// Read their message.
 		let _read_buf_len = state.read_message(&bytes_input, &mut read_buf)?;
@@ -444,7 +467,10 @@ pub async fn initiator_reply(
 	our_gestalt_identity: NodeIdentity,
 	report_mismatch: NewProtocolKeyReporter,
 	mismatch_approver: NewProtocolKeyApprover,
-) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, NodeIdentity, Vec<u8>), HandshakeError> {
+) -> Result<
+	(snow::StatelessTransportState, HandshakeStepMessage, NodeIdentity, Vec<u8>),
+	HandshakeError,
+> {
 	if input.handshake_step == 2 {
 		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 1024];
@@ -613,7 +639,10 @@ pub fn initiator_sign_buf(
 	their_key: &NodeIdentity,
 	our_keys: &IdentityKeyPair,
 	handshake_hash: &Vec<u8>,
-) -> Result<(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter), HandshakeError> {
+) -> Result<
+	(snow::StatelessTransportState, HandshakeStepMessage, String, MessageCounter),
+	HandshakeError,
+> {
 	if input.handshake_step == 4 {
 		let bytes_input = BASE_64.decode(input.data)?;
 		let mut read_buf = [0u8; 65535];
@@ -631,26 +660,27 @@ pub fn initiator_sign_buf(
 		let our_signature_b64 = BASE_64.encode(our_signature_bytes);
 
 		// Validate header
-		let challenge: KeyChallenge =
-			serde_json::from_str(&challenge_string).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let challenge: KeyChallenge = serde_json::from_str(&challenge_string)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if challenge.static_challenge_name != CHALLENGE_NAME {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 		// Double-check to make sure their key is in the response.
-		let decoded_sender_key =
-			NodeIdentity::from_base64(&challenge.sender_ident).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let decoded_sender_key = NodeIdentity::from_base64(&challenge.sender_ident)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &decoded_sender_key != their_key {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 		// Does it sign over our key?
-		let public_key_claim =
-			NodeIdentity::from_base64(&challenge.receiver_ident).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let public_key_claim = NodeIdentity::from_base64(&challenge.receiver_ident)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &public_key_claim != &our_keys.public {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 		// Does it sign over the handshake hash?
-		let decoded_session_id =
-			BASE_64.decode(&challenge.session_id).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let decoded_session_id = BASE_64
+			.decode(&challenge.session_id)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &decoded_session_id != handshake_hash {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
@@ -721,26 +751,27 @@ pub fn responder_sign(
 		let our_signature_b64 = BASE_64.encode(our_signature_bytes);
 
 		// Validate their header
-		let challenge: KeyChallenge =
-			serde_json::from_str(&challenge_string).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let challenge: KeyChallenge = serde_json::from_str(&challenge_string)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if challenge.static_challenge_name != CHALLENGE_NAME {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 		// Double-check to make sure their key is in the response.
-		let decoded_sender_key =
-			NodeIdentity::from_base64(&challenge.sender_ident).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let decoded_sender_key = NodeIdentity::from_base64(&challenge.sender_ident)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &decoded_sender_key != peer_identity {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 		// Does it sign over our key?
-		let public_key_claim =
-			NodeIdentity::from_base64(&challenge.receiver_ident).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let public_key_claim = NodeIdentity::from_base64(&challenge.receiver_ident)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &public_key_claim != &our_keys.public {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
 		// Does it sign over the handshake hash?
-		let decoded_session_id =
-			BASE_64.decode(&challenge.session_id).map_err(|_| HandshakeError::BadChallengeHeader)?;
+		let decoded_session_id = BASE_64
+			.decode(&challenge.session_id)
+			.map_err(|_| HandshakeError::BadChallengeHeader)?;
 		if &decoded_session_id != handshake_hash {
 			return Err(HandshakeError::BadChallengeHeader);
 		}
@@ -799,7 +830,13 @@ pub enum HandshakeIntitiatorState {
 	Init,
 	SentFirstAwaitSecond(snow::HandshakeState),
 	SentThirdAwaitFourth(snow::StatelessTransportState, NodeIdentity, Vec<u8>),
-	SentFifthAwaitSixth(snow::StatelessTransportState, String, MessageCounter, NodeIdentity, Vec<u8>),
+	SentFifthAwaitSixth(
+		snow::StatelessTransportState,
+		String,
+		MessageCounter,
+		NodeIdentity,
+		Vec<u8>,
+	),
 	Done(snow::StatelessTransportState, MessageCounter, NodeIdentity, Vec<u8>),
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -818,8 +855,12 @@ impl HandshakeIntitiatorState {
 	pub fn get_step(&self) -> HandshakeIntitiatorStep {
 		match self {
 			HandshakeIntitiatorState::Init => HandshakeIntitiatorStep::Init,
-			HandshakeIntitiatorState::SentFirstAwaitSecond(_) => HandshakeIntitiatorStep::SentFirstAwaitSecond,
-			HandshakeIntitiatorState::SentThirdAwaitFourth(_, _, _) => HandshakeIntitiatorStep::SentThirdAwaitFourth,
+			HandshakeIntitiatorState::SentFirstAwaitSecond(_) => {
+				HandshakeIntitiatorStep::SentFirstAwaitSecond
+			}
+			HandshakeIntitiatorState::SentThirdAwaitFourth(_, _, _) => {
+				HandshakeIntitiatorStep::SentThirdAwaitFourth
+			}
 			HandshakeIntitiatorState::SentFifthAwaitSixth(_, _, _, _, _) => {
 				HandshakeIntitiatorStep::SentFifthAwaitSixth
 			}
@@ -878,11 +919,17 @@ impl HandshakeInitiator {
 			Err(HandshakeError::FirstAfterInit)
 		}
 	}
-	pub async fn advance(&mut self, incoming: HandshakeStepMessage) -> Result<HandshakeNext, HandshakeError> {
+	pub async fn advance(
+		&mut self,
+		incoming: HandshakeStepMessage,
+	) -> Result<HandshakeNext, HandshakeError> {
 		match self.last_state.take().unwrap() {
 			HandshakeIntitiatorState::Init => Err(HandshakeError::WrongOrder),
 			HandshakeIntitiatorState::SentFirstAwaitSecond(state) => {
-				let report_mismatch = self.report_mismatch.take().ok_or(HandshakeError::NoMismatchChannels)?;
+				let report_mismatch = self
+					.report_mismatch
+					.take()
+					.ok_or(HandshakeError::NoMismatchChannels)?;
 				let mismatch_approver = self
 					.mismatch_approver
 					.take()
@@ -896,7 +943,11 @@ impl HandshakeInitiator {
 					mismatch_approver,
 				)
 				.await?;
-				self.last_state = Some(HandshakeIntitiatorState::SentThirdAwaitFourth(new_state, peer_identity, sid));
+				self.last_state = Some(HandshakeIntitiatorState::SentThirdAwaitFourth(
+					new_state,
+					peer_identity,
+					sid,
+				));
 				Ok(HandshakeNext::SendMessage(message))
 			}
 			HandshakeIntitiatorState::SentThirdAwaitFourth(state, peer_id, sid) => {
@@ -909,7 +960,8 @@ impl HandshakeInitiator {
 			}
 			HandshakeIntitiatorState::SentFifthAwaitSixth(state, nonce, _seq, peer_id, sid) => {
 				let (transport, new_seq) = initiator_final(state, incoming, &peer_id, nonce)?;
-				self.last_state = Some(HandshakeIntitiatorState::Done(transport, new_seq, peer_id, sid));
+				self.last_state =
+					Some(HandshakeIntitiatorState::Done(transport, new_seq, peer_id, sid));
 				Ok(HandshakeNext::Done)
 			}
 			HandshakeIntitiatorState::Done(_, _, _, _) => Err(HandshakeError::AdvanceAfterDone),
@@ -920,8 +972,12 @@ impl HandshakeInitiator {
 	}
 	pub fn complete(
 		mut self,
-	) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), HandshakeError> {
-		if let HandshakeIntitiatorState::Done(transport, counter, peer_id, session_id) = self.last_state.take().unwrap()
+	) -> Result<
+		(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId),
+		HandshakeError,
+	> {
+		if let HandshakeIntitiatorState::Done(transport, counter, peer_id, session_id) =
+			self.last_state.take().unwrap()
 		{
 			Ok((transport, counter, peer_id, truncate_to_session_id(&session_id)))
 		} else {
@@ -951,8 +1007,12 @@ impl HandshakeReceiverState {
 	pub fn get_step(&self) -> HandshakeReceiverStep {
 		match self {
 			HandshakeReceiverState::Init => HandshakeReceiverStep::Init,
-			HandshakeReceiverState::SentSecondAwaitThird(_) => HandshakeReceiverStep::SentSecondAwaitThird,
-			HandshakeReceiverState::SentFourthAwaitFifth(_, _, _, _) => HandshakeReceiverStep::SentFourthAwaitFifth,
+			HandshakeReceiverState::SentSecondAwaitThird(_) => {
+				HandshakeReceiverStep::SentSecondAwaitThird
+			}
+			HandshakeReceiverState::SentFourthAwaitFifth(_, _, _, _) => {
+				HandshakeReceiverStep::SentFourthAwaitFifth
+			}
 			HandshakeReceiverState::Done(_, _, _) => HandshakeReceiverStep::Done,
 		}
 	}
@@ -990,7 +1050,10 @@ impl HandshakeReceiver {
 			mismatch_approver: Some(mismatch_approver),
 		}
 	}
-	pub async fn advance(&mut self, incoming: HandshakeStepMessage) -> Result<HandshakeNext, HandshakeError> {
+	pub async fn advance(
+		&mut self,
+		incoming: HandshakeStepMessage,
+	) -> Result<HandshakeNext, HandshakeError> {
 		match self.last_state.take().unwrap() {
 			HandshakeReceiverState::Init => {
 				let (state, message) = receive_initial(
@@ -1002,7 +1065,10 @@ impl HandshakeReceiver {
 				Ok(HandshakeNext::SendMessage(message))
 			}
 			HandshakeReceiverState::SentSecondAwaitThird(state) => {
-				let report_mismatch = self.report_mismatch.take().ok_or(HandshakeError::NoMismatchChannels)?;
+				let report_mismatch = self
+					.report_mismatch
+					.take()
+					.ok_or(HandshakeError::NoMismatchChannels)?;
 				let mismatch_approver = self
 					.mismatch_approver
 					.take()
@@ -1016,7 +1082,8 @@ impl HandshakeReceiver {
 					mismatch_approver,
 				)
 				.await?;
-				self.last_state = Some(HandshakeReceiverState::SentFourthAwaitFifth(new_state, nonce, seq, sid));
+				self.last_state =
+					Some(HandshakeReceiverState::SentFourthAwaitFifth(new_state, nonce, seq, sid));
 				self.peer_public_key = Some(peer_identity);
 				Ok(HandshakeNext::SendMessage(message))
 			}
@@ -1025,7 +1092,9 @@ impl HandshakeReceiver {
 					state,
 					incoming,
 					&self.local_gestalt_keys,
-					self.peer_public_key.as_ref().ok_or(HandshakeError::NoIdentity)?,
+					self.peer_public_key
+						.as_ref()
+						.ok_or(HandshakeError::NoIdentity)?,
 					nonce,
 					&sid,
 				)?;
@@ -1040,12 +1109,20 @@ impl HandshakeReceiver {
 	}
 	pub fn complete(
 		mut self,
-	) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), HandshakeError> {
-		if let HandshakeReceiverState::Done(transport, counter, session_id) = self.last_state.take().unwrap() {
+	) -> Result<
+		(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId),
+		HandshakeError,
+	> {
+		if let HandshakeReceiverState::Done(transport, counter, session_id) =
+			self.last_state.take().unwrap()
+		{
 			Ok((
 				transport,
 				counter,
-				self.peer_public_key.as_ref().ok_or(HandshakeError::NoIdentity)?.clone(),
+				self.peer_public_key
+					.as_ref()
+					.ok_or(HandshakeError::NoIdentity)?
+					.clone(),
 				truncate_to_session_id(&session_id),
 			))
 		} else {
@@ -1071,7 +1148,9 @@ pub async fn approver_no_mismatch(
 		Ok(_) => {
 			panic!("New connection with an unrecognized key - this test should never evaluate the mismatch code path.")
 		}
-		Err(_) => info!("Dropped mismatch sender before using receiver - as it should be in this test."),
+		Err(_) => {
+			info!("Dropped mismatch sender before using receiver - as it should be in this test.")
+		}
 	}
 }
 
@@ -1099,8 +1178,12 @@ mod test {
 		tokio::spawn(approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender));
 
 		let (bob_state, message_1) = initiate_handshake(clone_keypair(&bob_noise_keys)).unwrap();
-		let (alice_state, message_2) =
-			receive_initial(clone_keypair(&alice_noise_keys), alice_gestalt_keys.public.clone(), message_1).unwrap();
+		let (alice_state, message_2) = receive_initial(
+			clone_keypair(&alice_noise_keys),
+			alice_gestalt_keys.public.clone(),
+			message_1,
+		)
+		.unwrap();
 		let (bob_transport, message_3, bob_copy_alice_identity, bob_session_id) = initiator_reply(
 			bob_state,
 			message_2,
@@ -1111,17 +1194,23 @@ mod test {
 		)
 		.await
 		.unwrap();
-		let (alice_transport, message_4, alice_nonce, _alice_seq, alice_copy_bob_identity, alice_session_id) =
-			receive_last_noise(
-				alice_state,
-				message_3,
-				PathBuf::from(noise_dir.path()),
-				alice_gestalt_keys.public.clone(),
-				mismatch_report_channel.sender_subscribe(),
-				mismatch_approve_channel.receiver_subscribe(),
-			)
-			.await
-			.unwrap();
+		let (
+			alice_transport,
+			message_4,
+			alice_nonce,
+			_alice_seq,
+			alice_copy_bob_identity,
+			alice_session_id,
+		) = receive_last_noise(
+			alice_state,
+			message_3,
+			PathBuf::from(noise_dir.path()),
+			alice_gestalt_keys.public.clone(),
+			mismatch_report_channel.sender_subscribe(),
+			mismatch_approve_channel.receiver_subscribe(),
+		)
+		.await
+		.unwrap();
 		let (bob_transport, message_5, bob_nonce, _bob_seq) = initiator_sign_buf(
 			bob_transport,
 			message_4,
@@ -1226,10 +1315,12 @@ mod test {
 		// Breaking this loop requires encountering a HandshakeNext::Done
 
 		assert!(initiator.is_done());
-		let (_bob_transport, _bob_seq, bob_copy_alice_ident, bob_session_id) = initiator.complete().unwrap();
+		let (_bob_transport, _bob_seq, bob_copy_alice_ident, bob_session_id) =
+			initiator.complete().unwrap();
 
 		assert!(receiver.is_done());
-		let (_alice_transport, _alice_seq, alice_copy_bob_ident, alice_session_id) = receiver.complete().unwrap();
+		let (_alice_transport, _alice_seq, alice_copy_bob_ident, alice_session_id) =
+			receiver.complete().unwrap();
 
 		assert_eq!(bob_session_id, alice_session_id);
 

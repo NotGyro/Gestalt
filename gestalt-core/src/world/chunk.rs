@@ -56,7 +56,8 @@ pub struct DataSublayerDescriptor {
 	/// Used to order in the sublayer array and also for equality checks.  
 	pub id: u8,
 	/// Based on metadata, how big do we expect this to be? If it's 0 it shouldn't be present.
-	pub expected_size: fn(&ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError>,
+	pub expected_size:
+		fn(&ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError>,
 }
 
 pub struct DataLayerDescriptor {
@@ -109,7 +110,9 @@ impl ChunkTilesVariant {
 	}
 }
 
-pub fn chunk_variant_from_metadata(upper_byte: u8) -> Result<ChunkTilesVariant, ChunkValidationError> {
+pub fn chunk_variant_from_metadata(
+	upper_byte: u8,
+) -> Result<ChunkTilesVariant, ChunkValidationError> {
 	match upper_byte {
 		0 => Ok(ChunkTilesVariant::Uniform),
 		1 => Ok(ChunkTilesVariant::Small),
@@ -118,7 +121,9 @@ pub fn chunk_variant_from_metadata(upper_byte: u8) -> Result<ChunkTilesVariant, 
 	}
 }
 
-pub fn voxel_data_expected_size(metadata: &ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError> {
+pub fn voxel_data_expected_size(
+	metadata: &ChunkLayerMetadata,
+) -> Result<ExpectedSublayerLength, ChunkValidationError> {
 	Ok(match chunk_variant_from_metadata(metadata[0])? {
 		ChunkTilesVariant::Uniform => ExpectedSublayerLength::Exact(0),
 		ChunkTilesVariant::Small => ExpectedSublayerLength::Exact(CHUNK_SIZE_CUBED),
@@ -132,14 +137,14 @@ pub fn voxel_palette_expected_size(
 	Ok(match chunk_variant_from_metadata(metadata[0])? {
 		// Not here in a Uniform chunk - the one individual TileID lives in metadata instead.
 		ChunkTilesVariant::Uniform => ExpectedSublayerLength::Exact(0),
-		ChunkTilesVariant::Small => {
-			ExpectedSublayerLength::Range((SMALL_PALETTE_ENTRY_LEN)..(256 * SMALL_PALETTE_ENTRY_LEN))
-		}
+		ChunkTilesVariant::Small => ExpectedSublayerLength::Range(
+			(SMALL_PALETTE_ENTRY_LEN)..(256 * SMALL_PALETTE_ENTRY_LEN),
+		),
 		// We could do 256*LARGE_PALETTE_ENTRY_LEN here but I want to give the garbage collection
 		// of downgrading chunks some wiggle room.
-		ChunkTilesVariant::Large => {
-			ExpectedSublayerLength::Range((LARGE_PALETTE_ENTRY_LEN)..(CHUNK_SIZE_CUBED * LARGE_PALETTE_ENTRY_LEN))
-		}
+		ChunkTilesVariant::Large => ExpectedSublayerLength::Range(
+			(LARGE_PALETTE_ENTRY_LEN)..(CHUNK_SIZE_CUBED * LARGE_PALETTE_ENTRY_LEN),
+		),
 	})
 }
 
@@ -176,7 +181,9 @@ plus the identity element (leave it where it is giving 24 possible rotations in 
 // 4 tiles = 3 bytes
 // (CHUNK_SIZE_CUBED / 4) * 3 should give you the number of bytes required to describe rotations for every tile.
 
-pub fn rotations_expected_size(_metadata: &ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError> {
+pub fn rotations_expected_size(
+	_metadata: &ChunkLayerMetadata,
+) -> Result<ExpectedSublayerLength, ChunkValidationError> {
 	Ok(ExpectedSublayerLength::Exact((CHUNK_SIZE_CUBED / 4) * 3))
 }
 
@@ -361,7 +368,9 @@ impl<T: Voxel> ChunkTilesLarge<T> {
 	}
 	#[inline(always)]
 	pub fn get(&self, coord: VoxelPos<u8>) -> &T {
-		self.palette.get(self.inner.get_raw(coord).as_usize()).unwrap()
+		self.palette
+			.get(self.inner.get_raw(coord).as_usize())
+			.unwrap()
 	}
 	#[inline(always)]
 	pub fn get_raw_i(&self, i: usize) -> &AlwaysLeU16 {
@@ -678,7 +687,10 @@ fn chunk_index_bounds() {
 	for x in 0..CHUNK_SIZE {
 		for y in 0..CHUNK_SIZE {
 			for z in 0..CHUNK_SIZE {
-				assert!(crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE) < CHUNK_SIZE_CUBED);
+				assert!(
+					crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE)
+						< CHUNK_SIZE_CUBED
+				);
 			}
 		}
 	}
