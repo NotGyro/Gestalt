@@ -188,9 +188,9 @@ pub mod resourceid_base64_string {
 		serializer.serialize_str(val.to_string().as_str())
 	}
 
-	struct ResourceIdVisitor;
+	struct ResourceIdStringVisitor;
 
-	impl<'de> Visitor<'de> for ResourceIdVisitor {
+	impl<'de> Visitor<'de> for ResourceIdStringVisitor {
 		type Value = ResourceId;
 
 		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -210,7 +210,7 @@ pub mod resourceid_base64_string {
 	where
 		D: Deserializer<'de>,
 	{
-		deserializer.deserialize_string(ResourceIdVisitor {})
+		deserializer.deserialize_string(ResourceIdStringVisitor {})
 	}
 }
 
@@ -236,8 +236,6 @@ pub struct ResourceInfo {
 	pub id: ResourceId,
 	/// What did the "creator" user call this resource?
 	pub filename: String,
-	/// Directory structure leading up to "filename", to disambiguate it.
-	pub path: Option<Vec<String>>,
 	/// Which user claims to have "made" this resource? Who signed it, who is the authority on it?
 	pub creator: NodeIdentity,
 	/// What broad category of things does this resource fall into?

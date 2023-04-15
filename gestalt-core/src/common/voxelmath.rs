@@ -770,7 +770,7 @@ pub mod axis {
 
 		#[inline(always)]
 		#[allow(dead_code)]
-		pub const fn to_id(&self) -> usize {
+		pub const fn to_id(&self) -> u8 {
 			match self {
 				VoxelSide::PosiX => posi_x_index!(),
 				VoxelSide::PosiY => posi_y_index!(),
@@ -1438,16 +1438,21 @@ where
 		}
 	}
 	pub const fn get(&self, dir: VoxelSide) -> &T {
-		&self.data[dir.to_id()]
+		&self.data[dir.to_id() as usize]
 	}
 	pub const fn get_i(&self, i: usize) -> &T {
 		&self.data[i]
 	}
 	pub fn set(&mut self, value: T, dir: VoxelSide) {
-		(*self.data.get_mut(dir.to_id()).unwrap()) = value;
+		(*self.data.get_mut(dir.to_id() as usize).unwrap()) = value;
 	}
 	pub fn set_i(&mut self, value: T, i: usize) {
 		(*self.data.get_mut(i).unwrap()) = value;
+	}
+
+	pub fn get_all<'a>(&'a self) -> [&'a T; 6] { 
+		[&self.data[0], &self.data[1], &self.data[2],
+		 &self.data[3], &self.data[4], &self.data[5]]
 	}
 
 	pub fn iter(&self) -> SidesArrayIterator<T> {

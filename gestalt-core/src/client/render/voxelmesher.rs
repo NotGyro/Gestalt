@@ -18,14 +18,57 @@ use crate::{
     },
 };
 
+use super::voxel_art::VoxelArt;
 use super::{
     tiletextureatlas::{TileAtlasError, TileAtlasLayout},
-    CubeArt, CubeArtMapper, CubeTex,
 };
 
-use crate::world::chunk::{self as chunk, chunk_i_to_xyz, CHUNK_SIZE_CUBED};
+use crate::world::chunk::{self as chunk, CHUNK_SIZE_CUBED};
 
-#[derive(Copy, Clone)]
+/// A side index and voxel cell represented as [side_idx, x, y, z]
+pub(super) struct SidePos([u8; 4]);
+
+impl SidePos { 
+    pub fn get_side_idx(&self) -> u8 { 
+        self.0[0]
+    }
+    pub fn get_x(&self) -> u8 { 
+        self.0[1]
+    }
+    pub fn get_y(&self) -> u8 { 
+        self.0[2]
+    }
+    pub fn get_z(&self) -> u8 { 
+        self.0[3]
+    }
+    pub fn set_side(&mut self, value: VoxelSide) { 
+        self.0[0] = value.to_id()
+    }
+    pub fn set_side_idx(&mut self, value: u8) { 
+        self.0[0] = value
+    }
+    pub fn set_x(&mut self, value: u8) { 
+        self.0[1] = value
+    }
+    pub fn set_y(&mut self, value: u8) { 
+        self.0[2] = value
+    }
+    pub fn set_z(&mut self, value: u8) { 
+        self.0[3] = value
+    }
+}
+pub(super) trait VoxelVertex: Sized + Send + Sync + bytemuck::Pod + bytemuck::Zeroable {
+    /// Texture index as passed in when generating a face.
+    type TexRepr : Sized + Send + Sync;
+    const VERTICIES_PER_FACE: usize;
+    fn buffer_layout() -> wgpu::VertexBufferLayout<'static>;
+    fn generate_face(side_pos: SidePos, 
+            texture_index: &Self::TexRepr) 
+        -> [Self; Self::VERTICIES_PER_FACE];
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     position: [u32; 3],
 }
@@ -169,6 +212,7 @@ pub enum TextureLookupError {
     FileNotLoaded(String, String),
 }
 
+/* Commented out because this was from when tile textures were an atlas and not an arraytexture
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 // We record the associated U,V values in this implementation (for the Texture Atlas)
 pub struct UvCache {
@@ -176,23 +220,37 @@ pub struct UvCache {
     pub(crate) lower_v: f32,
     pub(crate) higher_u: f32,
     pub(crate) higher_v: f32,
-}
+} */
 
-type SidesCache = SidesArray<UvCache>;
+type TextureArrayIndex = u16;
+
+type SidesCache = SidesArray<ResourceId>;
 
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
-pub struct CubeArtNotes {
-    pub visible: bool,
-    pub cull_self: bool,   //Do we cull the same material?
-    pub cull_others: bool, //Do we cull materials other than this one?
+struct CubeArtNotes {
+    /// Should *this voxel mesher code* draw this tile?
+    pub visible_this_pass: bool,
+    /// Do we cull the same material? i.e do other tiles with the same ID get culled by this one?
+    pub cull_self: bool,
+    /// Do we cull other materials? i.e do other tiles with different IDs get culled by this one?
+    pub cull_others: bool,
 }
 
-impl From<&CubeArt> for CubeArtNotes {
-    fn from(art: &CubeArt) -> Self {
-        Self {
-            visible: art.is_visible(),
-            cull_self: art.cull_self,
-            cull_others: art.cull_others,
+impl From<&VoxelArt> for CubeArtNotes {
+    fn from(art: &VoxelArt) -> Self {
+        match art {
+            VoxelArt::SimpleCube(cube) => {
+                CubeArtNotes { 
+                    visible_this_pass: true,
+                    cull_self: cube.cull_self,
+                    cull_others: cube.cull_others,
+                }
+            },
+            _ => CubeArtNotes {
+                visible_this_pass: false, 
+                cull_self: false,
+                cull_others: false,
+            },
         }
     }
 }
@@ -249,7 +307,7 @@ fn sides_cache_from_art(
     art: &CubeArt,
     layout: &mut TileAtlasLayout,
 ) -> Result<Option<SidesCache>, TileAtlasError> {
-    match &art.textures {
+    match &art {
         CubeTex::Invisible => Ok(None),
         CubeTex::Single(t) => Ok(Some(SidesArray::new_uniform(&uv_cache_from_resource(
             t, layout,

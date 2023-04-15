@@ -26,13 +26,16 @@ use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvid
 use crate::resource::{ResourceId, ResourceStatus};
 use crate::world::TickLength;
 
+use self::array_texture::{ArrayTexture, ArrayTextureLayout};
 use self::drawable::BillboardDrawable;
 
 use super::camera::Camera;
 
 pub mod drawable;
+pub mod array_texture;
 pub mod tiletextureatlas;
 //pub mod voxelmesher;
+pub mod voxel_art;
 //pub mod terrain_renderer;
 
 fn load_test_shader<P: AsRef<Path>>(path: P) -> wgpu::ShaderSource<'static> {
@@ -67,7 +70,7 @@ pub(in crate::client::render) type TextureHandle = NonZeroU32;
 // Renderer-internal handle to a currently-loaded texture.
 /*
 pub(in crate::client::render) struct LoadedTextureRef {
-    pub base_texture: TextureHandle, 
+    pub base_texture: TextureHandle,
     /// Which cell in an array-texture or a texture atlas is this referring to?
     pub cell: u16,
 }*/
@@ -224,7 +227,7 @@ impl Renderer {
 			Some(adapt_name) => adapters.remove(&adapt_name).unwrap(),
 			None => instance
 				.request_adapter(&wgpu::RequestAdapterOptions {
-					power_preference: wgpu::PowerPreference::default(),
+					power_preference: wgpu::PowerPreference::HighPerformance,
 					compatible_surface: Some(&surface),
 					force_fallback_adapter: false,
 				})
@@ -232,9 +235,12 @@ impl Renderer {
 				.ok_or(InitRenderError::CannotRequestAdapter)?,
 		};
 
-		let features = wgpu::Features::default().union(wgpu::Features::PUSH_CONSTANTS);
+		let features = wgpu::Features::default()
+			.union(wgpu::Features::PUSH_CONSTANTS);
+		// wgpu::Features::TEXTURE_BINDING_ARRAY
+		// wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
 		let mut limits = wgpu::Limits::default(); 
-		limits.max_push_constant_size = std::mem::size_of::<ModelPush>() as u32; 
+		limits.max_push_constant_size = std::mem::size_of::<ModelPush>() as u32;
 		let (device, queue) = adapter
 			.request_device(
 				&DeviceDescriptor {
@@ -245,7 +251,9 @@ impl Renderer {
 				None,
 			)
 			.await?;
-
+		info!("Max array layers: {} \n Max 3D texture size: {}", 
+			device.limits().max_texture_array_layers,
+			device.limits().max_texture_dimension_3d);
 		//Ensure WGPU knows how to use our surface.
 		let surface_capabilities = surface.get_capabilities(&adapter);
 		if surface_capabilities.formats.is_empty() {
@@ -771,6 +779,16 @@ impl Renderer {
 
         (texture, view, sampler)
     }
+	pub fn funky_array_texture_test<P>(&mut self, textures: &[&ResourceId], loader: &mut P)
+			where P: ImageProvider {
+		let mut layout = ArrayTextureLayout::new((64, 64), None);
+		for tex in textures.iter() {
+			let idx = layout.get_or_make_index_for_texture(*tex); 
+			info!("Layout ingest result: {idx:?}");
+		}
+		let mut array = ArrayTexture::new(layout, None, &mut self.device).unwrap();
+		array.full_rebuild(&mut self.device, &mut self.queue, loader).unwrap();
+	}
 }
 
 pub fn generate_engine_texture_image(

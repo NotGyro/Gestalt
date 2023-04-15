@@ -116,7 +116,6 @@ impl DevImageLoader {
 		let metadata = ResourceInfo {
 			id: rid,
 			filename: filename.to_string(),
-			path: None,
 			creator: creator_identity.public,
 			resource_type: "image/png".to_string(),
 			authors: "Gyro".to_string(),
@@ -404,6 +403,13 @@ pub fn run_client(
 
 	let mut last_remesh_time = Instant::now();
 	*/
+	renderer.funky_array_texture_test(
+		&[&test_dirt_image_id,
+		&test_stone_image_id,
+		&test_grass_image_id,
+		&test_dome_thing_image_id,],
+		&mut image_loader
+	);
 
 	let mut current_down = HashSet::new();
 
