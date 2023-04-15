@@ -75,6 +75,38 @@ impl Angle for DegreeAngle {
     }
 }
 
+pub struct Color { 
+	/// Red
+	pub r: u8,
+	/// Green
+	pub g: u8,
+	/// Blue
+	pub b: u8,
+}
+impl Color { 
+	pub fn to_normalized_float(&self) -> (f32, f32, f32) {
+		(self.r as f32 / 255.0,
+		self.g as f32 / 255.0,
+		self.b as f32 / 255.0)
+	}
+}
+
+pub struct ColorAlpha { 
+	pub color: Color, 
+	/// Transparency
+	pub alpha: u8,
+}
+impl ColorAlpha { 
+	pub fn to_normalized_float(&self) -> (f32, f32, f32, f32) {
+		let color = self.color.to_normalized_float();
+		(color.0,
+		color.1,
+		color.2,
+		self.alpha as f32 / 255.0)
+	}
+}
+
+
 /// Non-cryptographic hashmap for internally-generated structures.
 pub type FastHashMap<K, V> = std::collections::HashMap<K, V, Xxh3Builder>;
 /// Non-cryptographic hashset for internally-generated structures.

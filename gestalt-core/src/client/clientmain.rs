@@ -24,7 +24,7 @@ use crate::{
 	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}}},
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
-		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, DegreeAngle,
+		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, DegreeAngle, Color,
 	},
 	message::{self, MessageSender},
 	message_types::{
@@ -451,6 +451,12 @@ pub fn run_client(
 		)
 	};
 
+	let clear_color = Color { 
+		r: 89,
+		g: 102, 
+		b: 204
+	};
+
 	event_loop.run(move |event, _, control| {
 		let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
 		/*if let Ok(events) = voxel_event_receiver.recv_poll() {
@@ -713,7 +719,7 @@ pub fn run_client(
 				//Tell us some about it.
 				let draw_time = draw_start.elapsed();
 
-				renderer.render_frame(&camera,&entity_world).unwrap();
+				renderer.render_frame(&camera,&entity_world, &clear_color).unwrap();
 
 				let total_time = game_start_time.elapsed();
 				let current_fps = (total_frames as f64) / (total_time.as_secs_f64());

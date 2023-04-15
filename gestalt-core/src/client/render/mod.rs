@@ -19,7 +19,7 @@ use wgpu::{
 use winit::window::Window;
 
 use crate::client::client_config::{ClientConfig, DisplaySize};
-use crate::common::Angle;
+use crate::common::{Angle, Color};
 use crate::common::voxelmath::ToSigned;
 use crate::entity::{EcsWorld, EntityPos, EntityRot, EntityScale};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
@@ -456,7 +456,7 @@ impl Renderer {
 			self.depth_texture = Self::create_depth_texture(&self.device, &self.surface_config, "depth_texture");
 		}
 	}
-	pub fn render_frame(&mut self, camera: &Camera, ecs_world: &EcsWorld) -> Result<(), DrawFrameError> {
+	pub fn render_frame(&mut self, camera: &Camera, ecs_world: &EcsWorld, clear_color: &Color) -> Result<(), DrawFrameError> {
 		let view_projection_matrix = camera.build_view_projection_matrix();
 		let output = self.surface.get_current_texture()?;
 
@@ -479,6 +479,7 @@ impl Renderer {
 				label: Some("Render Encoder"),
 			});
 		{
+			let (clear_r, clear_g, clear_b) = clear_color.to_normalized_float();
 			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("Render Pass"),
 				color_attachments: &[
@@ -487,9 +488,9 @@ impl Renderer {
 						resolve_target: None,
 						ops: wgpu::Operations {
 							load: wgpu::LoadOp::Clear(wgpu::Color {
-								r: 0.35,
-								g: 0.4,
-								b: 0.8,
+								r: clear_r as f64,
+								g: clear_g as f64,
+								b: clear_b as f64,
 								a: 1.0,
 							}),
 							store: true,
