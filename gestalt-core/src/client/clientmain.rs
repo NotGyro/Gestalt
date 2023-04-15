@@ -7,6 +7,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
+use glam::Vec3;
 use image::RgbaImage;
 use log::{error, info, trace, warn};
 use serde::{Deserialize, Serialize};
@@ -36,8 +37,8 @@ use crate::{
 	world::{
 		chunk::ChunkInner, fsworldstorage::WorldDefaults,
 		/*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/
-		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId,
-	}, entity::{EntityPos, EntityVec3, EntityRot, EntityScale},
+		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId, TickLength,
+	}, entity::{EntityPos, EntityVec3, EntityRot, EntityScale, EntityVelocity, tick_movement_system, LastPos},
 };
 use crate::{
 	//client::render::CubeArt,
@@ -420,6 +421,9 @@ pub fn run_client(
 	let mut has_focus = true;
 
 	let mut entity_world = crate::entity::EcsWorld::default();
+	
+	let tick_length = TickLength::from_tps(30.0);
+
 	let test_entity = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(0.0, 0.0, 0.0)), 
 		EntityRot::new_from_euler(DegreeAngle(90.0), DegreeAngle(0.0), DegreeAngle(0.0)),
@@ -427,6 +431,8 @@ pub fn run_client(
 	));
 	let test_entity_2 = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)),
+		EntityVelocity::new(Vec3::new(0.0, 0.0, 0.5)),
+		LastPos::new(EntityVec3::new(5.0, 0.0, 0.0)),
 		EntityRot::new_from_euler(DegreeAngle(30.0), DegreeAngle(0.0), DegreeAngle(0.0)),
 		BillboardDrawable::new(testlet_2_image_id.clone(), BillboardStyle::Cylindrical)
 	));
@@ -457,8 +463,22 @@ pub fn run_client(
 		b: 204
 	};
 
+	let mut accumulated_tick_time: f32 = 0.0;
+	let mut game_tick: u64 = 0;
+	//let mut last_tick = Instant::now();
+
 	event_loop.run(move |event, _, control| {
 		let elapsed_secs = prev_frame_time.elapsed().as_secs_f64() as f32;
+		accumulated_tick_time = accumulated_tick_time + elapsed_secs;
+		while accumulated_tick_time >= tick_length.get() { 
+			game_tick +=1; 
+			accumulated_tick_time -= tick_length.get();
+			if (game_tick % 300) == 0 {
+				info!("Ticking game for the {game_tick}th time."); 
+			}
+			tick_movement_system(&mut entity_world, tick_length);
+			//last_tick = Instant::now(); 
+		}
 		/*if let Ok(events) = voxel_event_receiver.recv_poll() {
 			for (_ident, announce) in events {
 				let old_value = world_space.get(announce.pos).unwrap();
@@ -719,7 +739,10 @@ pub fn run_client(
 				//Tell us some about it.
 				let draw_time = draw_start.elapsed();
 
-				renderer.render_frame(&camera,&entity_world, &clear_color).unwrap();
+				renderer.render_frame(&camera,
+					&entity_world, 
+					&clear_color, 
+					accumulated_tick_time as f32).unwrap();
 
 				let total_time = game_start_time.elapsed();
 				let current_fps = (total_frames as f64) / (total_time.as_secs_f64());

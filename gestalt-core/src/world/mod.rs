@@ -55,7 +55,7 @@ pub struct TickLength {
 	seconds_per_tick: f32,
 }
 impl TickLength {
-	pub fn new(target_tps: f32) -> Self {
+	pub fn from_tps(target_tps: f32) -> Self {
 		if !target_tps.is_normal() {
 			panic!(
 				"Ticks per second must not be zero, infinite, or NaN! \n\
@@ -83,7 +83,7 @@ pub const DEFAULT_TPS: f32 = 30.0;
 
 impl Default for TickLength {
 	fn default() -> Self {
-		Self::new(DEFAULT_TPS)
+		Self::from_tps(DEFAULT_TPS)
 	}
 }
 
@@ -150,5 +150,5 @@ impl Div<TickLength> for f32 {
 #[test]
 #[should_panic]
 fn zero_tps_does_panic() {
-	let _value = TickLength::new(0.0);
+	let _value = TickLength::from_tps(0.0);
 }

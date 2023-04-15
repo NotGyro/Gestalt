@@ -31,6 +31,13 @@ impl EntityPos {
 pub struct LastPos {
 	pub pos: EntityVec3,
 }
+impl LastPos {
+	pub fn new(pos: EntityVec3) -> Self { 
+		Self { 
+			pos
+		}
+	}
+}
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct EntityRot {
@@ -114,23 +121,26 @@ impl Default for EntityScale {
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct EntityVelocity {
-	change_per_tick: EntityVec3,
+	motion_per_second: EntityVec3
 }
 impl EntityVelocity {
-	pub fn new(motion_per_second: EntityVec3, seconds_per_tick: TickLength) -> Self {
+	pub fn new(motion_per_second: EntityVec3) -> Self {
 		Self {
-			change_per_tick: motion_per_second * seconds_per_tick.get(),
+			motion_per_second
 		}
 	}
-	pub fn apply_tick(&self, to_move: &mut EntityPos) {
-		to_move.move_by(self.change_per_tick)
+	pub fn get_motion_per_second(&self) -> EntityVec3 { 
+		self.motion_per_second
 	}
-	pub fn apply_multi_tick(&self, to_move: &mut EntityPos, num_ticks: u32) {
-		to_move.move_by(self.change_per_tick * (num_ticks as f32))
+	pub fn apply_tick(&self, to_move: &mut EntityPos, seconds_per_tick: TickLength) {
+		to_move.move_by(self.get_motion_per_second() * seconds_per_tick.get())
+	}
+	pub fn apply_multi_tick(&self, to_move: &mut EntityPos, seconds_per_tick: TickLength, num_ticks: u32) {
+		to_move.move_by(self.get_motion_per_second() * seconds_per_tick.get() * (num_ticks as f32))
 	}
 }
 
-pub fn tick_movement_system(world: &mut EcsWorld) {
+pub fn tick_movement_system(world: &mut EcsWorld, seconds_per_tick: TickLength) {
 	for (_entity, (position, velocity, last_pos_maybe)) in
 		world.query_mut::<(&mut EntityPos, &EntityVelocity, Option<&mut LastPos>)>()
 	{
@@ -138,6 +148,6 @@ pub fn tick_movement_system(world: &mut EcsWorld) {
 		if let Some(previous) = last_pos_maybe {
 			previous.pos = position.get();
 		}
-		velocity.apply_tick(position);
+		velocity.apply_tick(position, seconds_per_tick);
 	}
 }

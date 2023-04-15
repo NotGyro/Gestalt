@@ -21,9 +21,10 @@ use winit::window::Window;
 use crate::client::client_config::{ClientConfig, DisplaySize};
 use crate::common::{Angle, Color};
 use crate::common::voxelmath::ToSigned;
-use crate::entity::{EcsWorld, EntityPos, EntityRot, EntityScale};
+use crate::entity::{EcsWorld, EntityPos, EntityRot, EntityScale, LastPos, EntityVelocity};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
 use crate::resource::{ResourceId, ResourceStatus};
+use crate::world::TickLength;
 
 use self::drawable::BillboardDrawable;
 
@@ -456,7 +457,11 @@ impl Renderer {
 			self.depth_texture = Self::create_depth_texture(&self.device, &self.surface_config, "depth_texture");
 		}
 	}
-	pub fn render_frame(&mut self, camera: &Camera, ecs_world: &EcsWorld, clear_color: &Color) -> Result<(), DrawFrameError> {
+	pub fn render_frame(&mut self, 
+			camera: &Camera, 
+			ecs_world: &EcsWorld, 
+			clear_color: &Color,
+			secs_since_last_tick: f32) -> Result<(), DrawFrameError> {
 		let view_projection_matrix = camera.build_view_projection_matrix();
 		let output = self.surface.get_current_texture()?;
 
@@ -510,12 +515,14 @@ impl Renderer {
 			for (_entity, (
 					position, 
 					drawable,
-					scale_maybe
+					scale_maybe,
+					velocity_maybe
 				)
 			) in ecs_world.query::<
 					(&EntityPos, 
 					&BillboardDrawable,
-					Option<&EntityScale>)
+					Option<&EntityScale>,
+					Option<&EntityVelocity>)
 				>().iter() {
 				let texture_maybe = match &drawable.texture_handle {
 					Some(handle) => self.loaded_textures.get(handle),
@@ -563,6 +570,16 @@ impl Renderer {
 								% std::f32::consts::PI, 
 							(camera.get_roll().get_radians() - std::f32::consts::PI)
 								% std::f32::consts::PI) */
+				// Guess where the entity *should* be independent of tick rate. 
+				let interpolated_pos = match velocity_maybe {
+					Some(vel) => {
+						let motion_per_second = vel.get_motion_per_second();
+						let movement_guess = motion_per_second * secs_since_last_tick; 
+						position.get() + movement_guess
+					},
+					None => position.get(),
+				};
+
 				let negated_camera_forward = camera.get_front().neg().normalize();
 				let initial_look_back = Quat::from_rotation_arc(Vec3::new(0.0,0.0,1.0), negated_camera_forward);
 				let billboard_look_back = match drawable.style {
@@ -580,10 +597,10 @@ impl Renderer {
 						Mat4::from_scale_rotation_translation(
 							scale.get().into(), 
 							billboard_look_back, 
-							position.get())
+							interpolated_pos)
 					}, 
 					None => {
-						Mat4::from_rotation_translation(billboard_look_back, position.get())
+						Mat4::from_rotation_translation(billboard_look_back, interpolated_pos)
 					}
 				};
 
