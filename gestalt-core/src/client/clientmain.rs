@@ -423,17 +423,17 @@ pub fn run_client(
 	let test_entity = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(0.0, 0.0, 0.0)), 
 		EntityRot::new_from_euler(DegreeAngle(90.0), DegreeAngle(0.0), DegreeAngle(0.0)),
-		BillboardDrawable::new(testlet_image_id.clone(), BillboardStyle::Spherical)
+		BillboardDrawable::new(testlet_image_id.clone(), BillboardStyle::Cylindrical)
 	));
 	let test_entity_2 = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)),
 		EntityRot::new_from_euler(DegreeAngle(30.0), DegreeAngle(0.0), DegreeAngle(0.0)),
-		BillboardDrawable::new(testlet_2_image_id.clone(), BillboardStyle::Spherical)
+		BillboardDrawable::new(testlet_2_image_id.clone(), BillboardStyle::Cylindrical)
 	));
 	let test_entity_3 = entity_world.spawn((
 		EntityPos::new(EntityVec3::new(0.0, 0.0, -10.0)),
 		EntityScale::new(EntityVec3::new(8.0, 8.0, 8.0)),
-		BillboardDrawable::new(testlet_3_image_id.clone(), BillboardStyle::Spherical)
+		BillboardDrawable::new(testlet_3_image_id.clone(), BillboardStyle::Cylindrical)
 	));
 
 	renderer.ingest_image(&testlet_image_id, &mut image_loader);

@@ -25,8 +25,10 @@ pub trait Angle {
 	fn from_radians(value: f32) -> Self;
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct RadianAngle(pub f32);
 
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub struct DegreeAngle(pub f32);
 
 impl Angle for RadianAngle {

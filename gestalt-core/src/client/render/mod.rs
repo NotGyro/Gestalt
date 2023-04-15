@@ -2,6 +2,7 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::iter;
 use std::num::NonZeroU32;
+use std::ops::Neg;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -18,6 +19,8 @@ use wgpu::{
 use winit::window::Window;
 
 use crate::client::client_config::{ClientConfig, DisplaySize};
+use crate::common::Angle;
+use crate::common::voxelmath::ToSigned;
 use crate::entity::{EcsWorld, EntityPos, EntityRot, EntityScale};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
 use crate::resource::{ResourceId, ResourceStatus};
@@ -121,12 +124,12 @@ const UNIT_BILLBOARD: &[Vertex] = &[
 ];
 
 #[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: Mat4 = glam::mat4(
-    Vec4::new(1.0, 0.0, 0.0, 0.0),
-    Vec4::new(0.0, 1.0, 0.0, 0.0),
-    Vec4::new(0.0, 0.0, 0.5, 0.0),
-    Vec4::new(0.0, 0.0, 0.5, 1.0),
-); 
+pub const OPENGL_TO_WGPU_MATRIX: Mat4 = Mat4::from_cols_array(&[
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.0,
+    0.0, 0.0, 0.5, 1.0,
+]);
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -550,32 +553,36 @@ impl Renderer {
 						Mat4::from_translation(position.get().into())
 					}
 				};*/
+				// Translate camera into this-object-space
+				/*
+						Quat::from_euler(EulerRot::YXZ, 
+							(camera.get_yaw().get_radians() - std::f32::consts::PI)
+								% std::f32::consts::PI,
+							(camera.get_pitch().get_radians() - std::f32::consts::PI)
+								% std::f32::consts::PI, 
+							(camera.get_roll().get_radians() - std::f32::consts::PI)
+								% std::f32::consts::PI) */
+				let negated_camera_forward = camera.get_front().neg().normalize();
+				let initial_look_back = Quat::from_rotation_arc(Vec3::new(0.0,0.0,1.0), negated_camera_forward);
 				let billboard_look_back = match drawable.style {
-					drawable::BillboardStyle::Spherical => { 
-						let look_matrix = Mat4::look_at_lh(
-							position.get().into(), 
-							*camera.get_position(), 
-							Vec3::new(0.0, 1.0, 0.0));
-						look_matrix.to_scale_rotation_translation().1
+					drawable::BillboardStyle::Spherical => {
+						let euler = initial_look_back.to_euler(EulerRot::YXZ);
+						Quat::from_euler(EulerRot::YXZ, euler.0, euler.1, 0.0)
 					},
 					drawable::BillboardStyle::Cylindrical => {
-						let look_matrix = Mat4::look_at_lh(
-							position.get().into(), 
-							*camera.get_position(), 
-							Vec3::new(0.0, 1.0, 0.0));
-						let yaw = look_matrix.to_scale_rotation_translation().1.to_euler(EulerRot::YXZ).1; 
-						Quat::from_euler(EulerRot::YXZ, 0.0, yaw, 0.0)
+						let yaw = initial_look_back.to_euler(EulerRot::YXZ).0;
+						Quat::from_euler(EulerRot::YXZ, yaw, 0.0, 0.0)
 					},
-				};
+				}.normalize();
 				let model_matrix = match scale_maybe {
 					Some(scale) => {
 						Mat4::from_scale_rotation_translation(
 							scale.get().into(), 
 							billboard_look_back, 
-							position.get().into())
+							position.get())
 					}, 
-					None => { 
-						Mat4::from_rotation_translation(billboard_look_back, position.get().into())
+					None => {
+						Mat4::from_rotation_translation(billboard_look_back, position.get())
 					}
 				};
 

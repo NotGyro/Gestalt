@@ -3,7 +3,7 @@ pub use hecs::World as EcsWorld;
 
 use crate::{world::TickLength, common::{Angle, RadianAngle}};
 pub type EntityCoord = f32;
-pub type EntityVec3 = glam::f32::Vec3A;
+pub type EntityVec3 = glam::f32::Vec3;
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct EntityPos {
