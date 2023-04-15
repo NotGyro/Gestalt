@@ -34,7 +34,7 @@ use super::camera::Camera;
 pub mod drawable;
 pub mod array_texture;
 pub mod tiletextureatlas;
-//pub mod voxelmesher;
+pub mod voxelmesher;
 pub mod voxel_art;
 //pub mod terrain_renderer;
 

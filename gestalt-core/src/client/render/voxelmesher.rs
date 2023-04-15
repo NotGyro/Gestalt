@@ -4,6 +4,7 @@ use glam::{vec3, Vec2, Vec3};
 use std::collections::HashSet;
 use log::{error, warn};
 
+use crate::common::{FastHashMap, FastHashSet};
 use crate::common::voxelmath::VoxelPos;
 use crate::{
     common::voxelmath::*,
@@ -18,17 +19,14 @@ use crate::{
     },
 };
 
-use super::voxel_art::VoxelArt;
-use super::{
-    tiletextureatlas::{TileAtlasError, TileAtlasLayout},
-};
-
+use super::array_texture::{ArrayTextureLayout, ArrayTextureError};
+use super::voxel_art::{VoxelArt, CubeArt, CubeTex, VoxelArtMapper};
 use crate::world::chunk::{self as chunk, CHUNK_SIZE_CUBED};
 
 /// A side index and voxel cell represented as [side_idx, x, y, z]
 pub(super) struct SidePos([u8; 4]);
 
-impl SidePos { 
+impl SidePos {
     pub fn get_side_idx(&self) -> u8 { 
         self.0[0]
     }
@@ -57,14 +55,13 @@ impl SidePos {
         self.0[3] = value
     }
 }
-pub(super) trait VoxelVertex: Sized + Send + Sync + bytemuck::Pod + bytemuck::Zeroable {
+pub(super) trait CubeVertex: Sized + Send + Sync + bytemuck::Pod + bytemuck::Zeroable {
     /// Texture index as passed in when generating a face.
     type TexRepr : Sized + Send + Sync;
-    const VERTICIES_PER_FACE: usize;
     fn buffer_layout() -> wgpu::VertexBufferLayout<'static>;
-    fn generate_face(side_pos: SidePos, 
-            texture_index: &Self::TexRepr) 
-        -> [Self; Self::VERTICIES_PER_FACE];
+    fn generate_from(side_pos: SidePos,
+            texture_index: Self::TexRepr)
+        -> Vec<Self>;
 }
 
 #[repr(C)]
@@ -220,10 +217,9 @@ pub struct UvCache {
     pub(crate) lower_v: f32,
     pub(crate) higher_u: f32,
     pub(crate) higher_v: f32,
-} */
+}*/
 
-type TextureArrayIndex = u16;
-
+type ArrayTextureIndex = u16;
 type SidesCache = SidesArray<ResourceId>;
 
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
@@ -256,17 +252,19 @@ impl From<&VoxelArt> for CubeArtNotes {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
-pub struct ArtCacheEntry {
-    pub(crate) textures: SidesCache,
-    pub(crate) tile_info: CubeArtNotes,
+struct ArtCacheEntry {
+    pub(super) valid_sides: SidesFlags,
+    pub(super) textures: SidesCache,
+    pub(super) tile_info: CubeArtNotes,
 }
 
 impl ArtCacheEntry {
-    fn new(art: &CubeArt, atlas: &mut TileAtlasLayout) -> Self {
+    fn new(art: &VoxelArt, atlas: &mut ArrayTextureLayout) -> Self {
         let notes = CubeArtNotes::from(art);
-        if !notes.visible {
+        if !notes.visible_this_pass {
             return Self {
-                textures: SidesCache::default(),
+                valid_sides: SidesFlags::new_none(),
+                textures: None,
                 tile_info: notes,
             };
         }
@@ -275,77 +273,74 @@ impl ArtCacheEntry {
             _ => sides_cache_missing_texture(atlas),
         };
         Self {
+            valid_sides: SidesFlags::new_all(),
             textures: sides_uv,
             tile_info: notes,
         }
     }
 }
 
-const CUBE_ART_MISSING_TEXTURE: CubeArt = CubeArt {
-    textures: CubeTex::Single(ID_MISSING_TEXTURE),
-    cull_self: true,
-    cull_others: true,
-};
+const VOXEL_ART_MISSING_TEXTURE: VoxelArt = VoxelArt::SimpleCube(
+    CubeArt {
+        textures: CubeTex::Single(ID_MISSING_TEXTURE),
+        cull_self: true,
+        cull_others: true,
+    }
+);
 
-fn uv_cache_from_resource(
+fn idx_from_resource(
     resource: &ResourceId,
-    layout: &mut TileAtlasLayout,
-) -> Result<UvCache, TileAtlasError> {
+    layout: &mut ArrayTextureLayout,
+) -> Result<ArrayTextureIndex, ArrayTextureError> {
     let idx = layout.get_or_make_index_for_texture(resource)?;
-    let lower_uv = layout.get_uv_for_index(idx, false, false);
-    let higher_uv = layout.get_uv_for_index(idx, true, true);
 
-    Ok(UvCache {
-        lower_u: lower_uv.x,
-        lower_v: lower_uv.y,
-        higher_u: higher_uv.x,
-        higher_v: higher_uv.y,
-    })
+    Ok(idx)
 }
 
 fn sides_cache_from_art(
     art: &CubeArt,
-    layout: &mut TileAtlasLayout,
-) -> Result<Option<SidesCache>, TileAtlasError> {
+    layout: &mut ArrayTextureLayout,
+) -> Result<Option<SidesCache>, ArrayTextureError> {
     match &art {
         CubeTex::Invisible => Ok(None),
-        CubeTex::Single(t) => Ok(Some(SidesArray::new_uniform(&uv_cache_from_resource(
+        CubeTex::Single(t) => Ok(Some(SidesArray::new_uniform(&idx_from_resource(
             t, layout,
         )?))),
         CubeTex::AllSides(a) => {
-            let mut result_array: [UvCache; 6] = [UvCache::default(); 6];
-            for (i, uv_cache) in result_array.iter_mut().enumerate() {
-                *uv_cache = uv_cache_from_resource(a.get_i(i), layout)?;
-            }
+            let mut result_array: [ArrayTextureIndex; 6] = std::array::try_from_fn(|i| {
+                idx_from_resource(a.get_i(i), layout)
+            });
             Ok(Some(SidesCache { data: result_array }))
         }
     }
+
 }
 
-fn sides_cache_missing_texture(layout: &mut TileAtlasLayout) -> SidesCache {
-    let lower_uv = layout.get_missing_texture_uvs(false, false);
-    let higher_uv = layout.get_missing_texture_uvs(true, true);
+fn sides_cache_missing_texture(layout: &mut ArrayTextureLayout) -> SidesCache {
+    let idx = layout.get_missing_texture_idx();
 
-    let uv = UvCache {
-        lower_u: lower_uv.x,
-        lower_v: lower_uv.y,
-        higher_u: higher_uv.x,
-        higher_v: higher_uv.y,
-    };
-
-    SidesCache::new_uniform(&uv)
+    SidesCache::new_uniform(&idx)
 }
 
-fn art_cache_missing_texture(layout: &mut TileAtlasLayout) -> ArtCacheEntry {
+fn art_cache_missing_texture(layout: &mut ArrayTextureLayout) -> ArtCacheEntry {
     ArtCacheEntry {
         textures: sides_cache_missing_texture(layout),
-        tile_info: CubeArtNotes::from(&CUBE_ART_MISSING_TEXTURE),
+        tile_info: CubeArtNotes::from(&VOXEL_ART_MISSING_TEXTURE),
+        valid_sides: SidesFlags::new_all(),
     }
 }
 
+struct ArtCell { 
+    /// Post-culling side-render state.
+    pub sides_render: SidesFlags,
+    pub sides_array: SidesArray<ArrayTextureIndex>,
+}
+
+impl ArtCell {
+}
+
 pub trait ArtCache {
-    /// Return "None" if invisible block.
-    fn get_mapping(&self, idx: u16) -> Option<&ArtCacheEntry>;
+    fn get_mapping(&self, tile_idx: u16) -> &ArtCacheEntry;
     /// Should we draw anything for this chunk at all?
     fn is_any_visible(&self) -> bool;
 }
@@ -364,18 +359,19 @@ impl ArtCacheUniform {
 }
 
 impl ArtCache for ArtCacheUniform {
-    fn get_mapping(&self, idx: u16) -> Option<&ArtCacheEntry> {
-        if idx != 0 {
-            error!("Non-zero index in supposedly-uniform chunk! This shouldn't happen. Using missing texture.");
-            return Some(&self.missing_texture);
+    fn get_mapping(&self, tile_idx: u16) -> &ArtCacheEntry {
+        #[cfg(debug_assertions)]
+        {
+            if tile_idx != 0 {
+                error!("Non-zero index in supposedly-uniform chunk! This shouldn't happen. Using missing texture.");
+                return Some(&self.missing_texture);
+            }
         }
-        match self.value.tile_info.visible {
-            true => Some(&self.value),
-            false => None,
-        }
+
+        &self.value
     }
     fn is_any_visible(&self) -> bool {
-        self.value.tile_info.visible
+        self.value.tile_info.visible_this_pass
     }
 }
 
@@ -393,14 +389,23 @@ impl ArtCacheSmall {
 }
 
 impl ArtCache for ArtCacheSmall {
-    fn get_mapping(&self, idx: u16) -> Option<&ArtCacheEntry> {
-        if idx > (u8::MAX as u16) {
-            error!("Over-255 index supposedly-small chunk! This shouldn't happen. Using missing texture.");
-            return Some(&self.missing_texture);
+    fn get_mapping(&self, tile_idx: u16) -> &ArtCacheEntry {
+        #[cfg(debug_assertions)]
+        {
+            if tile_idx > (u8::MAX as u16) {
+                error!("Over-255 index supposedly-small chunk! This shouldn't happen. Using missing texture.");
+                return &self.missing_texture;
+            }
+            
+            self.data.get(tile_idx as usize)
+                .unwrap_or(&self.missing_texture)
         }
-        self.data
-            .get(idx as usize)
-            .and_then(|a| if !a.tile_info.visible { None } else { Some(a) })
+        #[cfg(not(debug_assertions))]
+        {
+            self.data.get(tile_idx as usize)
+                .expect("Attempted to look up an invalid index \
+                    in the art cache while building a voxel mesh!")
+        }
     }
     fn is_any_visible(&self) -> bool {
         true
@@ -408,14 +413,22 @@ impl ArtCache for ArtCacheSmall {
 }
 
 pub struct ArtCacheLarge {
-    data: HashMap<u16, ArtCacheEntry>,
+    data: HashMap<u16, ArtCacheEntry, nohash::BuildNoHashHasher<u16>>,
 }
 
 impl ArtCache for ArtCacheLarge {
-    fn get_mapping(&self, idx: u16) -> Option<&ArtCacheEntry> {
-        self.data
-            .get(&idx)
-            .and_then(|a| if !a.tile_info.visible { None } else { Some(a) })
+    fn get_mapping(&self, tile_idx: u16) -> &ArtCacheEntry {
+        #[cfg(debug_assertions)]
+        {
+            self.data.get(&tile_idx)
+                .unwrap_or(&self.missing_texture)
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            self.data.get(&tile_idx)
+                .expect("Attempted to look up an invalid index \
+                    in the art cache while building a voxel mesh!")
+        }
     }
     fn is_any_visible(&self) -> bool {
         true
@@ -423,7 +436,7 @@ impl ArtCache for ArtCacheLarge {
 }
 
 impl ArtCacheLarge {
-    pub fn new(palette: HashMap<u16, ArtCacheEntry>) -> Self {
+    pub fn new(palette: HashMap<u16, ArtCacheEntry, nohash::BuildNoHashHasher<u16>>) -> Self {
         Self { data: palette }
     }
 }
@@ -436,7 +449,7 @@ pub struct ChunkMesh {
     pub uv: Vec<OutputUv>,
 }
 
-impl ChunkMesh { 
+impl ChunkMesh {
     pub fn zero() -> Self { 
         ChunkMesh {
             verticies: Vec::default(),
@@ -454,25 +467,25 @@ pub enum ArtCacheHolder {
 pub struct MesherState<'a> {
     pub art_cache: ArtCacheHolder,
     pub chunk: &'a Chunk<TileId>,
-    pub textures_needed: HashSet<ResourceId>,
+    pub textures_needed: FastHashSet<ResourceId>,
 }
 
 impl<'a> MesherState<'a> {
-    pub fn prepare_to_mesh<A: CubeArtMapper<TileId>>(
+    pub fn prepare_to_mesh<A: VoxelArtMapper<TileId>>(
         chunk: &'a Chunk<TileId>,
         tiles_to_art: &A,
-        atlas: &mut TileAtlasLayout,
+        layout: &mut ArrayTextureLayout,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let (inner, mut textures_needed): (ArtCacheHolder, HashSet<ResourceId>) = match &chunk.inner {
+        let (inner, mut textures_needed): (ArtCacheHolder, FastHashSet<ResourceId>) = match &chunk.inner {
             ChunkInner::Uniform(val) => {
-                let missing_texture = art_cache_missing_texture(atlas);
+                let missing_texture = art_cache_missing_texture(layout);
                 let mut textures_needed = HashSet::new();
                 let cube_art = match tiles_to_art.get_art_for_tile(val) {
                     Some(art) => {
                         for t in art.all_textures() {
                             textures_needed.insert(*t);
                         }
-                        ArtCacheEntry::new(art, atlas)
+                        ArtCacheEntry::new(art, layout)
                     }
                     None => {
                         warn!(
@@ -487,7 +500,7 @@ impl<'a> MesherState<'a> {
                 (ArtCacheHolder::Uniform(art_cache), textures_needed)
             }
             ChunkInner::Small(chunk_inner) => {
-                let missing_texture = art_cache_missing_texture(atlas);
+                let missing_texture = art_cache_missing_texture(layout);
                 let mut textures_needed = HashSet::new();
                 let mut art_palette: [ArtCacheEntry; 256] = [ArtCacheEntry::default(); 256];
                 //Iterate through the palette
@@ -498,7 +511,7 @@ impl<'a> MesherState<'a> {
                             for t in art.all_textures() {
                                 textures_needed.insert(*t);
                             }
-                            ArtCacheEntry::new(art, atlas)
+                            ArtCacheEntry::new(art, layout)
                         }
                         None => {
                             warn!(
@@ -515,7 +528,7 @@ impl<'a> MesherState<'a> {
                 (ArtCacheHolder::Small(art_cache), textures_needed)
             }
             ChunkInner::Large(chunk_inner) => {
-                let missing_texture = art_cache_missing_texture(atlas);
+                let missing_texture = art_cache_missing_texture(layout);
                 let mut textures_needed = HashSet::new();
                 let mut art_palette: HashMap<u16, ArtCacheEntry> =
                     HashMap::with_capacity(chunk_inner.palette.len());
@@ -526,7 +539,7 @@ impl<'a> MesherState<'a> {
                             for t in art.all_textures() {
                                 textures_needed.insert(*t);
                             }
-                            ArtCacheEntry::new(art, atlas)
+                            ArtCacheEntry::new(art, layout)
                         }
                         None => {
                             warn!(

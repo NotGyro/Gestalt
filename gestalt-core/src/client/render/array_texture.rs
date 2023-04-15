@@ -136,6 +136,12 @@ impl ArrayTextureLayout {
 	pub fn get_texture_count(&self) -> usize {
 		self.textures.len()
 	}
+	pub fn get_missing_texture_idx(&self) -> u32 { 
+		INDEX_MISSING_TEXTURE
+	}
+	pub fn get_pending_texture_idx(&self) -> u32 { 
+		INDEX_PENDING_TEXTURE
+	}
 	pub fn unload(&mut self, resource: &ResourceId) {
 		if let Some(idx) = self.reverse_index.get(resource) { 
 			let idx = *idx as u32;

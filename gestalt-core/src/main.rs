@@ -6,6 +6,7 @@
 #![feature(associated_type_bounds)]
 #![feature(inherent_associated_types)]
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(array_try_from_fn)]
 #![allow(clippy::large_enum_variant)]
 
 #[macro_use]

@@ -35,6 +35,7 @@ sha2 = "0.10.1"
 string_cache = "0.8"
 thiserror = "1.0.30"
 xxhash-rust = { version = "0.8.5", features = ["xxh3", "const_xxh3"] }
+nohash = "0.2"
 
 # This is what I consider the short-list of "I'm pulling in too many deps, 
 # let's rewrite this and have fewer deps when we have the energy." 
