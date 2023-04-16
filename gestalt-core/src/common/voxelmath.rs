@@ -1509,15 +1509,8 @@ impl SidesFlags {
 	pub const NEGA_Z_MASK: SidesFlags = SidesFlags(1 << nega_z_index!());
 
 	#[inline(always)]
-	pub const fn new_all() -> Self { 
-		Self(
-			Self::POSI_X_MASK |
-			Self::POSI_Y_MASK |
-			Self::POSI_Z_MASK |
-			Self::NEGA_X_MASK |
-			Self::NEGA_Y_MASK |
-			Self::NEGA_Z_MASK
-		)
+	pub const fn new_all() -> Self {
+		Self(0b0_00_11111)
 	}
 
 	#[inline(always)]
@@ -1548,7 +1541,7 @@ impl From<&[VoxelSide]> for SidesFlags {
     fn from(value: &[VoxelSide]) -> Self {
 		let mut val = 0;
 		for side in value { 
-			val |= 1 << value.to_id();
+			val |= 1 << side.to_id();
 		}
         Self(val)
     }

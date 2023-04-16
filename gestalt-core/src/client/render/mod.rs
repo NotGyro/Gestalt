@@ -28,6 +28,7 @@ use crate::world::TickLength;
 
 use self::array_texture::{ArrayTexture, ArrayTextureLayout};
 use self::drawable::BillboardDrawable;
+use self::voxelmesher::ChunkMesh;
 
 use super::camera::Camera;
 
@@ -190,6 +191,7 @@ pub struct Renderer {
     camera_matrix_bind_group: wgpu::BindGroup,
 
 	depth_texture: (wgpu::Texture, wgpu::TextureView, wgpu::Sampler),
+	chunk_mesh: Option<(ChunkMesh, ArrayTexture)>,
 }
 
 impl Renderer {
@@ -304,8 +306,14 @@ impl Renderer {
 		// Load some simple shaders to figure out what I'm doing here with.
 		let shader_source = load_test_shader(PathBuf::from("test_shader.wgsl"));
 		let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-			label: Some("Shader"),
+			label: Some("Billboard Shader"),
 			source: shader_source,
+		});
+
+		let voxel_shader_source = load_test_shader(PathBuf::from("voxel_chunk_shader.wgsl"));
+		let voxel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+			label: Some("Voxel Shader"),
+			source: voxel_shader_source,
 		});
 
 		// Set up the uniform for our camera. 
@@ -451,6 +459,7 @@ impl Renderer {
             missing_texture,
             error_texture,
 			depth_texture,
+			chunk_mesh: None,
 		})
 	}
 	/// Resize the display area
@@ -779,15 +788,15 @@ impl Renderer {
 
         (texture, view, sampler)
     }
-	pub fn funky_array_texture_test<P>(&mut self, textures: &[&ResourceId], loader: &mut P)
-			where P: ImageProvider {
-		let mut layout = ArrayTextureLayout::new((64, 64), None);
-		for tex in textures.iter() {
-			let idx = layout.get_or_make_index_for_texture(*tex); 
-			info!("Layout ingest result: {idx:?}");
-		}
-		let mut array = ArrayTexture::new(layout, None, &mut self.device).unwrap();
-		array.full_rebuild(&mut self.device, &mut self.queue, loader).unwrap();
+	pub fn ingest_voxel_mesh_for_test<P>(&mut self, 
+			chunk_mesh: ChunkMesh, 
+			layout: ArrayTextureLayout, 
+			texture_loader: &mut P)
+				where P: ImageProvider {
+		let max_cells = Some(layout.get_max_textures());
+		let mut array = ArrayTexture::new(layout, max_cells, &mut self.device).unwrap();
+		array.full_rebuild(&mut self.device, &mut self.queue, texture_loader).unwrap();
+
 	}
 }
 

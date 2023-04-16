@@ -80,4 +80,20 @@ impl VoxelArt {
             VoxelArt::SimpleCube(_) => VoxelArtKind::SimpleCube,
         }
     }
+    pub fn all_textures(&self) -> Vec<&ResourceId> { 
+        match self {
+            VoxelArt::Invisible => vec![],
+            VoxelArt::SimpleCube(cube) => {
+                match &cube.textures {
+                    CubeTex::Single(tex) => vec![tex],
+                    CubeTex::AllSides(sides) => {
+                        sides.iter().collect()
+                    },
+                }
+            },
+        }
+    }
+    pub fn simple_solid_block(texture: &ResourceId) -> Self { 
+        Self::SimpleCube(CubeArt::simple_solid_block(texture))
+    }
 }

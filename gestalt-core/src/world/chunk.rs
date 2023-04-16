@@ -1,9 +1,8 @@
 use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-use crate::common::{voxelmath::*, Version};
+use crate::common::{voxelmath::*, Version, FastHashMap, new_fast_hash_map};
 
 use super::{
 	voxelarray::{VoxelArrayError, VoxelArrayStatic},
@@ -13,7 +12,7 @@ use super::{
 
 pub const NEWEST_CHUNK_FILE_VERSION: Version = version!(0, 0, 1);
 
-pub const CHUNK_EXP: usize = 4;
+pub const CHUNK_EXP: usize = 5;
 pub const CHUNK_SIZE: usize = 2_usize.pow(CHUNK_EXP as u32);
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
@@ -258,10 +257,10 @@ impl USizeAble for AlwaysLeU16 {
 // Actual chunk implementation starts here:
 pub struct ChunkTilesSmall<T: Voxel> {
 	//Attempting to use the constant causes Rust to freak out for some reason
-	//so I simply type 16
-	pub inner: VoxelArrayStatic<u8, u8, 16>,
+	//so I simply type 32
+	pub inner: VoxelArrayStatic<u8, u8, 32>,
 	pub palette: [T; 256],
-	pub reverse_palette: HashMap<T, u8>,
+	pub reverse_palette: FastHashMap<T, u8>,
 	pub highest_idx: u8,
 	// Used by the serializer to tell if the palette has changed.
 	pub palette_dirty: bool,
@@ -314,7 +313,7 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 			new_inner.set_raw_i(i, AlwaysLeU16::new(*tile as u16));
 		}
 
-		let mut new_reverse_palette: HashMap<T, AlwaysLeU16> = HashMap::default();
+		let mut new_reverse_palette: FastHashMap<T, AlwaysLeU16> = new_fast_hash_map();
 		for (key, value) in self.reverse_palette.iter() {
 			new_reverse_palette.insert(key.clone(), AlwaysLeU16::new(*value as u16));
 		}
@@ -354,10 +353,10 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 //In a 16*16*16, a u16 encodes a number larger than the total number of possible voxel positions anyway.
 pub struct ChunkTilesLarge<T: Voxel> {
 	//Attempting to use the constant causes Rust to freak out for some reason
-	//so I simply type 16
-	pub inner: VoxelArrayStatic<AlwaysLeU16, u8, 16>,
+	//so I simply type 32
+	pub inner: VoxelArrayStatic<AlwaysLeU16, u8, 32>,
 	pub palette: Vec<T>,
-	pub reverse_palette: HashMap<T, AlwaysLeU16>,
+	pub reverse_palette: FastHashMap<T, AlwaysLeU16>,
 	pub palette_dirty: bool,
 }
 
@@ -525,7 +524,7 @@ impl<T: Voxel> Chunk<T> {
 						array
 					};
 					palette[1] = tile.clone();
-					let mut reverse_palette: HashMap<T, u8> = HashMap::default();
+					let mut reverse_palette: FastHashMap<T, u8> = new_fast_hash_map();
 					reverse_palette.insert(val.clone(), 0);
 					reverse_palette.insert(tile, 1);
 					self.tiles = ChunkInner::Small(Box::new(ChunkTilesSmall {

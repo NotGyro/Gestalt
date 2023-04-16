@@ -22,7 +22,7 @@ use winit::{
 };
 
 use crate::{
-	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}}},
+	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}, voxel_art::VoxelArt, voxelmesher::make_mesh_completely}},
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
 		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, DegreeAngle, Color,
@@ -376,17 +376,6 @@ pub fn run_client(
 		.preload_image_file("testpoak.png", identity_keys)
 		.unwrap();
 	/*
-	let mut tiles_to_art: HashMap<TileId, CubeArt> = HashMap::new();
-
-	tiles_to_art.insert(air_id, CubeArt::airlike());
-	tiles_to_art.insert(stone_id, CubeArt::simple_solid_block(&test_stone_image_id));
-	tiles_to_art.insert(dirt_id, CubeArt::simple_solid_block(&test_dirt_image_id));
-	tiles_to_art.insert(grass_id, CubeArt::simple_solid_block(&test_grass_image_id));
-	tiles_to_art.insert(
-		dome_thing_id,
-		CubeArt::simple_solid_block(&test_dome_thing_image_id),
-	);
-
 	// Set up our test world a bit
 	let mut world_space = TileSpace::new();
 	let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
@@ -403,14 +392,52 @@ pub fn run_client(
 
 	let mut last_remesh_time = Instant::now();
 	*/
-	renderer.funky_array_texture_test(
-		&[&test_dirt_image_id,
-		&test_stone_image_id,
-		&test_grass_image_id,
-		&test_dome_thing_image_id,],
-		&mut image_loader
+
+	
+    //Set up a test chunk.
+    let air_id = 0;
+    let stone_id = 1;
+    let dirt_id = 2;
+    let grass_id = 3;
+    let dome_thing_id = 4;
+
+	let mut tiles_to_art: HashMap<TileId, VoxelArt> = HashMap::new();
+
+	tiles_to_art.insert(air_id, VoxelArt::Invisible);
+	tiles_to_art.insert(stone_id, VoxelArt::simple_solid_block(&test_stone_image_id));
+	tiles_to_art.insert(dirt_id, VoxelArt::simple_solid_block(&test_dirt_image_id));
+	tiles_to_art.insert(grass_id, VoxelArt::simple_solid_block(&test_grass_image_id));
+	tiles_to_art.insert(
+		dome_thing_id,
+		VoxelArt::simple_solid_block(&test_dome_thing_image_id),
 	);
 
+    let mut test_chunk: Chunk<u32> = Chunk::new(air_id);
+    for i in test_chunk.get_bounds() {
+        if i.y >= (CHUNK_SIZE as u8) / 2 {
+            let vec = Vec3::new(
+                (i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+                (i.y as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+                (i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+            );
+            if vec.length_squared() <= 6.5f32 * 6.5f32 {
+                test_chunk.set(i, dome_thing_id).unwrap();
+            }
+        } else {
+            if i.y > 5 {
+                test_chunk.set(i, dirt_id).unwrap();
+            } else {
+                test_chunk.set(i, stone_id).unwrap();
+            }
+        }
+    }
+
+	let (chunk_mesh, chunk_texture_layout) = make_mesh_completely(64, 
+		&test_chunk,
+		&tiles_to_art,
+		Some(4096)).unwrap();
+
+	renderer.ingest_voxel_mesh_for_test(chunk_mesh, chunk_texture_layout, &mut image_loader);
 	let mut current_down = HashSet::new();
 
 	let game_start_time = Instant::now();
