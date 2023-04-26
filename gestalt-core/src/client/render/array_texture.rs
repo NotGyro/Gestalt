@@ -121,6 +121,8 @@ impl ArrayTextureLayout {
 				//Make sure we can look it up the other way, too.
 				self.reverse_index.insert(*resource, idx as usize);
                 
+				info!("Adding texture {resource} at index {idx} to array texture");
+
 				self.changes.push(
 					ArrayTextureChange::Added { slot: idx, added_resource: resource.clone() }
 				);
@@ -275,23 +277,23 @@ impl ArrayTexture {
         };
 
 		for (texture_index, resource_texture) in self.layout.textures.iter().enumerate() {
-			let mut texture_to_use = match texture_source.load_image(resource_texture) {
-				crate::resource::ResourceStatus::Pending => &self.pending_image,
-				crate::resource::ResourceStatus::Errored(e) => match e { 
-					RetrieveImageError::DoesNotExist(_) => { 
-						warn!("No texture found for {resource_texture:?}, \
-							using missing-texture placeholder.");
-						&self.missing_image
-					}, 
-					_ => &self.error_image,
-				},
-				crate::resource::ResourceStatus::Ready(image) => image,
+			info!("Attempting to load texture {resource_texture} at index {texture_index}");
+			let mut texture_to_use = match resource_texture { 
+				&ID_PENDING_TEXTURE => &self.pending_image,
+				&ID_MISSING_TEXTURE => &self.missing_image,
+				_ => match texture_source.load_image(resource_texture) {
+					crate::resource::ResourceStatus::Pending => &self.pending_image,
+					crate::resource::ResourceStatus::Errored(e) => match e { 
+						RetrieveImageError::DoesNotExist(_) => { 
+							warn!("No texture found for {resource_texture}, \
+								using missing-texture placeholder.");
+							&self.missing_image
+						}, 
+						_ => &self.error_image,
+					},
+					crate::resource::ResourceStatus::Ready(image) => image,
+				}
 			};
-			if resource_texture == &ID_PENDING_TEXTURE {
-				texture_to_use = &self.pending_image;
-			} else if resource_texture == &ID_MISSING_TEXTURE {
-				texture_to_use = &self.missing_image;
-			}
 
 			//Is it the wrong size?
 			if !((texture_to_use.width() == texture_size.0)

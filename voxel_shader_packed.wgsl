@@ -18,7 +18,7 @@ struct VertexInput {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) tex_coords: vec2<f32>,
-    @location(1) tex_idx: u32,
+    @location(1) tex_idx: i32,
 }
 
 @vertex
@@ -40,7 +40,7 @@ fn vs_main(
 
 	//Extract texture ID
 	var bitmask_12 = u32(4095);
-	var t_id = u32((vertex.vertex_data >> u32(18)) & bitmask_12);
+	var t_id = i32((vertex.vertex_data >> u32(18)) & bitmask_12);
     out.tex_idx = t_id;
 	
 	var bitmask_1 = u32(1); //Lowest one bit time.

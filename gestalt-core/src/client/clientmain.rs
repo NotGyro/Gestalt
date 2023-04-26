@@ -113,6 +113,8 @@ impl DevImageLoader {
 
 		rid.verify(buf.as_slice())?;
 
+		info!("Loaded {filename} as resource ID {rid}");
+
 		let metadata = ResourceInfo {
 			id: rid,
 			filename: filename.to_string(),

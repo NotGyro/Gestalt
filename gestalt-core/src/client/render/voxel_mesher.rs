@@ -136,7 +136,10 @@ impl PackedVertex {
     pub fn set_tex_id(&mut self, texture_idx: u16) {
         let bitmask : u32 = 0b0_0_111111111111_000000_000000_000000;
         self.vertex_data = self.vertex_data & (! bitmask); //clear out value
-        self.vertex_data = self.vertex_data | (texture_idx as u32 & bitmask); //Set our value
+
+        let val = (texture_idx as u32) << 18;
+
+        self.vertex_data = self.vertex_data | (val & bitmask); //Set our value
     }
 
     pub fn set_u_low(&mut self) {
@@ -360,7 +363,11 @@ impl ArtCacheEntry {
         }
         let sides_textures = match sides_cache_from_art(art, layout) {
             Ok(Some(sides)) => sides,
-            _ => sides_cache_missing_texture(layout),
+            Err(e) => {
+                error!("Array texture error: {e}"); 
+                sides_cache_missing_texture(layout)
+            },
+            Ok(None) => sides_cache_missing_texture(layout),
         };
         Some(Self {
             textures: sides_textures,
@@ -575,7 +582,7 @@ impl<'a> MesherState<'a> {
                 //Iterate through the palette
                 for i in 0..(chunk_inner.highest_idx + 1) {
                     let tile = chunk_inner.palette[i as usize];
-                    let cube_art = match tiles_to_art.get_art_for_tile(&tile) {
+                    let cube_art: Option<ArtCacheEntry> = match tiles_to_art.get_art_for_tile(&tile) {
                         Some(art) => {
                             for t in art.all_textures() {
                                 textures_needed.insert(*t);
@@ -763,7 +770,7 @@ fn build_mesh<V: Voxel, A: ArtCache>(
         if let Some(art) = art_cache.get_mapping(tile) {
             // Skip it if it's air.
             if art.tile_info.visible_this_pass {
-                offset_unroll!(SIDE, offset_idx, i, SIDE_INDEX {
+                offset_unroll!(_SIDE, offset_idx, i, SIDE_INDEX {
                     let mut cull: bool = false;
                     if let Some(neighbor_idx) = offset_idx {
                         let neighbor_tile = chunk.get_raw_i(neighbor_idx);

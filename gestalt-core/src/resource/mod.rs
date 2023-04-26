@@ -25,7 +25,7 @@ pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 /// in the resource, then the 32-byte Sha256-512 hash encoded in base-64.
 /// For example, `1.2048.J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA` would be a version 1 ResourceID.
 #[repr(C)]
-#[derive(Copy, Clone, PartialOrd, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialOrd, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResourceId {
 	/// Which version of the ResourceId struct is this?
 	pub version: u8,
@@ -141,23 +141,6 @@ impl ResourceId {
 		})
 	}
 }
-
-impl Hash for ResourceId {
-	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-		self.length.hash(state);
-		self.hash.hash(state);
-	}
-}
-
-impl PartialEq for ResourceId {
-	fn eq(&self, other: &Self) -> bool {
-		//Ignore version here
-		// TODO: Figure out how to compare two RId's of different origin
-		(self.length == other.length) && (self.hash == other.hash)
-	}
-}
-
-impl Eq for ResourceId {}
 
 impl std::fmt::Display for ResourceId {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
