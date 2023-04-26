@@ -1,12 +1,18 @@
 use std::collections::{HashSet, HashMap};
+use std::path::PathBuf;
 
+use glam::{Vec3, Quat, Mat4};
 use image::{Rgba, RgbaImage};
+use wgpu::util::DeviceExt;
+use wgpu::{BindGroupDescriptor, BindGroupLayout, PushConstantRange, ShaderStages, TextureView};
 
-use super::TextureId;
-use super::tiletextureatlas::{TileAtlasLayout, build_tile_atlas, TileAtlasError};
-use super::voxelmesher::{ChunkMesh, MesherState};
+use super::array_texture::{ArrayTextureLayout, ArrayTexture, ArrayTextureError};
+use super::{load_test_shader, ModelPush};
+use super::voxel_art::VoxelArtMapper;
+use super::voxel_mesher::{ChunkMesh, MesherState, PackedVertex};
 use crate::common::voxelmath::SidesArray;
 use crate::resource::image::ImageProvider;
+use crate::world::tilespace::{TileSpace, TileSpaceError, world_to_chunk_pos, chunk_to_world_pos};
 //use crate::world::chunk::CHUNK_SIZE;
 //use crate::world::tilespace::{world_to_chunk_pos, TileSpaceError, TileSpace};
 use crate::world::{ChunkPos, TilePos, TileId};
@@ -14,14 +20,14 @@ use crate::world::voxelstorage::{Voxel, VoxelSpace};
 
 #[derive(thiserror::Error, Debug)]
 pub enum TerrainRendererError {
-    //#[error("Error borrowing chunk for terrain renderer: {0:?}")]
-    //UnrecognizedTexture(#[from] TileSpaceError),
+    #[error("Error borrowing chunk for terrain renderer: {0:?}")]
+    ChunkError(#[from] TileSpaceError),
     #[error("Could not prepare meshing for chunk {0:?}, received error: {1:?}")]
     PrepareMeshingError(ChunkPos, String),
     #[error("Could not mesh chunk {0:?}, received error: {1:?}")]
     MeshingError(ChunkPos, String),
-    #[error("Could not build tile texture atlas: {0:?}")]
-    TileAtlasError(#[from] TileAtlasError)
+    #[error("Could not build tile array texture: {0}")]
+    ArrayTextureError(#[from] ArrayTextureError)
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,46 +39,15 @@ pub enum VoxelMesherPass {
     SimpleCubes,
 }
 
-/*
-// Chunk mesh state which is produced by the mesher and then 
-// consumed on uploading it to the GPU
-struct IntermediaryChunkMesh { 
-    geometry: ChunkMesh, 
-    /// This does not correspond to anything on the GPU, it just 
-    /// refers to a texture managed internally in the TerrainRenderer
-    texture_id: u32,
-}
-impl IntermediaryChunkMesh {
-    fn new(geometry: ChunkMesh, texture_id: u32) -> Self {
-        IntermediaryChunkMesh {
-            geometry,
-            texture_id,
-        }
-    }
-    fn get_texture_id(&self) -> u32 { 
-        self.texture_id
-    }
-}*/
-
-/// Handle to GPU data for this chunk
-#[allow(dead_code)]
-struct GpuChunkMeshHandle {
-    mesh_handle: (), // TODO 
-    object_handle: (),  // TODO
-}
-
-/// Data we keep around for a tile texture atlas for as long as we don't need to rebuild it.
-#[allow(dead_code)]
-struct BuiltTexture {
-    last_built_revision: u64, 
-    gpu_handle: (), // TODO
-    material: (), // TODO
-}
-
 #[derive(Copy, Clone, Hash, Debug)]
 struct ChunkTextureBinding { 
     texture_id: u32,
-    tile_atlas_revision: u64,
+    tile_array_texture_revision: u64,
+}
+
+struct BuiltChunk { 
+    pub buffer: wgpu::Buffer,
+    pub num_verts: u32,
 }
 
 /// A subsystem that is responsible for building, maintaining 
@@ -83,32 +58,132 @@ pub struct TerrainRenderer {
     /// so that partial rebuilds of a chunk are possible (Rather than total rebuilds every time)
     pending_remesh: HashSet<ChunkPos>,
     meshed_chunks: HashMap<ChunkPos, ChunkMesh>, 
-    built_chunks: HashMap<ChunkPos, GpuChunkMeshHandle>,
+    built_chunks: HashMap<ChunkPos, BuiltChunk>,
     texture_for_chunk: HashMap<ChunkPos, ChunkTextureBinding>,
-    texture_layouts: HashMap<u32, TileAtlasLayout>,
-    built_textures: HashMap<u32, BuiltTexture>,
+    texture_layouts: HashMap<u32, ArrayTextureLayout>,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    built_textures: HashMap<u32, ArrayTexture>,
     /// One past the highest texture ID in texture_layouts. Incremented each time we add a new texture layout.
     next_texture_id: u32,
     texture_size: u32,
+    
+	render_pipeline: wgpu::RenderPipeline,
 }
 
 impl TerrainRenderer {
-    pub fn new(texture_size: u32) -> Self { 
+    pub fn new(texture_size: u32,
+            camera_layout: &wgpu::BindGroupLayout, 
+            device: &wgpu::Device,
+            render_format: &wgpu::TextureFormat,
+            depth_format: &wgpu::TextureFormat )
+                -> Self {
+        let texture_bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            }
+        );
+
+		let voxel_shader_source = load_test_shader(PathBuf::from("voxel_shader_packed.wgsl"));
+		let voxel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+			label: Some("Voxel Shader"),
+			source: voxel_shader_source,
+		});
+
+		let render_pipeline_layout =
+			device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+				label: Some("Render Pipeline Layout"),
+				bind_group_layouts: &[
+					&texture_bind_group_layout,
+					camera_layout,
+				],
+				push_constant_ranges: &[PushConstantRange{ 
+					stages: ShaderStages::VERTEX,
+					range: 0..(std::mem::size_of::<ModelPush>() as u32),
+				}],
+			});
+
+        
+		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+			label: Some("Voxel Render Pipeline"),
+			layout: Some(&render_pipeline_layout),
+			vertex: wgpu::VertexState {
+				module: &voxel_shader,
+				entry_point: "vs_main",
+				buffers: &[
+					PackedVertex::desc(),
+				],
+			},
+            fragment: Some(wgpu::FragmentState {
+                module: &voxel_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_format.clone(),
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent::REPLACE,
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+			primitive: wgpu::PrimitiveState {
+				topology: wgpu::PrimitiveTopology::TriangleList,
+				strip_index_format: None,
+				front_face: wgpu::FrontFace::Ccw,
+				cull_mode: Some(wgpu::Face::Back),
+				polygon_mode: wgpu::PolygonMode::Fill,
+				unclipped_depth: false,
+				conservative: false,
+			},
+			depth_stencil: Some(wgpu::DepthStencilState {
+				format: *depth_format,
+				depth_write_enabled: true,
+				depth_compare: wgpu::CompareFunction::Less,
+				stencil: wgpu::StencilState::default(),
+				bias: wgpu::DepthBiasState::default(),
+			}),
+			multisample: wgpu::MultisampleState {
+				count: 1,
+				mask: !0,
+				alpha_to_coverage_enabled: false,
+			},
+			multiview: None,
+		});
+
         TerrainRenderer {
             pending_remesh: HashSet::default(),
             meshed_chunks: HashMap::default(),
             built_chunks: HashMap::default(),
             texture_for_chunk: HashMap::default(),
             texture_layouts: HashMap::default(),
+            texture_bind_group_layout,
             built_textures: HashMap::default(),
             next_texture_id: 0,
             texture_size,
+            render_pipeline,
         }
     }
     /// Inform this terrain renderer that a block at the given position has changed.
     pub fn notify_changed(&mut self, tile_position: &TilePos) { 
-        //let chunk_position = world_to_chunk_pos(tile_position);
-        //self.pending_remesh.insert(chunk_position);
+        let chunk_position = world_to_chunk_pos(tile_position);
+        self.pending_remesh.insert(chunk_position);
     }
     /// Inform this terrain renderer that a specific chunk needs to be remeshed.
     pub fn notify_chunk_remesh_needed(&mut self, chunk_position: &ChunkPos) {
@@ -130,38 +205,38 @@ impl TerrainRenderer {
             self.texture_for_chunk.remove(chunk_position);
         }
     }
-    fn make_new_atlas(&mut self) -> ChunkTextureBinding { 
+    fn make_new_array_texture(&mut self) -> ChunkTextureBinding { 
         let new_texture_id = self.next_texture_id;
         self.next_texture_id += 1;
-        let new_atlas = TileAtlasLayout::new(self.texture_size, 32, 8, Some(4096));
-        self.texture_layouts.insert(new_texture_id, new_atlas);
+        let new_array_texture = ArrayTextureLayout::new((self.texture_size, self.texture_size), Some(4096));
+        self.texture_layouts.insert(new_texture_id, new_array_texture);
         ChunkTextureBinding{ 
             texture_id: new_texture_id,
-            tile_atlas_revision: 0,
+            tile_array_texture_revision: 0,
         }
     }
-    fn find_available_texture_atlas(&mut self) -> ChunkTextureBinding {
+    fn find_available_texture_array_texture(&mut self) -> ChunkTextureBinding {
         if self.texture_layouts.is_empty() {
-            self.make_new_atlas()
+            self.make_new_array_texture()
         }
         else {
             for (atlas_id, layout) in self.texture_layouts.iter() { 
                 //Is it relatively safe to assume we won't overrun max layout size?
-                if layout.get_tile_count() <= (layout.get_max_tiles()/2) { 
+                if layout.get_texture_count() <= (layout.get_max_textures()/2) as usize { 
                     return ChunkTextureBinding { 
                         texture_id: *atlas_id, 
-                        tile_atlas_revision: layout.get_revision(),
+                        tile_array_texture_revision: layout.get_revision(),
                     };
                 }
             }
-            self.make_new_atlas()
+            self.make_new_array_texture()
         }
     }
-    // Rebuild any meshes which have been flagged as changed. 
+
+    // Rebuild any meshes which have been flagged as changed.
     // Does not automatically push any mesh data to the GPU. Please use push_to_gpu() to update the meshes for rendering after calling this.
-    // Returns whether or not any remesh is actually required. 
-    /*
-    pub fn process_remesh<A: CubeArtMapper<TileId>>(&mut self, voxel_space: &TileSpace, tiles_to_art: &A) -> Result<bool, TerrainRendererError> {
+    // Returns whether or not any remesh is actually required.
+    pub fn process_remesh<A: VoxelArtMapper<TileId>>(&mut self, voxel_space: &TileSpace, tiles_to_art: &A) -> Result<bool, TerrainRendererError> {
         if self.pending_remesh.is_empty() { 
             Ok(false)
         }
@@ -174,12 +249,12 @@ impl TerrainRenderer {
                 let texture_binding = if let Some(previous_texture_id) = self.texture_for_chunk.get(chunk_position) { 
                     *previous_texture_id
                 } else {
-                    self.find_available_texture_atlas()
+                    self.find_available_texture_array_texture()
                 };
     
                 let chunk = voxel_space.borrow_chunk(chunk_position)?;
     
-                //TODO: Handle case where texture atlas goes over max
+                //TODO: Handle case where texture array goes over max
                 let mesher_state = MesherState::prepare_to_mesh(chunk, tiles_to_art, self.texture_layouts.get_mut(&texture_binding.texture_id).unwrap())
                     .map_err(|e| { 
                         TerrainRendererError::PrepareMeshingError(*chunk_position, format!("{:?}",e))
@@ -203,149 +278,116 @@ impl TerrainRenderer {
             Ok(did_mesh)
         }
     }
-    */
+
     /// Takes any of the changed or new chunk meshes made in process_remesh() and makes them available for rendering. 
-    pub fn push_to_gpu<TextureSource: ImageProvider>(&mut self, texture_source: &mut TextureSource) -> Result<(), TerrainRendererError> {
+    pub fn push_to_gpu<TextureSource: ImageProvider>(&mut self,
+            device: &mut wgpu::Device,
+            queue: &mut wgpu::Queue,
+            texture_source: &mut TextureSource) 
+                -> Result<(), TerrainRendererError> {
         // First, handle textures.
         let mut textures_to_build: HashSet<u32> = HashSet::new();
         for (_, binding) in self.texture_for_chunk.iter() {
             let revision = self.texture_layouts.get_mut(&binding.texture_id).unwrap().get_revision();
-            if (binding.tile_atlas_revision < revision) || ((binding.tile_atlas_revision == 0) && (revision == 0)){ 
+            if binding.tile_array_texture_revision != revision { 
                 // Newer-than-expected atlas! Mark to rebuild it.
                 textures_to_build.insert(binding.texture_id);
             }
         }
-        for texture_id in textures_to_build.iter() {
+        for texture_id in textures_to_build.drain() {
             // Build our tile atlas
-            let tile_atlas = self.texture_layouts.get(texture_id).unwrap();
-            let image = build_tile_atlas(tile_atlas, texture_source)?;
+            let tile_array_texture = self.texture_layouts.get(&texture_id).unwrap();
+            let mut array_texture = ArrayTexture::new(tile_array_texture.clone(),
+                Some(tile_array_texture.get_max_textures()),
+                &self.texture_bind_group_layout,
+                device)?;
 
-            // Set up Rend3 texture handle.
-            /*let atlas_texture = rend3::types::Texture {
-                label: Option::None,
-                data: image.to_vec(),
-                format: rend3::types::TextureFormat::Rgba8UnormSrgb,
-                size: glam::UVec2::new(image.dimensions().0, image.dimensions().1),
-                //No mipmaps allowed
-                mip_count: rend3::types::MipmapCount::ONE,
-                mip_source: rend3::types::MipmapSource::Uploaded,
-            };
-
-            let texture_handle = renderer.add_texture_2d(atlas_texture);
-
-            // Add PBR material with all defaults except a single color.
-            let material = rend3_routine::pbr::PbrMaterial {
-                albedo: rend3_routine::pbr::AlbedoComponent::Texture(texture_handle.clone()), //Texture handle is an ARC internally. 
-                unlit: true,
-                sample_type: rend3_routine::pbr::SampleType::Nearest,
-                ..rend3_routine::pbr::PbrMaterial::default()
-            };
-            let material_handle = renderer.add_material(material);
-            self.built_textures.insert(*texture_id, BuiltTexture{
-                last_built_revision: tile_atlas.get_revision(),
-                gpu_handle: texture_handle,
-                material: material_handle,
-            });*/
+            array_texture.full_rebuild(&self.texture_bind_group_layout, 
+                device, 
+                queue, 
+                texture_source)?;
+            self.built_textures.insert(texture_id, array_texture);
         }
 
         // Then, geometry.
         for (position, meshed_chunk) in self.meshed_chunks.drain() { 
-            let ChunkMesh { verticies, uv } = meshed_chunk;
-            /*
-            let mesh = MeshBuilder::new(verticies, Handedness::Left)
-                .with_vertex_uv0(uv)
-                .build()
-                .unwrap();
-    
-            // Add mesh to renderer's world.
-            // All handles are refcounted, so we only need to hang onto the handle until we make an object.
-            let mesh_handle = renderer.add_mesh(mesh);
+            let ChunkMesh { verticies } = meshed_chunk;
 
-            let atlas = self.built_textures.get(&self.texture_for_chunk.get(&position).unwrap().texture_id).unwrap();
-
-            let chunk_translation = Vec3::new(
-                (position.x * CHUNK_SIZE as i32) as f32,
-                (position.y * CHUNK_SIZE as i32) as f32,
-                (position.z * CHUNK_SIZE as i32) as f32
+            let chunk_vertex_buffer = device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&verticies),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }
             );
-    
-            // Combine the mesh and the material with a location to give an object.
-            let object = rend3::types::Object {
-                mesh: mesh_handle.clone(),
-                material: atlas.material.clone(),
-                transform: glam::Mat4::from_scale_rotation_translation(Vec3::ONE, Quat::IDENTITY, chunk_translation),
-            };
-            let object_handle = renderer.add_object(object);
-            self.built_chunks.insert(position, GpuChunkMeshHandle {
-                mesh_handle,
-                object_handle,
-            });*/
+
+            self.built_chunks.insert(position,
+                BuiltChunk { 
+                    buffer: chunk_vertex_buffer, 
+                    num_verts: verticies.len() as u32
+                });
+        }
+        Ok(())
+    }
+    pub fn draw(&mut self,
+            render_surface_view: &TextureView,
+            depth_texture_view: &TextureView,
+            scale: Vec3,
+            translation: Vec3,
+            rotation: Quat,
+            camera_bind_group: &wgpu::BindGroup,
+            encoder: &mut wgpu::CommandEncoder) -> Result<(), TerrainRendererError> {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Render Pass"),
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: render_surface_view,
+                    resolve_target: None, //No multisampling
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                }),
+            ],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_texture_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: true,
+                }),
+                stencil_ops: None,
+            }),
+        });
+        render_pass.set_pipeline(&self.render_pipeline);
+
+        for (chunk_pos, mesh) in self.built_chunks.iter() { 
+            let pos_int = chunk_to_world_pos(&chunk_pos);
+            let chunk_origin = Vec3::new(pos_int.x as f32, pos_int.y as f32, pos_int.z as f32);
+            let translated_origin = chunk_origin + translation;
+
+            // This is very cursed and will be unperformant and should be replaced later.
+            // Multiple arrays that are in sync, maybe? Arc<ArrayTexture> instead of weird
+            // spread-out IDs in hashamps? 
+            let chunk_texture_binding = self.texture_for_chunk.get(chunk_pos).unwrap();
+            let id = chunk_texture_binding.texture_id; 
+            let texture_array = self.built_textures.get(&id).unwrap();
+            let texture = texture_array.get_handle();
+            
+            // Allowing scaling, translation, and rotation of worlds will help us later when/if 
+            // vehicles become a thing.
+            let model_matrix = Mat4::from_scale_rotation_translation(scale, 
+                rotation, 
+                translated_origin);
+
+            render_pass.set_push_constants(ShaderStages::VERTEX, 
+                0,
+                &bytemuck::cast_slice(&[ModelPush::new(model_matrix)]));
+
+            render_pass.set_bind_group(0, &texture.bind_group, &[]);
+            render_pass.set_bind_group(1, camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, mesh.buffer.slice(..));
+            render_pass.draw(0..(mesh.num_verts as u32), 0..1);
         }
         Ok(())
     }
 }
-
-pub trait CubeArtMapper<V>
-where
-    V: Voxel,
-{
-    fn get_art_for_tile(&self, tile: &V) -> Option<&CubeArt>;
-}
-
-impl<V> CubeArtMapper<V> for HashMap<V, CubeArt>
-where
-    V: Voxel,
-{
-    fn get_art_for_tile(&self, tile: &V) -> Option<&CubeArt> {
-        self.get(tile)
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum CubeTex {
-    Invisible,
-    Single(TextureId),
-    AllSides(Box<SidesArray<TextureId>>),
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CubeArt {
-    pub textures: CubeTex,
-    pub cull_self: bool,   //Do we cull the same material?
-    pub cull_others: bool, //Do we cull materials other than this one?
-}
-
-impl CubeArt {
-    pub fn get_render_type(&self) -> VoxelMesherPass {
-        VoxelMesherPass::SimpleCubes
-    }
-    pub fn is_visible(&self) -> bool {
-        !(self.textures == CubeTex::Invisible)
-    }
-    pub fn all_textures(&self) -> Vec<&TextureId> {
-        match &self.textures {
-            CubeTex::Invisible => Vec::default(),
-            CubeTex::Single(v) => vec![v],
-            CubeTex::AllSides(sides) => sides.iter().collect(),
-        }
-    }
-    pub fn simple_solid_block(texture: &TextureId) -> Self {
-        CubeArt {
-            textures: CubeTex::Single(*texture),
-            cull_self: true,
-            cull_others: true,
-        }
-    }
-    pub fn airlike() -> Self {
-        CubeArt {
-            textures: CubeTex::Invisible,
-            cull_self: false,
-            cull_others: false,
-        }
-    }
-}
-
-pub const AIR_ART: CubeArt = CubeArt {
-    textures: CubeTex::Invisible,
-    cull_self: false,
-    cull_others: false,
-};

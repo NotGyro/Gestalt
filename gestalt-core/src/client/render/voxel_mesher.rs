@@ -172,6 +172,20 @@ impl PackedVertex {
         }
         return ret;
     }
+
+    pub(in super) fn desc() -> wgpu::VertexBufferLayout<'static> { 
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<u32>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Uint32,
+                },
+            ],
+        }
+    }
 }
 impl From<IntermediateVertex> for PackedVertex {
     fn from(value: IntermediateVertex) -> Self {

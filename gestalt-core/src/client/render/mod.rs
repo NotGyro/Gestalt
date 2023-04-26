@@ -4,42 +4,36 @@ use std::iter;
 use std::num::NonZeroU32;
 use std::ops::Neg;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use futures::executor::block_on;
-use glam::{Quat, Vec3, Mat4, Vec4, EulerRot};
+use glam::{Quat, Vec3, Mat4, EulerRot};
 use image::{Rgba, RgbaImage};
 use log::info;
 use wgpu::util::DeviceExt;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use wgpu::{
-	Adapter, AdapterInfo, CreateSurfaceError, Device, DeviceDescriptor,
-	InstanceDescriptor, Queue, Surface, PushConstantRange, ShaderStages,
+	CreateSurfaceError, DeviceDescriptor,
+	InstanceDescriptor, PushConstantRange, ShaderStages,
 };
 use winit::window::Window;
 
 use crate::client::client_config::{ClientConfig, DisplaySize};
-use crate::common::{Angle, Color};
-use crate::common::voxelmath::ToSigned;
-use crate::entity::{EcsWorld, EntityPos, EntityRot, EntityScale, LastPos, EntityVelocity};
+use crate::common::{Color, FastHashMap, new_fast_hash_map};
+use crate::entity::{EcsWorld, EntityPos, EntityScale, EntityVelocity};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
 use crate::resource::{ResourceId, ResourceStatus};
-use crate::world::TickLength;
 
-use self::array_texture::{ArrayTexture, ArrayTextureLayout};
 use self::drawable::BillboardDrawable;
-use self::voxelmesher::ChunkMesh;
+use self::terrain_renderer::{TerrainRendererError, TerrainRenderer};
 
 use super::camera::Camera;
 
 pub mod drawable;
 pub mod array_texture;
 pub mod tiletextureatlas;
-pub mod voxelmesher;
+pub mod voxel_mesher;
 pub mod voxel_art;
-//pub mod terrain_renderer;
+pub mod terrain_renderer;
 
-fn load_test_shader<P: AsRef<Path>>(path: P) -> wgpu::ShaderSource<'static> {
+pub(in self) fn load_test_shader<P: AsRef<Path>>(path: P) -> wgpu::ShaderSource<'static> {
 	let path = path.as_ref();
 	let mut file = OpenOptions::new()
 		.read(true)
@@ -76,16 +70,12 @@ pub(in crate::client::render) struct LoadedTextureRef {
     pub cell: u16,
 }*/
 
-struct LoadedTexture {
-    pub buffer_handle: wgpu::Texture,
-    pub texture_view: wgpu::TextureView,
-    pub bind_group: wgpu::BindGroup,
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum DrawFrameError {
-	#[error("Unable to draw a frame, could not acquire render surface: {0:?}")]
+	#[error("Unable to draw a frame, could not acquire render surface: {0}")]
 	CannotRequestDevice(#[from] wgpu::SurfaceError),
+	#[error("Unable to draw a frame due to voxel rendering issue: {0}")]
+	VoxelError(#[from] TerrainRendererError)
 }
 
 #[repr(C)]
@@ -138,7 +128,7 @@ pub const OPENGL_TO_WGPU_MATRIX: Mat4 = Mat4::from_cols_array(&[
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
+pub(in self) struct CameraUniform {
     view_proj: [[f32; 4]; 4],
 }
 impl CameraUniform { 
@@ -154,7 +144,7 @@ impl CameraUniform {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct ModelPush {
+pub(in self) struct ModelPush {
     matrix: [[f32; 4]; 4],
 }
 impl ModelPush {
@@ -164,6 +154,184 @@ impl ModelPush {
 		}
 	}
 }
+
+struct TextureManager {
+    id_to_texture: FastHashMap<ResourceId, ImageTextureBinding>, 
+    loaded_textures: HashMap<u32, LoadedTexture, nohash::BuildNoHashHasher<u32>>,
+	
+    next_texture_handle: TextureHandle,
+	
+    missing_texture: InternalImage,
+    pending_texture: InternalImage,
+    error_texture: InternalImage,
+}
+
+impl TextureManager {
+	pub fn new() -> Self {
+        // Set up engine textures.
+        let missing_texture = generate_missing_texture_image(32, 32);
+        let pending_texture = generate_pending_texture_image(32, 32);
+        let error_texture = generate_error_texture_image(32, 32);
+
+		Self {
+			next_texture_handle: unsafe {
+				//Actually very safe, because one is not zero, but we'll humor the compiler here.
+				TextureHandle::new_unchecked(1)
+			},
+			missing_texture,
+			pending_texture,
+			error_texture,
+            id_to_texture: new_fast_hash_map(), 
+            loaded_textures: HashMap::with_hasher(nohash::BuildNoHashHasher::default()),
+		}
+		
+	}
+
+    // This will likely change when the engine as a whole is more structured.
+    // Probably it'll be some kind of message-passing situation. 
+    pub fn ingest_image<P>(&mut self,
+		resource_id: &ResourceId,
+		sampler_config: &wgpu::SamplerDescriptor,
+		device: &wgpu::Device,
+		queue: &wgpu::Queue,
+		bind_group_layout: &wgpu::BindGroupLayout,
+		loader: &mut P
+	) -> TextureHandle
+            where P: ImageProvider {
+
+        let image = if resource_id == &ID_PENDING_TEXTURE {
+            &self.pending_texture
+        } else if resource_id == &ID_MISSING_TEXTURE {
+            &self.missing_texture
+        }
+        else {
+            match loader.load_image(resource_id) {
+                ResourceStatus::Pending => &self.pending_texture,
+                ResourceStatus::Errored(e) => match e {
+                    crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_texture,
+                    _ => &self.error_texture,
+                },
+                ResourceStatus::Ready(image) => image,
+            }
+        };
+        
+        let texture_size = wgpu::Extent3d {
+            width: image.dimensions().0,
+            height:  image.dimensions().1,
+            depth_or_array_layers: 1
+        };
+
+        // Create the buffer on the GPU.
+        let texture_buffer = device.create_texture(
+            &wgpu::TextureDescriptor {
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                label: Some("diffuse_texture"),
+                view_formats: &[],
+            }
+        );
+        // Upload the image to the buffer
+        queue.write_texture(
+            //Dest
+            wgpu::ImageCopyTexture {
+                texture: &texture_buffer,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            //Source
+            &image,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(4 * texture_size.width),
+                rows_per_image: std::num::NonZeroU32::new(texture_size.height),
+            },
+            texture_size,
+        );
+        
+        let texture_view = texture_buffer.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        let sampler = device.create_sampler(sampler_config);
+
+        let bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    }
+                ],
+                label: Some("diffuse_bind_group"),
+            }
+        );
+
+        let handle = self.next_texture_handle;
+        self.next_texture_handle = self.next_texture_handle.checked_add(1)
+            .expect("Ran out of texture handle IDs!");
+        let finished_texture = LoadedTexture {
+            buffer_handle: Box::new(texture_buffer),
+            texture_view,
+            bind_group,
+        };
+
+        let previous_texture = self.loaded_textures.insert(handle.get(), finished_texture);
+        assert!(previous_texture.is_none());
+        self.id_to_texture.insert(resource_id.clone(), handle);
+        
+        handle
+    }
+	pub fn get(&self, handle: TextureHandle) -> Option<&LoadedTexture> { 
+		self.loaded_textures.get(&handle.get())
+	}
+	pub fn get_by_resource(&self, resource: &ResourceId) -> Option<&LoadedTexture> { 
+		let id = self.id_to_texture.get(resource)?;
+		self.get(*id)
+	}
+	pub fn get_id_by_resource(&self, resource: &ResourceId) -> Option<&TextureHandle> { 
+		self.id_to_texture.get(resource)
+	}
+}
+
+pub(self) struct LoadedTexture {
+    pub buffer_handle: Box<wgpu::Texture>,
+    pub texture_view: wgpu::TextureView,
+    pub bind_group: wgpu::BindGroup,
+}
+
+/// Describes where an Image ResourceID lives in the renderer. 
+pub type ImageTextureBinding = TextureHandle;
+
+/*
+#[repr(C)]
+#[derive(Debug, Clone)]
+/// Describes where an Image ResourceID lives in the renderer. 
+pub enum ImageTextureBinding {
+	/// This image got its own buffer and bindgroup.
+	OneToOne(TextureHandle),
+	/// This image has been batched into one layer of an ArrayTexture.
+	InBatch{
+		array_texture: TextureHandle,
+		cell: u32,
+	},
+	/// This image needed to be in both its own buffer and inside an ArrayTexture at the same time,
+	/// and so it was uploaded to one first and then that texture data was copied to the second 
+	/// buffer via the command queue (this should never be done on the CPU and then uploaded a
+	/// second time!).
+	Both{
+		unary_texture: TextureHandle,
+		array_texture: TextureHandle,
+		cell: u32,
+	},
+}*/
 
 pub struct Renderer {
 	window_size: winit::dpi::PhysicalSize<u32>,
@@ -177,21 +345,17 @@ pub struct Renderer {
 	render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
 
-    next_texture_handle: TextureHandle,
-    id_to_texture: HashMap<ResourceId, TextureHandle>, 
-    loaded_textures: HashMap<TextureHandle, LoadedTexture>,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     
-    missing_texture: InternalImage,
-    pending_texture: InternalImage,
-    error_texture: InternalImage,
-
     camera_uniform: CameraUniform,
     camera_matrix_buffer: wgpu::Buffer,
     camera_matrix_bind_group: wgpu::BindGroup,
 
 	depth_texture: (wgpu::Texture, wgpu::TextureView, wgpu::Sampler),
-	chunk_mesh: Option<(ChunkMesh, ArrayTexture)>,
+
+	texture_manager: TextureManager, 
+
+	pub terrain_renderer: TerrainRenderer,
 }
 
 impl Renderer {
@@ -279,6 +443,10 @@ impl Renderer {
 
 		let aspect_ratio = (window_size.width as f32) / (window_size.height as f32);
 
+		// ^
+		// | Alright, we're done initializing the screen, time for pipileines. |
+		//                                                                     v
+
         let texture_bind_group_layout = device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -310,12 +478,6 @@ impl Renderer {
 			source: shader_source,
 		});
 
-		let voxel_shader_source = load_test_shader(PathBuf::from("voxel_chunk_shader.wgsl"));
-		let voxel_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-			label: Some("Voxel Shader"),
-			source: voxel_shader_source,
-		});
-
 		// Set up the uniform for our camera. 
 		let mut camera_uniform = CameraUniform::new();
 		camera_uniform.update(OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix());
@@ -331,12 +493,12 @@ impl Renderer {
 			&wgpu::BindGroupLayoutDescriptor {
 				entries: &[
 					wgpu::BindGroupLayoutEntry {
-						binding: 0, 
+						binding: 0,
 						visibility: wgpu::ShaderStages::VERTEX,
-						ty: wgpu::BindingType::Buffer { 
-							ty: wgpu::BufferBindingType::Uniform, 
-							has_dynamic_offset: false, 
-							min_binding_size: None 
+						ty: wgpu::BindingType::Buffer {
+							ty: wgpu::BufferBindingType::Uniform,
+							has_dynamic_offset: false,
+							min_binding_size: None
 						},
 						count: None,
 					}
@@ -412,16 +574,10 @@ impl Renderer {
 				mask: !0,
 				alpha_to_coverage_enabled: false,
 			},
-			multiview: None, // 5.
+			multiview: None,
 		});
 
-        // Set up engine textures.
-        let missing_texture = generate_missing_texture_image(32, 32);
-        let pending_texture = generate_pending_texture_image(32, 32);
-        let error_texture = generate_error_texture_image(32, 32);
-
-		// For testing 
-		
+		// For testing
 		let vertex_buffer = device.create_buffer_init(
 			&wgpu::util::BufferInitDescriptor {
 				label: Some("Vertex Buffer"),
@@ -430,8 +586,72 @@ impl Renderer {
 			}
 		);
 
+		let render_pipeline_layout =
+			device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+				label: Some("Render Pipeline Layout"),
+				bind_group_layouts: &[
+					&texture_bind_group_layout,
+					&camera_bind_group_layout,
+				],
+				push_constant_ranges: &[PushConstantRange{ 
+					stages: ShaderStages::VERTEX,
+					range: 0..(std::mem::size_of::<ModelPush>() as u32),
+				}],
+			});
+
+		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+			label: Some("Render Pipeline"),
+			layout: Some(&render_pipeline_layout),
+			vertex: wgpu::VertexState {
+				module: &shader,
+				entry_point: "vs_main",
+				buffers: &[
+					Vertex::desc(),
+				],
+			},
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_format.clone(),
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent::REPLACE,
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+			primitive: wgpu::PrimitiveState {
+				topology: wgpu::PrimitiveTopology::TriangleList,
+				strip_index_format: None,
+				front_face: wgpu::FrontFace::Ccw,
+				cull_mode: Some(wgpu::Face::Back),
+				polygon_mode: wgpu::PolygonMode::Fill,
+				unclipped_depth: false,
+				conservative: false,
+			},
+			depth_stencil: Some(wgpu::DepthStencilState {
+				format: Self::DEPTH_FORMAT,
+				depth_write_enabled: true,
+				depth_compare: wgpu::CompareFunction::Less,
+				stencil: wgpu::StencilState::default(),
+				bias: wgpu::DepthBiasState::default(),
+			}),
+			multisample: wgpu::MultisampleState {
+				count: 1,
+				mask: !0,
+				alpha_to_coverage_enabled: false,
+			},
+			multiview: None,
+		});
+
 		let depth_texture = Self::create_depth_texture(&device, &surface_config, "depth_texture");
 
+		let terrain_renderer = TerrainRenderer::new(64,
+			&camera_bind_group_layout, 
+			&device,
+			render_format, 
+			&Self::DEPTH_FORMAT);
 		Ok(Self {
 			aspect_ratio,
 			window_size,
@@ -442,12 +662,6 @@ impl Renderer {
 			queue,
 			device,
 			render_pipeline,
-            next_texture_handle: unsafe {
-                //Actually very safe, because one is not zero, but we'll humor the compiler here.
-                TextureHandle::new_unchecked(1)
-            },
-            id_to_texture: HashMap::default(), 
-            loaded_textures: HashMap::default(),
             texture_bind_group_layout,
 			vertex_buffer, 
 
@@ -455,11 +669,9 @@ impl Renderer {
 			camera_matrix_buffer: camera_buffer,
 			camera_matrix_bind_group: camera_bind_group,
 
-            pending_texture,
-            missing_texture,
-            error_texture,
 			depth_texture,
-			chunk_mesh: None,
+			texture_manager: TextureManager::new(),
+			terrain_renderer,
 		})
 	}
 	/// Resize the display area
@@ -491,7 +703,7 @@ impl Renderer {
 			bytemuck::cast_slice(&[self.camera_uniform]),
 		);
 
-		let view = output
+		let surface_texture_view = output
 			.texture
 			.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -501,12 +713,14 @@ impl Renderer {
 				label: Some("Render Encoder"),
 			});
 		{
+			// In the future everything inside this block will instead exist in 
+			// separate render pass structs. 
 			let (clear_r, clear_g, clear_b) = clear_color.to_normalized_float();
 			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("Render Pass"),
 				color_attachments: &[
 					Some(wgpu::RenderPassColorAttachment {
-						view: &view,
+						view: &surface_texture_view,
 						resolve_target: None,
 						ops: wgpu::Operations {
 							load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -542,17 +756,8 @@ impl Renderer {
 					Option<&EntityVelocity>)
 				>().iter() {
 				let texture_maybe = match &drawable.texture_handle {
-					Some(handle) => self.loaded_textures.get(handle),
-					None => {
-						match self.id_to_texture.get(&drawable.texture) {
-							Some(handle) => {
-								self.loaded_textures.get(handle)
-							}
-							None => { 
-								None
-							}
-						}
-					},
+					Some(handle) => self.texture_manager.get(*handle),
+					None => self.texture_manager.get_by_resource(&drawable.texture),
 				};
 				let texture = texture_maybe.unwrap();
 				render_pass.set_pipeline(&self.render_pipeline);
@@ -631,119 +836,25 @@ impl Renderer {
 				render_pass.draw(0..(UNIT_BILLBOARD.len() as u32), 0..1);
 			}
 		}
+		self.terrain_renderer.draw(&surface_texture_view, 
+			&self.depth_texture.1, 
+			Vec3::ONE,
+			Vec3::ZERO,
+			Quat::IDENTITY, 
+			&self.camera_matrix_bind_group, 
+			&mut encoder)?;
 
 		self.queue.submit(iter::once(encoder.finish()));
 		output.present();
 
 		Ok(())
 	}
-    
-    // This will likely change when the engine as a whole is more structured.
-    // Probably it'll be some kind of message-passing situation. 
-    pub fn ingest_image<P>(&mut self, 
-		resource_id: &ResourceId, 
-		loader: &mut P
-	) -> TextureHandle
-            where P: ImageProvider {
 
-        let diffuse_image = if resource_id == &ID_PENDING_TEXTURE {
-            &self.pending_texture
-        } else if resource_id == &ID_MISSING_TEXTURE {
-            &self.missing_texture
-        }
-        else { 
-            match loader.load_image(resource_id) {
-                ResourceStatus::Pending => &self.pending_texture,
-                ResourceStatus::Errored(e) => match e {
-                    crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_texture,
-                    _ => &self.error_texture,
-                },
-                ResourceStatus::Ready(image) => image,
-            }
-        };
-        
-        let texture_size = wgpu::Extent3d { 
-            width: diffuse_image.dimensions().0,
-            height:  diffuse_image.dimensions().1, 
-            depth_or_array_layers: 1
-        };
-        // Create the buffer on the GPU.
-        let diffuse_texture_buffer = self.device.create_texture(
-            &wgpu::TextureDescriptor {
-                size: texture_size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                label: Some("diffuse_texture"),
-                view_formats: &[],
-            }
-        );
-        // Upload the image to the buffer
-        self.queue.write_texture(
-            //Dest
-            wgpu::ImageCopyTexture {
-                texture: &diffuse_texture_buffer,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            //Source
-            &diffuse_image,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * texture_size.width),
-                rows_per_image: std::num::NonZeroU32::new(texture_size.height),
-            },
-            texture_size,
-        );
-        
-        let diffuse_texture_view = diffuse_texture_buffer.create_view(&wgpu::TextureViewDescriptor::default());
-        
-        // Set up for texture sampling
-        let diffuse_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::Repeat,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let diffuse_bind_group = self.device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &self.texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-                    }
-                ],
-                label: Some("diffuse_bind_group"),
-            }
-        );
-
-        let handle = self.next_texture_handle; 
-        self.next_texture_handle = self.next_texture_handle.checked_add(1)
-            .expect("Ran out of texture handle IDs!");
-        let finished_texture = LoadedTexture {
-            buffer_handle: diffuse_texture_buffer,
-            texture_view: diffuse_texture_view,
-            bind_group: diffuse_bind_group,
-        };
-
-        let previous_texture = self.loaded_textures.insert(handle, finished_texture);
-        assert!(previous_texture.is_none());
-        self.id_to_texture.insert(resource_id.clone(), handle);
-        
-        handle
-    }
+	pub fn process_terrain_mesh_uploads<P>(&mut self, image_loader: &mut P) 
+			-> Result<(), TerrainRendererError> 
+			where P: ImageProvider { 
+		self.terrain_renderer.push_to_gpu(&mut self.device, &mut self.queue, image_loader)
+	}
 
 	pub fn get_aspect_ratio(&self) -> f32 { 
 		self.aspect_ratio
@@ -788,15 +899,21 @@ impl Renderer {
 
         (texture, view, sampler)
     }
-	pub fn ingest_voxel_mesh_for_test<P>(&mut self, 
-			chunk_mesh: ChunkMesh, 
-			layout: ArrayTextureLayout, 
-			texture_loader: &mut P)
-				where P: ImageProvider {
-		let max_cells = Some(layout.get_max_textures());
-		let mut array = ArrayTexture::new(layout, max_cells, &mut self.device).unwrap();
-		array.full_rebuild(&mut self.device, &mut self.queue, texture_loader).unwrap();
-
+	pub fn ingest_image<P>(&mut self,
+		resource_id: &ResourceId,
+		texture_loader: &mut P)
+			where P: ImageProvider {
+				
+		let diffuse_sampler = wgpu::SamplerDescriptor {
+			address_mode_u: wgpu::AddressMode::Repeat,
+			address_mode_v: wgpu::AddressMode::Repeat,
+			address_mode_w: wgpu::AddressMode::ClampToEdge,
+			mag_filter: wgpu::FilterMode::Nearest,
+			min_filter: wgpu::FilterMode::Nearest,
+			mipmap_filter: wgpu::FilterMode::Nearest,
+			..Default::default()
+		};
+		self.texture_manager.ingest_image(resource_id, &diffuse_sampler, &self.device, &self.queue, &self.texture_bind_group_layout, texture_loader);
 	}
 }
 

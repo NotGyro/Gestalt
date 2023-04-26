@@ -22,7 +22,7 @@ use winit::{
 };
 
 use crate::{
-	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}, voxel_art::VoxelArt, voxelmesher::make_mesh_completely}},
+	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}, voxel_art::VoxelArt, voxel_mesher::make_mesh_completely}},
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
 		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, DegreeAngle, Color,
@@ -37,7 +37,7 @@ use crate::{
 	world::{
 		chunk::ChunkInner, fsworldstorage::WorldDefaults,
 		/*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/
-		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId, TickLength,
+		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId, TickLength, tilespace::TileSpace,
 	}, entity::{EntityPos, EntityVec3, EntityRot, EntityScale, EntityVelocity, tick_movement_system, LastPos},
 };
 use crate::{
@@ -349,8 +349,6 @@ pub fn run_client(
 	let grass_id = 3;
 	let dome_thing_id = 4;
 
-	let air_list = vec![air_id];
-
 	let mut image_loader = DevImageLoader::new();
 
 	let test_dome_thing_image_id = image_loader
@@ -393,20 +391,13 @@ pub fn run_client(
 	let mut last_remesh_time = Instant::now();
 	*/
 
-	
-    //Set up a test chunk.
-    let air_id = 0;
-    let stone_id = 1;
-    let dirt_id = 2;
-    let grass_id = 3;
-    let dome_thing_id = 4;
-
 	let mut tiles_to_art: HashMap<TileId, VoxelArt> = HashMap::new();
 
 	tiles_to_art.insert(air_id, VoxelArt::Invisible);
 	tiles_to_art.insert(stone_id, VoxelArt::simple_solid_block(&test_stone_image_id));
 	tiles_to_art.insert(dirt_id, VoxelArt::simple_solid_block(&test_dirt_image_id));
 	tiles_to_art.insert(grass_id, VoxelArt::simple_solid_block(&test_grass_image_id));
+	tiles_to_art.insert(dome_thing_id, VoxelArt::simple_solid_block(&test_dome_thing_image_id));
 	tiles_to_art.insert(
 		dome_thing_id,
 		VoxelArt::simple_solid_block(&test_dome_thing_image_id),
@@ -432,12 +423,14 @@ pub fn run_client(
         }
     }
 
-	let (chunk_mesh, chunk_texture_layout) = make_mesh_completely(64, 
-		&test_chunk,
-		&tiles_to_art,
-		Some(4096)).unwrap();
+	let mut test_space = TileSpace::new();
+	test_space.ingest_loaded_chunk(vpos!(0,0,0), test_chunk).unwrap();
 
-	renderer.ingest_voxel_mesh_for_test(chunk_mesh, chunk_texture_layout, &mut image_loader);
+	renderer.terrain_renderer.notify_chunk_remesh_needed(&vpos!(0,0,0));
+	renderer.terrain_renderer.process_remesh(&test_space, &tiles_to_art).unwrap();
+	renderer.process_terrain_mesh_uploads(&mut image_loader).unwrap();
+
+	// Input and time
 	let mut current_down = HashSet::new();
 
 	let game_start_time = Instant::now();

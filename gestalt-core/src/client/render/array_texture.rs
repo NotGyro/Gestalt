@@ -5,12 +5,12 @@ use crate::resource::image::{
 use crate::resource::ResourceId;
 use glam::Vec2;
 use image::{GenericImage, ImageError, RgbaImage};
-use log::error;
+use log::{error, info, warn};
 use std::collections::HashMap;
 
 use crate::client::render::{generate_missing_texture_image, generate_pending_texture_image};
 
-use super::generate_error_texture_image;
+use super::{generate_error_texture_image, LoadedTexture};
 
 const INDEX_MISSING_TEXTURE: usize = 0;
 const INDEX_PENDING_TEXTURE: usize = 1;
@@ -46,6 +46,7 @@ pub enum ArrayTextureChange {
 	}
 } 
 
+#[derive(Clone)]
 pub struct ArrayTextureLayout {
 	/// Array of texture atlas tiles.
 	textures: Vec<ResourceId>,
@@ -186,14 +187,15 @@ pub struct ArrayTexture {
 	/// How many cells to add each time we run out of cells and have to rebuild.
 	max_cells: u32,
 	current_cell_capacity: u32,
-	array_texture: wgpu::Texture,
+	texture: LoadedTexture,
 	error_image: RgbaImage, 
 	missing_image: RgbaImage,
 	pending_image: RgbaImage,
 }
 
 impl ArrayTexture {
-	fn resize_buffer(&mut self, 
+	fn resize_buffer(&mut self,
+		bind_group_layout: &wgpu::BindGroupLayout,
 		device: &mut wgpu::Device) { 
 		
 		let array_size = wgpu::Extent3d { 
@@ -202,7 +204,7 @@ impl ArrayTexture {
 			depth_or_array_layers: self.current_cell_capacity
 		};
 		// Create the buffer on the GPU.
-		self.array_texture = device.create_texture(
+		let new_texture_buffer = device.create_texture(
 			&wgpu::TextureDescriptor {
 				size: array_size,
 				mip_level_count: 1,
@@ -216,12 +218,38 @@ impl ArrayTexture {
 				view_formats: &[],
 			}
 		);
+        let texture_view = new_texture_buffer.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        let sampler = device.create_sampler(&Self::get_sampler_config());
+
+        let bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    }
+                ],
+                label: Some("diffuse_bind_group"),
+            }
+        );
+		self.texture = LoadedTexture {
+			buffer_handle: Box::new(new_texture_buffer),
+			texture_view,
+			bind_group,
+		};
 	}
 	pub fn full_rebuild<TextureSource: ImageProvider>(&mut self, 
+			bind_group_layout: &wgpu::BindGroupLayout,
 			device: &mut wgpu::Device,
 			queue: &mut wgpu::Queue,
 			texture_source: &mut TextureSource)
-				-> Result<(), ArrayTextureError> { 
+				-> Result<(), ArrayTextureError> {
 		let texture_size = self.layout.texture_size;
 	
 		let layout_cells = self.layout.textures.len() as u32; 
@@ -237,7 +265,7 @@ impl ArrayTexture {
 		let requested_cells = requested_cells.min(self.max_cells);
 		if requested_cells > self.current_cell_capacity { 
 			self.current_cell_capacity = requested_cells;
-			self.resize_buffer(device);
+			self.resize_buffer(bind_group_layout, device);
 		}
 
 		let texture_size_layer = wgpu::Extent3d {
@@ -250,7 +278,11 @@ impl ArrayTexture {
 			let mut texture_to_use = match texture_source.load_image(resource_texture) {
 				crate::resource::ResourceStatus::Pending => &self.pending_image,
 				crate::resource::ResourceStatus::Errored(e) => match e { 
-					RetrieveImageError::DoesNotExist(_) => &self.missing_image, 
+					RetrieveImageError::DoesNotExist(_) => { 
+						warn!("No texture found for {resource_texture:?}, \
+							using missing-texture placeholder.");
+						&self.missing_image
+					}, 
 					_ => &self.error_image,
 				},
 				crate::resource::ResourceStatus::Ready(image) => image,
@@ -258,7 +290,7 @@ impl ArrayTexture {
 			if resource_texture == &ID_PENDING_TEXTURE {
 				texture_to_use = &self.pending_image;
 			} else if resource_texture == &ID_MISSING_TEXTURE {
-				texture_to_use = &self.pending_image;
+				texture_to_use = &self.missing_image;
 			}
 
 			//Is it the wrong size?
@@ -279,7 +311,7 @@ impl ArrayTexture {
 			queue.write_texture(
 				//Dest
 				wgpu::ImageCopyTexture {
-					texture: &self.array_texture,
+					texture: &self.texture.buffer_handle,
 					mip_level: 0,
 					origin: wgpu::Origin3d { 
 						x: 0, 
@@ -304,6 +336,7 @@ impl ArrayTexture {
 	pub fn new(
 		layout: ArrayTextureLayout,
 		max_cells: Option<u32>,
+		bind_group_layout: &wgpu::BindGroupLayout,
 		device: &mut wgpu::Device,
 	) -> Result<Self, ArrayTextureError> {
 		let texture_size = layout.texture_size;
@@ -355,15 +388,57 @@ impl ArrayTexture {
 		let error_image = generate_error_texture_image(texture_size.0, texture_size.1);
 		let pending_image = generate_pending_texture_image(texture_size.0, texture_size.1);
 
+        let texture_view = texture_buffer.create_view(&wgpu::TextureViewDescriptor::default());
+        
+        let sampler = device.create_sampler(&Self::get_sampler_config());
+
+        let bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    }
+                ],
+                label: Some("diffuse_bind_group"),
+            }
+        );
+
+		let texture = LoadedTexture {
+			buffer_handle: Box::new(texture_buffer),
+			texture_view,
+			bind_group,
+		};
+		
 		Ok(Self {
 			last_rebuilt_revision: layout.revision,
 			layout,
 			max_cells,
 			current_cell_capacity,
-			array_texture: texture_buffer,
+			texture,
 			missing_image,
 			error_image,
 			pending_image,
 		})
+	}
+
+	pub(in super) fn get_handle(&self) -> &LoadedTexture { 
+		&self.texture
+	}
+	fn get_sampler_config() -> wgpu::SamplerDescriptor<'static> { 
+		wgpu::SamplerDescriptor {
+			address_mode_u: wgpu::AddressMode::Repeat,
+			address_mode_v: wgpu::AddressMode::Repeat,
+			address_mode_w: wgpu::AddressMode::ClampToEdge,
+			mag_filter: wgpu::FilterMode::Nearest,
+			min_filter: wgpu::FilterMode::Nearest,
+			mipmap_filter: wgpu::FilterMode::Nearest,
+			..Default::default()
+		}
 	}
 }

@@ -59,10 +59,10 @@ var s_diffuse: sampler;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // TODO: This is most likely a bug in WGPU - 
+    // TODO: This is most likely a bug in WGPU -
     // u32 is supposed to be supported as a texture index but currently
     // it throws a shader compilation error, so we convert it to an
-    // i32 instead. 
+    // i32 instead.
     var tex_idx: i32 = i32(in.tex_idx);
     return textureSample(t_diffuse, s_diffuse, in.tex_coords, tex_idx);
 }
