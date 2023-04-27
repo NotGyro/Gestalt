@@ -222,68 +222,68 @@ const NEGX_NEGY_NEGZ_VERT: IntermediateVertex = IntermediateVertex {
 };
 
 const POSITIVE_X_FACE: [IntermediateVertex; 6] = [
-    POSX_POSY_NEGZ_VERT,
+    POSX_NEGY_POSZ_VERT,
     POSX_POSY_POSZ_VERT,
-    POSX_NEGY_POSZ_VERT,
-    //-Second triangle:
-    POSX_NEGY_POSZ_VERT,
-    POSX_NEGY_NEGZ_VERT,
     POSX_POSY_NEGZ_VERT,
+    //-Second triangle:
+    POSX_POSY_NEGZ_VERT,
+    POSX_NEGY_NEGZ_VERT,
+    POSX_NEGY_POSZ_VERT,
 ];
 
 const NEGATIVE_X_FACE: [IntermediateVertex; 6] = [
     //-First triangle:
-    NEGX_POSY_POSZ_VERT,
+    NEGX_NEGY_NEGZ_VERT,
     NEGX_POSY_NEGZ_VERT,
-    NEGX_NEGY_NEGZ_VERT,
-    //-Second triangle
-    NEGX_NEGY_NEGZ_VERT,
-    NEGX_NEGY_POSZ_VERT,
     NEGX_POSY_POSZ_VERT,
+    //-Second triangle
+    NEGX_POSY_POSZ_VERT,
+    NEGX_NEGY_POSZ_VERT,
+    NEGX_NEGY_NEGZ_VERT,
 ];
 
 const POSITIVE_Y_FACE: [IntermediateVertex; 6] = [
     //-First triangle:
-    NEGX_POSY_NEGZ_VERT,
+    POSX_POSY_POSZ_VERT,
     NEGX_POSY_POSZ_VERT,
-    POSX_POSY_POSZ_VERT,
-    //-Second triangle
-    POSX_POSY_POSZ_VERT,
-    POSX_POSY_NEGZ_VERT,
     NEGX_POSY_NEGZ_VERT,
+    //-Second triangle
+    NEGX_POSY_NEGZ_VERT,
+    POSX_POSY_NEGZ_VERT,
+    POSX_POSY_POSZ_VERT,
 ];
 
 const NEGATIVE_Y_FACE: [IntermediateVertex; 6] = [
     //-First triangle:
-    POSX_NEGY_NEGZ_VERT,
+    NEGX_NEGY_POSZ_VERT,
     POSX_NEGY_POSZ_VERT,
-    NEGX_NEGY_POSZ_VERT,
-    //-Second triangle
-    NEGX_NEGY_POSZ_VERT,
-    NEGX_NEGY_NEGZ_VERT,
     POSX_NEGY_NEGZ_VERT,
+    //-Second triangle
+    POSX_NEGY_NEGZ_VERT,
+    NEGX_NEGY_NEGZ_VERT,
+    NEGX_NEGY_POSZ_VERT,
 ];
 
 const POSITIVE_Z_FACE: [IntermediateVertex; 6] = [
     //-First triangle:
-    POSX_POSY_POSZ_VERT,
+    NEGX_NEGY_POSZ_VERT,
     NEGX_POSY_POSZ_VERT,
-    NEGX_NEGY_POSZ_VERT,
-    //-Second triangle
-    NEGX_NEGY_POSZ_VERT,
-    POSX_NEGY_POSZ_VERT,
     POSX_POSY_POSZ_VERT,
+    //-Second triangle
+    POSX_POSY_POSZ_VERT,
+    POSX_NEGY_POSZ_VERT,
+    NEGX_NEGY_POSZ_VERT,
 ];
 
 const NEGATIVE_Z_FACE: [IntermediateVertex; 6] = [
     //-First triangle:
-    NEGX_POSY_NEGZ_VERT,
+    POSX_NEGY_NEGZ_VERT,
     POSX_POSY_NEGZ_VERT,
-    POSX_NEGY_NEGZ_VERT,
-    //-Second triangle
-    POSX_NEGY_NEGZ_VERT,
-    NEGX_NEGY_NEGZ_VERT,
     NEGX_POSY_NEGZ_VERT,
+    //-Second triangle
+    NEGX_POSY_NEGZ_VERT,
+    NEGX_NEGY_NEGZ_VERT,
+    POSX_NEGY_NEGZ_VERT,
 ];
 
 fn get_face_verts(side: VoxelSide) -> [IntermediateVertex; 6] {
@@ -294,6 +294,17 @@ fn get_face_verts(side: VoxelSide) -> [IntermediateVertex; 6] {
         VoxelSide::NegaY => NEGATIVE_Y_FACE,
         VoxelSide::PosiZ => POSITIVE_Z_FACE,
         VoxelSide::NegaZ => NEGATIVE_Z_FACE,
+    }
+}
+fn get_face_idx_verts(side: u8) -> [IntermediateVertex; 6] {
+    match side {
+        posi_x_index!() => POSITIVE_X_FACE,
+        nega_x_index!() => NEGATIVE_X_FACE,
+        posi_y_index!() => POSITIVE_Y_FACE,
+        nega_y_index!() => NEGATIVE_Y_FACE,
+        posi_z_index!() => POSITIVE_Z_FACE,
+        nega_z_index!() => NEGATIVE_Z_FACE,
+        _ => panic!("Invalid voxel face"),
     }
 }
 
@@ -716,42 +727,37 @@ macro_rules! offset_unroll {
     }};
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct SideRenderInfo {
-    pub(super) side_pos: SidePos,
-    pub tex: ArrayTextureIndex,
-}
-
 #[inline]
 fn per_face_step(
-    voxel_face: SideRenderInfo,
+    x: u8,
+    y: u8,
+    z: u8, 
+    texture_index: u16,
+    side_index: u8,
     vertex_buffer: &mut Vec<OutputVertex>,
 ) {
-    let x = voxel_face.side_pos.get_x();
-    let y = voxel_face.side_pos.get_y();
-    let z = voxel_face.side_pos.get_z();
     voxel_side_indicies_unroll!(INDEX, {
-        let mut temp_vert = get_face_verts(
-            VoxelSide::from_id( voxel_face.side_pos.get_side_idx() )
-        )[INDEX];
+        let side = VoxelSide::from_id(side_index);
+        let mut temp_vert = get_face_verts(side)[INDEX];
+
         temp_vert.position[0] += x;
         temp_vert.position[1] += y;
         temp_vert.position[2] += z;
         
         let mut packed_vert: PackedVertex = PackedVertex::from(temp_vert);
-        packed_vert.set_tex_id(voxel_face.tex);
+        packed_vert.set_tex_id(texture_index);
 
         if (INDEX == 2) || (INDEX == 3) {
             packed_vert.set_u_high();
-            packed_vert.set_v_high();
+            packed_vert.set_v_low();
         } else if (INDEX == 0) || (INDEX == 5) {
             packed_vert.set_u_low();
-            packed_vert.set_v_low();
+            packed_vert.set_v_high();
         } else if INDEX == 1 {
-            packed_vert.set_u_high();
+            packed_vert.set_u_low();
             packed_vert.set_v_low();
         } else if INDEX == 4 {
-            packed_vert.set_u_low();
+            packed_vert.set_u_high();
             packed_vert.set_v_high();
         }
 
@@ -782,14 +788,13 @@ fn build_mesh<V: Voxel, A: ArtCache>(
                     }
                     if !cull {
                         let (x,y,z) = voxelarray::chunk_i_to_xyz(i, CHUNK_SIZE);
-                        let sri = SideRenderInfo {
-                            side_pos: SidePos::new(SIDE_INDEX as u8,
-                                x as u8,
-                                y as u8,
-                                z as u8,
-                            ),
-                            tex : art.textures.data[SIDE_INDEX] };
-                        per_face_step(sri, &mut vertex_buffer);
+                        let tex_idx = art.textures.data[SIDE_INDEX];
+                        per_face_step(x as u8,
+                            y as u8,
+                            z as u8,
+                            tex_idx as u16,
+                            SIDE_INDEX as u8,
+                            &mut vertex_buffer);
                     }
                 });
             }

@@ -22,10 +22,10 @@ use winit::{
 };
 
 use crate::{
-	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}, voxel_art::VoxelArt, voxel_mesher::make_mesh_completely}},
+	client::{client_config::ClientConfig, render::{Renderer, drawable::{BillboardDrawable, BillboardStyle}, voxel_art::{VoxelArt, CubeArt, CubeTex}, voxel_mesher::make_mesh_completely}},
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
-		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide}, DegreeAngle, Color,
+		voxelmath::{VoxelPos, VoxelRange, VoxelRaycast, VoxelSide, SidesArray}, DegreeAngle, Color,
 	},
 	message::{self, MessageSender},
 	message_types::{
@@ -33,11 +33,11 @@ use crate::{
 		JoinDefaultEntry,
 	},
 	net::net_channels::{net_recv_channel::NetMsgReceiver, net_send_channel, NetSendChannel},
-	resource::ResourceKind,
+	resource::{ResourceKind, image::ID_MISSING_TEXTURE},
 	world::{
 		chunk::ChunkInner, fsworldstorage::WorldDefaults,
 		/*tilespace::{TileSpace, TileSpaceError}, fsworldstorage::{path_local_worlds, WorldDefaults, self, StoredWorldRole},*/
-		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId, TickLength, tilespace::TileSpace,
+		voxelstorage::VoxelSpace, ChunkPos, TilePos, WorldId, TickLength, tilespace::{TileSpace, TileSpaceError},
 	}, entity::{EntityPos, EntityVec3, EntityRot, EntityScale, EntityVelocity, tick_movement_system, LastPos},
 };
 use crate::{
@@ -150,7 +150,7 @@ pub enum StartClientError {
 }
 
 // Dirt simple worldgen for the sake of early testing / development
-/*pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
+pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
 	const AIR_ID: TileId = 0;
 	const STONE_ID: TileId = 1;
 	const DIRT_ID: TileId = 2;
@@ -159,14 +159,14 @@ pub enum StartClientError {
 	match chunk_position.y {
 		value if value > 0 => Chunk {
 			revision: 0,
-			inner: ChunkInner::Uniform(AIR_ID),
+			tiles: ChunkInner::Uniform(AIR_ID),
 		},
 		0 => {
 			let mut chunk = Chunk::new(STONE_ID);
 			for pos in chunk.get_bounds() {
-				if pos.y == (CHUNK_SIZE as u16 - 1) {
+				if pos.y == (CHUNK_SIZE as u8 - 1) {
 					chunk.set(pos, GRASS_ID).unwrap();
-				} else if pos.y > (CHUNK_SIZE as u16 - 4) {
+				} else if pos.y > (CHUNK_SIZE as u8 - 4) {
 					chunk.set(pos, DIRT_ID).unwrap();
 				}
 				//Otherwise it stays stone.
@@ -177,7 +177,7 @@ pub enum StartClientError {
 			/* chunk_position.y is less than zero */
 			Chunk {
 				revision: 0,
-				inner: ChunkInner::Uniform(STONE_ID),
+				tiles: ChunkInner::Uniform(STONE_ID),
 			}
 		}
 	}
@@ -193,7 +193,8 @@ pub fn click_voxel(world_space: &TileSpace, camera: &Camera, ignore: &[TileId], 
 		raycast.step();
 	}
 	todo!()
-}*/
+}
+
 /*
 pub fn get_lobby_world_id(pubkey: &NodeIdentity) -> WorldId {
 
@@ -375,23 +376,43 @@ pub fn run_client(
 	let testlet_3_image_id = image_loader
 		.preload_image_file("testpoak.png", identity_keys)
 		.unwrap();
-	/*
+
+	
+	let test_posi_x_image_id = image_loader
+		.preload_image_file("test_posi_x.png", identity_keys)
+		.unwrap();
+	let test_posi_y_image_id = image_loader
+		.preload_image_file("test_posi_y.png", identity_keys)
+		.unwrap();
+	let test_posi_z_image_id = image_loader
+		.preload_image_file("test_posi_z.png", identity_keys)
+		.unwrap();
+	let test_nega_x_image_id = image_loader
+		.preload_image_file("test_nega_x.png", identity_keys)
+		.unwrap();
+	let test_nega_y_image_id = image_loader
+		.preload_image_file("test_nega_y.png", identity_keys)
+		.unwrap();
+	let test_nega_z_image_id = image_loader
+		.preload_image_file("test_nega_z.png", identity_keys)
+		.unwrap();
+	
+	let mut sides = SidesArray::new_uniform(&ID_MISSING_TEXTURE);
+	sides.set(test_posi_x_image_id, VoxelSide::PosiX);
+	sides.set(test_posi_y_image_id, VoxelSide::PosiY);
+	sides.set(test_posi_z_image_id, VoxelSide::PosiZ);
+	sides.set(test_nega_x_image_id, VoxelSide::NegaX);
+	sides.set(test_nega_y_image_id, VoxelSide::NegaY);
+	sides.set(test_nega_z_image_id, VoxelSide::NegaZ);
+
+	let sides_art = VoxelArt::SimpleCube(CubeArt {
+		textures: CubeTex::AllSides(Box::new(sides)),
+		cull_self: true, 
+		cull_others: true, 
+	});
 	// Set up our test world a bit
-	let mut world_space = TileSpace::new();
-	let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
-	// Set up our voxel mesher.
-	let mut terrain_renderer = TerrainRenderer::new(64);
-
-	load_or_generate_dev_world(&mut world_space, &world_id, test_world_range, Some(&mut terrain_renderer)).unwrap();
-
-	//Remesh
-	let meshing_start = Instant::now();
-	terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
-	let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0;
-	info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
 
 	let mut last_remesh_time = Instant::now();
-	*/
 
 	let mut tiles_to_art: HashMap<TileId, VoxelArt> = HashMap::new();
 
@@ -402,7 +423,8 @@ pub fn run_client(
 	tiles_to_art.insert(dome_thing_id, VoxelArt::simple_solid_block(&test_dome_thing_image_id));
 	tiles_to_art.insert(
 		dome_thing_id,
-		VoxelArt::simple_solid_block(&test_dome_thing_image_id),
+		sides_art,
+		//VoxelArt::simple_solid_block(&test_dome_thing_image_id),
 	);
 
     let mut test_chunk: Chunk<u32> = Chunk::new(air_id);
@@ -417,7 +439,10 @@ pub fn run_client(
                 test_chunk.set(i, dome_thing_id).unwrap();
             }
         } else {
-            if i.y > 5 {
+			if i.y == ( (CHUNK_SIZE as u8) / 2) - 1 { 
+                test_chunk.set(i, grass_id).unwrap();
+			}
+            else if i.y > 5 {
                 test_chunk.set(i, dirt_id).unwrap();
             } else {
                 test_chunk.set(i, stone_id).unwrap();
@@ -425,11 +450,16 @@ pub fn run_client(
         }
     }
 
-	let mut test_space = TileSpace::new();
-	test_space.ingest_loaded_chunk(vpos!(0,0,0), test_chunk).unwrap();
-
-	renderer.terrain_renderer.notify_chunk_remesh_needed(&vpos!(0,0,0));
-	renderer.terrain_renderer.process_remesh(&test_space, &tiles_to_art).unwrap();
+	let mut world_space = TileSpace::new();
+	world_space.ingest_loaded_chunk(vpos!(0,0,0), test_chunk).unwrap();
+	let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
+	for chunk_pos in test_world_range {
+		renderer.terrain_renderer.notify_chunk_remesh_needed(&chunk_pos);
+		if chunk_pos != vpos!(0,0,0) { 
+			world_space.ingest_loaded_chunk(chunk_pos, gen_test_chunk(chunk_pos)).unwrap();
+		}
+	}
+	renderer.terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
 	renderer.process_terrain_mesh_uploads(&mut image_loader).unwrap();
 
 	// Input and time
@@ -507,15 +537,15 @@ pub fn run_client(
 			tick_movement_system(&mut entity_world, tick_length);
 			//last_tick = Instant::now(); 
 		}
-		/*if let Ok(events) = voxel_event_receiver.recv_poll() {
+		if let Ok(events) = voxel_event_receiver.recv_poll() {
 			for (_ident, announce) in events {
 				let old_value = world_space.get(announce.pos).unwrap();
 				if announce.new_tile != *old_value {
 					world_space.set(announce.pos, announce.new_tile).unwrap();
-					terrain_renderer.notify_changed(&announce.pos);
+					renderer.terrain_renderer.notify_changed(&announce.pos);
 				}
 			}
-		}*/
+		}
 		match event {
 			//WindowEvent::MouseInput is more useful for GUI input
 			winit::event::Event::WindowEvent {
@@ -552,8 +582,7 @@ pub fn run_client(
 				if has_focus {
 					camera.mouse_interact(adjusted_dx as f32, adjusted_dy as f32);
 				}
-			}
-			/*
+			},
 			winit::event::Event::DeviceEvent {
 				event: DeviceEvent::Button {
 					button: 1, // Left-click
@@ -562,7 +591,7 @@ pub fn run_client(
 				},
 				..
 			} => {
-				let hit = match click_voxel(&world_space, &camera, &air_list, 1024) {
+				let hit = match click_voxel(&world_space, &camera, &[air_id], 1024) {
 					Ok((result_position, result_id, _)) => {
 						Some((result_position, result_id))
 					},
@@ -587,7 +616,7 @@ pub fn run_client(
 								voxel_event_sender.send_one(voxel_msg).unwrap();
 							}
 
-							terrain_renderer.notify_changed(&result_position);
+							renderer.terrain_renderer.notify_changed(&result_position);
 						},
 						Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
 						Err(e) => error!("Tile access error: {:?}", e),
@@ -602,7 +631,7 @@ pub fn run_client(
 				},
 				..
 			} => {
-				let hit = match click_voxel(&world_space, &camera, &air_list, 1024) {
+				let hit = match click_voxel(&world_space, &camera, &[air_id], 1024) {
 					Ok((result_position, result_id, side)) => {
 						Some((result_position, result_id, side))
 					},
@@ -633,7 +662,7 @@ pub fn run_client(
 										voxel_event_sender.send_one(voxel_msg).unwrap();
 									}
 
-									terrain_renderer.notify_changed(&placement_position);
+									renderer.terrain_renderer.notify_changed(&placement_position);
 								},
 								Err(TileSpaceError::NotYetLoaded(pos) ) => info!("Tried to set a block on chunk {:?}, which is not yet loaded. Ignoring.", pos),
 								Err(e) => error!("Tile access error: {:?}", e),
@@ -641,7 +670,7 @@ pub fn run_client(
 						}
 					}
 				}
-			},*/
+			},
 			winit::event::Event::WindowEvent {
 				event: winit::event::WindowEvent::Focused(focus_status),
 				..
@@ -749,18 +778,20 @@ pub fn run_client(
 					Err(_) => todo!(),
 				}
 
-				/*
+				
 				// Remesh if it's not too spammy.
 				if last_remesh_time.elapsed().as_millis() > 64 {
 					let meshing_start = Instant::now();
-					let was_remesh_needed = terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
+					let was_remesh_needed = renderer.terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
 					if was_remesh_needed {
 						let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0;
 						info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
 
+						renderer.process_terrain_mesh_uploads(&mut image_loader).unwrap();
+
 						last_remesh_time = Instant::now();
 					}
-				}*/
+				}
 
 				let draw_start = Instant::now();
 

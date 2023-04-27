@@ -780,8 +780,8 @@ pub mod axis {
 		pub const fn from_id(val: u8) -> Self {
 			match val {
 				posi_x_index!() => VoxelSide::PosiX,
-				posi_z_index!() => VoxelSide::PosiY,
-				posi_y_index!() => VoxelSide::PosiZ,
+				posi_y_index!() => VoxelSide::PosiY,
+				posi_z_index!() => VoxelSide::PosiZ,
 				nega_x_index!() => VoxelSide::NegaX,
 				nega_y_index!() => VoxelSide::NegaY,
 				nega_z_index!() => VoxelSide::NegaZ,
