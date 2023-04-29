@@ -70,7 +70,8 @@ where
 			packets.push(packet);
 		}
 
-		self.send_multi_untyped(packets).map_err(|_e| SendError::NoReceivers)?;
+		self.send_multi_untyped(packets)
+			.map_err(|_e| SendError::NoReceivers)?;
 
 		Ok(())
 	}
@@ -85,13 +86,23 @@ pub mod net_send_channel {
 
 	use crate::{
 		common::identity::NodeIdentity,
-		message::{BroadcastChannel, BroadcastReceiver, DomainMessageSender, DomainSubscribeErr, SendError},
+		message::{
+			BroadcastChannel, BroadcastReceiver, DomainMessageSender, DomainSubscribeErr, SendError,
+		},
 	};
 
-	global_domain_channel!(BroadcastChannel, PACKET_TO_SESSION, PacketIntermediary, NodeIdentity, 4096);
+	global_domain_channel!(
+		BroadcastChannel,
+		PACKET_TO_SESSION,
+		PacketIntermediary,
+		NodeIdentity,
+		4096
+	);
 
 	// Subscribe
-	pub fn subscribe_sender<T>(peer: &NodeIdentity) -> Result<NetSendChannel<T>, DomainSubscribeErr<NodeIdentity>>
+	pub fn subscribe_sender<T>(
+		peer: &NodeIdentity,
+	) -> Result<NetSendChannel<T>, DomainSubscribeErr<NodeIdentity>>
 	where
 		T: Clone + Send + NetMsg,
 	{
@@ -185,7 +196,10 @@ pub mod net_send_channel {
 		PACKET_TO_SESSION.send_one_to_all_except(packet, exclude)
 	}
 
-	pub fn send_multi_to_all_except<T, C, D, V>(messages: V, exclude: &NodeIdentity) -> Result<(), SendError>
+	pub fn send_multi_to_all_except<T, C, D, V>(
+		messages: V,
+		exclude: &NodeIdentity,
+	) -> Result<(), SendError>
 	where
 		T: NetMsg,
 		V: IntoIterator<Item = T>,
@@ -243,7 +257,9 @@ pub mod net_recv_channel {
 			}
 		}
 
-		pub(crate) fn decode(inbound: Vec<InboundNetMsg>) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {
+		pub(crate) fn decode(
+			inbound: Vec<InboundNetMsg>,
+		) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {
 			let mut output = Vec::with_capacity(inbound.len());
 			for message in inbound {
 				if T::net_msg_id() != message.message_type_id {

@@ -1,9 +1,8 @@
 use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
-use crate::common::{voxelmath::*, Version};
+use crate::common::{voxelmath::*, Version, FastHashMap, new_fast_hash_map};
 
 use super::{
 	voxelarray::{VoxelArrayError, VoxelArrayStatic},
@@ -13,7 +12,7 @@ use super::{
 
 pub const NEWEST_CHUNK_FILE_VERSION: Version = version!(0, 0, 1);
 
-pub const CHUNK_EXP: usize = 4;
+pub const CHUNK_EXP: usize = 5;
 pub const CHUNK_SIZE: usize = 2_usize.pow(CHUNK_EXP as u32);
 pub const CHUNK_SIZE_CUBED: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
@@ -56,7 +55,8 @@ pub struct DataSublayerDescriptor {
 	/// Used to order in the sublayer array and also for equality checks.  
 	pub id: u8,
 	/// Based on metadata, how big do we expect this to be? If it's 0 it shouldn't be present.
-	pub expected_size: fn(&ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError>,
+	pub expected_size:
+		fn(&ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError>,
 }
 
 pub struct DataLayerDescriptor {
@@ -109,7 +109,9 @@ impl ChunkTilesVariant {
 	}
 }
 
-pub fn chunk_variant_from_metadata(upper_byte: u8) -> Result<ChunkTilesVariant, ChunkValidationError> {
+pub fn chunk_variant_from_metadata(
+	upper_byte: u8,
+) -> Result<ChunkTilesVariant, ChunkValidationError> {
 	match upper_byte {
 		0 => Ok(ChunkTilesVariant::Uniform),
 		1 => Ok(ChunkTilesVariant::Small),
@@ -118,7 +120,9 @@ pub fn chunk_variant_from_metadata(upper_byte: u8) -> Result<ChunkTilesVariant, 
 	}
 }
 
-pub fn voxel_data_expected_size(metadata: &ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError> {
+pub fn voxel_data_expected_size(
+	metadata: &ChunkLayerMetadata,
+) -> Result<ExpectedSublayerLength, ChunkValidationError> {
 	Ok(match chunk_variant_from_metadata(metadata[0])? {
 		ChunkTilesVariant::Uniform => ExpectedSublayerLength::Exact(0),
 		ChunkTilesVariant::Small => ExpectedSublayerLength::Exact(CHUNK_SIZE_CUBED),
@@ -132,14 +136,14 @@ pub fn voxel_palette_expected_size(
 	Ok(match chunk_variant_from_metadata(metadata[0])? {
 		// Not here in a Uniform chunk - the one individual TileID lives in metadata instead.
 		ChunkTilesVariant::Uniform => ExpectedSublayerLength::Exact(0),
-		ChunkTilesVariant::Small => {
-			ExpectedSublayerLength::Range((SMALL_PALETTE_ENTRY_LEN)..(256 * SMALL_PALETTE_ENTRY_LEN))
-		}
+		ChunkTilesVariant::Small => ExpectedSublayerLength::Range(
+			(SMALL_PALETTE_ENTRY_LEN)..(256 * SMALL_PALETTE_ENTRY_LEN),
+		),
 		// We could do 256*LARGE_PALETTE_ENTRY_LEN here but I want to give the garbage collection
 		// of downgrading chunks some wiggle room.
-		ChunkTilesVariant::Large => {
-			ExpectedSublayerLength::Range((LARGE_PALETTE_ENTRY_LEN)..(CHUNK_SIZE_CUBED * LARGE_PALETTE_ENTRY_LEN))
-		}
+		ChunkTilesVariant::Large => ExpectedSublayerLength::Range(
+			(LARGE_PALETTE_ENTRY_LEN)..(CHUNK_SIZE_CUBED * LARGE_PALETTE_ENTRY_LEN),
+		),
 	})
 }
 
@@ -176,7 +180,9 @@ plus the identity element (leave it where it is giving 24 possible rotations in 
 // 4 tiles = 3 bytes
 // (CHUNK_SIZE_CUBED / 4) * 3 should give you the number of bytes required to describe rotations for every tile.
 
-pub fn rotations_expected_size(_metadata: &ChunkLayerMetadata) -> Result<ExpectedSublayerLength, ChunkValidationError> {
+pub fn rotations_expected_size(
+	_metadata: &ChunkLayerMetadata,
+) -> Result<ExpectedSublayerLength, ChunkValidationError> {
 	Ok(ExpectedSublayerLength::Exact((CHUNK_SIZE_CUBED / 4) * 3))
 }
 
@@ -251,10 +257,10 @@ impl USizeAble for AlwaysLeU16 {
 // Actual chunk implementation starts here:
 pub struct ChunkTilesSmall<T: Voxel> {
 	//Attempting to use the constant causes Rust to freak out for some reason
-	//so I simply type 16
-	pub inner: VoxelArrayStatic<u8, u8, 16>,
+	//so I simply type 32
+	pub inner: VoxelArrayStatic<u8, u8, 32>,
 	pub palette: [T; 256],
-	pub reverse_palette: HashMap<T, u8>,
+	pub reverse_palette: FastHashMap<T, u8>,
 	pub highest_idx: u8,
 	// Used by the serializer to tell if the palette has changed.
 	pub palette_dirty: bool,
@@ -272,8 +278,9 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 		self.inner.get_raw_i(i)
 	}
 	#[inline(always)]
-	pub fn get(&self, coord: VoxelPos<u8>) -> &T {
-		&self.palette[*self.get_raw(coord) as usize]
+	pub fn get(&self, coord: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
+		self.palette.get(*self.get_raw(coord) as usize)
+			.ok_or(VoxelArrayError::NoPaletteEntry(coord))
 	}
 	#[inline(always)]
 	pub fn set_raw(&mut self, coord: VoxelPos<u8>, value: u8) {
@@ -307,7 +314,7 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 			new_inner.set_raw_i(i, AlwaysLeU16::new(*tile as u16));
 		}
 
-		let mut new_reverse_palette: HashMap<T, AlwaysLeU16> = HashMap::default();
+		let mut new_reverse_palette: FastHashMap<T, AlwaysLeU16> = new_fast_hash_map();
 		for (key, value) in self.reverse_palette.iter() {
 			new_reverse_palette.insert(key.clone(), AlwaysLeU16::new(*value as u16));
 		}
@@ -347,10 +354,10 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 //In a 16*16*16, a u16 encodes a number larger than the total number of possible voxel positions anyway.
 pub struct ChunkTilesLarge<T: Voxel> {
 	//Attempting to use the constant causes Rust to freak out for some reason
-	//so I simply type 16
-	pub inner: VoxelArrayStatic<AlwaysLeU16, u8, 16>,
+	//so I simply type 32
+	pub inner: VoxelArrayStatic<AlwaysLeU16, u8, 32>,
 	pub palette: Vec<T>,
-	pub reverse_palette: HashMap<T, AlwaysLeU16>,
+	pub reverse_palette: FastHashMap<T, AlwaysLeU16>,
 	pub palette_dirty: bool,
 }
 
@@ -360,8 +367,10 @@ impl<T: Voxel> ChunkTilesLarge<T> {
 		self.inner.get_raw(coord)
 	}
 	#[inline(always)]
-	pub fn get(&self, coord: VoxelPos<u8>) -> &T {
-		self.palette.get(self.inner.get_raw(coord).as_usize()).unwrap()
+	pub fn get(&self, coord: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
+		self.palette
+			.get(self.inner.get_raw(coord).as_usize())
+			.ok_or(VoxelArrayError::NoPaletteEntry(coord))
 	}
 	#[inline(always)]
 	pub fn get_raw_i(&self, i: usize) -> &AlwaysLeU16 {
@@ -516,7 +525,7 @@ impl<T: Voxel> Chunk<T> {
 						array
 					};
 					palette[1] = tile.clone();
-					let mut reverse_palette: HashMap<T, u8> = HashMap::default();
+					let mut reverse_palette: FastHashMap<T, u8> = new_fast_hash_map();
 					reverse_palette.insert(val.clone(), 0);
 					reverse_palette.insert(tile, 1);
 					self.tiles = ChunkInner::Small(Box::new(ChunkTilesSmall {
@@ -552,8 +561,8 @@ impl<T: Voxel> VoxelStorage<T, u8> for Chunk<T> {
 	fn get(&self, pos: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
 		match &self.tiles {
 			ChunkInner::Uniform(val) => Ok(val),
-			ChunkInner::Small(inner) => Ok(inner.get(pos)),
-			ChunkInner::Large(inner) => Ok(inner.get(pos)),
+			ChunkInner::Small(inner) => inner.get(pos),
+			ChunkInner::Large(inner) => inner.get(pos),
 		}
 	}
 	#[inline]
@@ -678,7 +687,10 @@ fn chunk_index_bounds() {
 	for x in 0..CHUNK_SIZE {
 		for y in 0..CHUNK_SIZE {
 			for z in 0..CHUNK_SIZE {
-				assert!(crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE) < CHUNK_SIZE_CUBED);
+				assert!(
+					crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE)
+						< CHUNK_SIZE_CUBED
+				);
 			}
 		}
 	}

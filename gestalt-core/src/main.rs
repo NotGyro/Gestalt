@@ -6,6 +6,7 @@
 #![feature(associated_type_bounds)]
 #![feature(inherent_associated_types)]
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(array_try_from_fn)]
 #![allow(clippy::large_enum_variant)]
 
 #[macro_use]
@@ -36,11 +37,15 @@ use std::{
 };
 
 use log::{error, info, warn, LevelFilter};
-use simplelog::{ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger};
+use simplelog::{
+	ColorChoice, CombinedLogger, ConfigBuilder, TermLogger, TerminalMode, WriteLogger,
+};
 
 use common::{
 	identity::NodeIdentity,
-	identity::{do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys},
+	identity::{
+		do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys,
+	},
 	message::*,
 	Version,
 };
@@ -141,7 +146,10 @@ impl ProgramArgs {
 		}
 	}
 	pub fn add_arg(&mut self, aliases: Vec<&str>, takes_parameter: bool) {
-		let mut converted_aliases: Vec<String> = aliases.iter().map(|alias| alias.to_ascii_lowercase()).collect();
+		let mut converted_aliases: Vec<String> = aliases
+			.iter()
+			.map(|alias| alias.to_ascii_lowercase())
+			.collect();
 		let mut alias_set = HashSet::default();
 		for alias in converted_aliases.drain(0..) {
 			alias_set.insert(alias);
@@ -187,7 +195,9 @@ impl ProgramArgs {
 				}
 			}
 		}
-		ArgumentMatches { matches: match_list }
+		ArgumentMatches {
+			matches: match_list,
+		}
 	}
 }
 
@@ -296,7 +306,11 @@ fn main() {
 			.read_line(&mut input)
 			.expect("Error reading from STDIN");
 
-		let passphrase = if input.chars().count() > 4 { Some(input) } else { None };
+		let passphrase = if input.chars().count() > 4 {
+			Some(input)
+		} else {
+			None
+		};
 
 		generate_local_keys(passphrase).unwrap()
 	} else {
@@ -406,8 +420,10 @@ fn main() {
 		let mut total_changes: Vec<VoxelChangeAnnounce> = Vec::new();
 		async_runtime.block_on(async move {
 			let mut quit_receiver = QuitReceiver::new();
-			let mut server_voxel_receiver_from_client = net_recv_channel::subscribe::<VoxelChangeRequest>().unwrap();
-			let mut server_join_receiver_from_client = net_recv_channel::subscribe::<JoinDefaultEntry>().unwrap();
+			let mut server_voxel_receiver_from_client =
+				net_recv_channel::subscribe::<VoxelChangeRequest>().unwrap();
+			let mut server_join_receiver_from_client =
+				net_recv_channel::subscribe::<JoinDefaultEntry>().unwrap();
 			loop {
 				tokio::select! {
 					voxel_events_maybe = server_voxel_receiver_from_client.recv_wait() => {
@@ -486,18 +502,31 @@ fn main() {
 
 		std::thread::sleep(Duration::from_millis(50));
 
-		let _voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
+		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
 			net_send_channel::subscribe_sender(&server_identity).unwrap();
 
-		let mut client_join_receiver_from_server = net_recv_channel::subscribe::<JoinAnnounce>().unwrap();
-		let _client_voxel_receiver_from_server = net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
+		let mut client_join_receiver_from_server =
+			net_recv_channel::subscribe::<JoinAnnounce>().unwrap();
+		let client_voxel_receiver_from_server =
+			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
 
 		async_runtime.spawn(async move {
 			loop {
 				match client_join_receiver_from_server.recv_wait().await {
 					Ok(join_msgs) => {
-						for (_server_ident, JoinAnnounce { identity, display_name }) in join_msgs {
-							info!("Peer {} joined with display name {}", identity.to_base64(), &display_name);
+						for (
+							_server_ident,
+							JoinAnnounce {
+								identity,
+								display_name,
+							},
+						) in join_msgs
+						{
+							info!(
+								"Peer {} joined with display name {}",
+								identity.to_base64(),
+								&display_name
+							);
 						}
 					}
 					Err(_e) => {
@@ -514,33 +543,33 @@ fn main() {
 			net_system_join_handle.await; //This is why quit_ready_sender exists. Make sure that's all done.
 			quit_ready.notify_ready();
 		});
-		/*
-		client::clientmain::run_client(keys,
-				voxel_event_sender,
-				client_voxel_receiver_from_server,
-				Some(server_identity),
-				async_runtime,
-			);
-		*/
+
+		client::clientmain::run_client(
+			keys,
+			voxel_event_sender,
+			client_voxel_receiver_from_server,
+			Some(server_identity),
+			async_runtime,
+		);
 	} else {
-		/*
 		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
 		let voxel_event_sender = NetSendChannel::new(voxel_event_sender);
 
-		let client_voxel_receiver_from_server = net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
+		let client_voxel_receiver_from_server =
+			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
 
-		async_runtime.spawn( async move {
+		async_runtime.spawn(async move {
 			loop {
 				//redirect to /dev/null
 				let _ = voxel_event_receiver.recv().await;
 			}
 		});
-		client::clientmain::run_client(keys,
+		client::clientmain::run_client(
+			keys,
 			voxel_event_sender,
 			client_voxel_receiver_from_server,
 			None,
 			async_runtime,
-			);
-		*/
+		);
 	}
 }

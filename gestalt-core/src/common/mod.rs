@@ -9,6 +9,7 @@ use std::{
 	collections::{HashMap, HashSet},
 	fmt::Display,
 	future::Future,
+	marker::PhantomData,
 	pin::Pin,
 };
 
@@ -16,6 +17,95 @@ use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::Xxh3Builder;
 
 pub type DynFuture<T> = Pin<Box<dyn Future<Output = T>>>;
+
+pub trait Angle {
+	fn get_degrees(&self) -> f32;
+	fn get_radians(&self) -> f32;
+	fn from_degrees(value: f32) -> Self;
+	fn from_radians(value: f32) -> Self;
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub struct RadianAngle(pub f32);
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub struct DegreeAngle(pub f32);
+
+impl Angle for RadianAngle {
+	#[inline(always)]
+    fn get_degrees(&self) -> f32 {
+        self.0.to_degrees()
+    }
+
+	#[inline(always)]
+    fn get_radians(&self) -> f32 {
+        self.0
+    }
+
+	#[inline(always)]
+	fn from_degrees(value: f32) -> Self {
+        RadianAngle(value.to_radians())
+    }
+
+	#[inline(always)]
+	fn from_radians(value: f32) -> Self {
+        RadianAngle(value)
+    }
+}
+
+impl Angle for DegreeAngle {
+	#[inline(always)]
+    fn get_degrees(&self) -> f32 {
+        self.0
+    }
+
+	#[inline(always)]
+    fn get_radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+
+	#[inline(always)]
+	fn from_degrees(value: f32) -> Self {
+        DegreeAngle(value)
+    }
+
+	#[inline(always)]
+	fn from_radians(value: f32) -> Self {
+        DegreeAngle(value.to_degrees())
+    }
+}
+
+pub struct Color { 
+	/// Red
+	pub r: u8,
+	/// Green
+	pub g: u8,
+	/// Blue
+	pub b: u8,
+}
+impl Color { 
+	pub fn to_normalized_float(&self) -> (f32, f32, f32) {
+		(self.r as f32 / 255.0,
+		self.g as f32 / 255.0,
+		self.b as f32 / 255.0)
+	}
+}
+
+pub struct ColorAlpha { 
+	pub color: Color, 
+	/// Transparency
+	pub alpha: u8,
+}
+impl ColorAlpha { 
+	pub fn to_normalized_float(&self) -> (f32, f32, f32, f32) {
+		let color = self.color.to_normalized_float();
+		(color.0,
+		color.1,
+		color.2,
+		self.alpha as f32 / 255.0)
+	}
+}
+
 
 /// Non-cryptographic hashmap for internally-generated structures.
 pub type FastHashMap<K, V> = std::collections::HashMap<K, V, Xxh3Builder>;
@@ -136,10 +226,13 @@ impl Version {
 		}
 
 		//Internal method to convert a field of the string to a version field, to avoid repetition.
-		fn number_from_field(field: &str, original_string: String) -> Result<u32, ParseVersionError> {
-			let big_number = field
-				.parse::<u128>()
-				.map_err(|_e| ParseVersionError::NotNumber(field.to_string(), original_string.clone()))?;
+		fn number_from_field(
+			field: &str,
+			original_string: String,
+		) -> Result<u32, ParseVersionError> {
+			let big_number = field.parse::<u128>().map_err(|_e| {
+				ParseVersionError::NotNumber(field.to_string(), original_string.clone())
+			})?;
 			if big_number > (u32::MAX as u128) {
 				return Err(ParseVersionError::TooBig(original_string, big_number));
 			}
@@ -230,6 +323,52 @@ pub mod version_string {
 		D: Deserializer<'de>,
 	{
 		deserializer.deserialize_string(VersionVisitor {})
+	}
+}
+
+/// Option-like semantics entirely within the type system.
+/// The compiler MAY optimize to this anyway, but this is a way to be sure if you'd
+/// prefer to have, for example, two different methods emitted by codegen for the Some
+/// case and for the None case, and give the optimization absolute knowledge of if the
+/// input is a Some or a None ahead of time. Useful in certain tight loops, for example
+/// in systems for the ECS.
+pub trait CompileTimeOption<T> {
+	const IS_SOME: bool;
+	fn unwrap(self) -> T;
+	fn to_option(self) -> Option<T>;
+}
+
+pub struct CompileTimeNone<T> {
+	_phantom: PhantomData<T>,
+}
+impl<T> CompileTimeOption<T> for CompileTimeNone<T> {
+	const IS_SOME: bool = false;
+
+	#[inline(always)]
+	fn unwrap(self) -> T {
+		panic!("Cannot unwrap a CompileTimeNone!");
+	}
+
+	#[inline(always)]
+	fn to_option(self) -> Option<T> {
+		None
+	}
+}
+
+#[repr(transparent)]
+pub struct CompileTimeSome<T>(T);
+
+impl<T> CompileTimeOption<T> for CompileTimeSome<T> {
+	const IS_SOME: bool = true;
+
+	#[inline(always)]
+	fn unwrap(self) -> T {
+		self.0
+	}
+
+	#[inline(always)]
+	fn to_option(self) -> Option<T> {
+		Some(self.0)
 	}
 }
 

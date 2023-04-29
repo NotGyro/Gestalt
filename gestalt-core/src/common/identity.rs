@@ -1,8 +1,13 @@
+use base64::engine::general_purpose::URL_SAFE as BASE_64;
+use base64::Engine;
 use signature::{Signer, Verifier};
 
 use serde::{Deserialize, Serialize};
 
-use pkcs8::{der::Document, AlgorithmIdentifier, DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
+use pkcs8::{
+	der::Document, AlgorithmIdentifier, DecodePrivateKey, DecodePublicKey, EncodePrivateKey,
+	EncodePublicKey,
+};
 use std::{
 	fs::{self, OpenOptions},
 	io::Write,
@@ -37,12 +42,10 @@ impl NodeIdentity {
 		&self.0
 	}
 	pub fn to_base64(&self) -> String {
-		let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
-		base64::encode_config(&self.0, config)
+		BASE_64.encode(&self.0)
 	}
 	pub fn from_base64(b64: &str) -> Result<Self, DecodeIdentityError> {
-		let config = base64::Config::new(base64::CharacterSet::UrlSafe, true);
-		let buf = base64::decode_config(b64, config)?;
+		let buf = BASE_64.decode(b64)?;
 		Self::from_bytes(&buf)
 	}
 	pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeIdentityError> {
@@ -196,7 +199,9 @@ pub fn do_keys_need_generating() -> bool {
 	false
 }
 
-pub fn generate_local_keys(passphrase: Option<String>) -> Result<IdentityKeyPair, Box<dyn std::error::Error>> {
+pub fn generate_local_keys(
+	passphrase: Option<String>,
+) -> Result<IdentityKeyPair, Box<dyn std::error::Error>> {
 	let mut rng = rand_core::OsRng::default();
 	// Set up paths
 	let keys_directory = PathBuf::from(KEYS_DIRECTORY);
@@ -264,7 +269,9 @@ pub fn does_private_key_need_passphrase() -> Result<bool, Box<dyn std::error::Er
 	Ok(private_key_string.contains("ENCRYPTED"))
 }
 
-pub fn load_local_identity_keys(passphrase: Option<String>) -> Result<IdentityKeyPair, Box<dyn std::error::Error>> {
+pub fn load_local_identity_keys(
+	passphrase: Option<String>,
+) -> Result<IdentityKeyPair, Box<dyn std::error::Error>> {
 	let keys_directory = PathBuf::from(KEYS_DIRECTORY);
 	let pub_key_path = keys_directory.join(PathBuf::from(PUB_KEY_FILENAME));
 	let priv_key_path = keys_directory.join(PathBuf::from(PRIV_KEY_FILENAME));
@@ -273,7 +280,9 @@ pub fn load_local_identity_keys(passphrase: Option<String>) -> Result<IdentityKe
 	let private_key_string = fs::read_to_string(priv_key_path)?;
 
 	let private_key_bytes = match passphrase {
-		Some(pass) => ed25519::pkcs8::KeypairBytes::from_pkcs8_encrypted_pem(&private_key_string, pass),
+		Some(pass) => {
+			ed25519::pkcs8::KeypairBytes::from_pkcs8_encrypted_pem(&private_key_string, pass)
+		}
 		None => ed25519::pkcs8::KeypairBytes::from_pkcs8_pem(&private_key_string),
 	}?;
 

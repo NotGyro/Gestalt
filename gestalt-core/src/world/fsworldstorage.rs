@@ -77,7 +77,12 @@ pub fn filename_for_chunk(pos: &ChunkPos) -> String {
 }
 
 #[inline]
-pub fn path_for_chunk(base_dir: &PathBuf, world_id: &WorldId, role: StoredWorldRole, pos: &ChunkPos) -> PathBuf {
+pub fn path_for_chunk(
+	base_dir: &PathBuf,
+	world_id: &WorldId,
+	role: StoredWorldRole,
+	pos: &ChunkPos,
+) -> PathBuf {
 	path_for_terrain(base_dir, world_id, role).join(filename_for_chunk(pos))
 }
 

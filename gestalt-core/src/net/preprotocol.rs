@@ -36,7 +36,8 @@ use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
 use super::handshake::{
-	load_noise_local_keys, noise_protocol_dir, HandshakeNext, NewProtocolKeyApprover, NewProtocolKeyReporter,
+	load_noise_local_keys, noise_protocol_dir, HandshakeNext, NewProtocolKeyApprover,
+	NewProtocolKeyReporter,
 };
 use super::{
 	handshake::{HandshakeError, HandshakeInitiator, HandshakeReceiver},
@@ -123,7 +124,8 @@ lazy_static! {
 }
 
 lazy_static! {
-	pub static ref SERVER_STATUS: Arc<Mutex<ServerStatus>> = Arc::new(Mutex::new(ServerStatus::Starting));
+	pub static ref SERVER_STATUS: Arc<Mutex<ServerStatus>> =
+		Arc::new(Mutex::new(ServerStatus::Starting));
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -142,7 +144,9 @@ pub enum PreProtocolError {
 	HandshakeAlreadyStarted,
 	#[error("An attempt to start a handshake was made with unsupported protocol: {0:?}")]
 	UnsupportedProtocol(ProtocolDef),
-	#[error("The Handshake Receiver did not produce a reply message to the start handshake message.")]
+	#[error(
+		"The Handshake Receiver did not produce a reply message to the start handshake message."
+	)]
 	NoReplyToStart,
 }
 
@@ -216,10 +220,17 @@ impl PreProtocolReceiver {
 	}
 	pub fn complete_handshake(
 		&mut self,
-	) -> Result<(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId), PreProtocolError> {
+	) -> Result<
+		(snow::StatelessTransportState, MessageCounter, NodeIdentity, SessionId),
+		PreProtocolError,
+	> {
 		match std::mem::take(&mut self.state) {
-			PreProtocolReceiverState::QueryAnswerer => Err(HandshakeError::CompleteBeforeDone.into()),
-			PreProtocolReceiverState::Handshake(receiver) => receiver.complete().map_err(|e| e.into()),
+			PreProtocolReceiverState::QueryAnswerer => {
+				Err(HandshakeError::CompleteBeforeDone.into())
+			}
+			PreProtocolReceiverState::Handshake(receiver) => {
+				receiver.complete().map_err(|e| e.into())
+			}
 		}
 	}
 	pub async fn receive_and_reply(
@@ -251,7 +262,11 @@ impl PreProtocolReceiver {
 					// Init the receiver state machine
 					let mut receiver_state = HandshakeReceiver::new(
 						noise_dir,
-						load_noise_local_keys(self.protocol_dir.clone(), self.our_identity.public.clone()).await?,
+						load_noise_local_keys(
+							self.protocol_dir.clone(),
+							self.our_identity.public.clone(),
+						)
+						.await?,
 						self.our_identity.clone(),
 						mismatch_reporter,
 						mismatch_approver,
@@ -262,9 +277,12 @@ impl PreProtocolReceiver {
 							PreProtocolOutput::Reply(PreProtocolReply::Handshake(message))
 						}
 						Ok(HandshakeNext::Done) => return Err(PreProtocolError::NoReplyToStart),
-						Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!("Handshake error: {:?}", e))),
+						Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!(
+							"Handshake error: {:?}",
+							e
+						))),
 					}
-					//Mutex guard should drop here.
+				//Mutex guard should drop here.
 				} else {
 					PreProtocolOutput::Reply(PreProtocolReply::Err(format!(
 						"Handshake error: {:?}",
@@ -283,30 +301,43 @@ impl PreProtocolReceiver {
 							}
 							// Receiver doesn't work this way.
 							Ok(HandshakeNext::Done) => unreachable!(),
-							Err(e) => {
-								PreProtocolOutput::Reply(PreProtocolReply::Err(format!("Handshake error: {:?}", e)))
-							}
+							Err(e) => PreProtocolOutput::Reply(PreProtocolReply::Err(format!(
+								"Handshake error: {:?}",
+								e
+							))),
 						}
 					}
-					PreProtocolReceiverState::QueryAnswerer => PreProtocolOutput::Reply(PreProtocolReply::Err(
-						format!("Handshake error: {:?}", PreProtocolError::HandshakeMessageWithoutHandshakeStart),
-					)),
+					PreProtocolReceiverState::QueryAnswerer => {
+						PreProtocolOutput::Reply(PreProtocolReply::Err(format!(
+							"Handshake error: {:?}",
+							PreProtocolError::HandshakeMessageWithoutHandshakeStart
+						)))
+					}
 				}
 			}
 			PreProtocolQuery::Err(err) => {
 				self.state = PreProtocolReceiverState::QueryAnswerer;
 				match self.state.get_peer_identity() {
 					Some(ident) => {
-						error!("Remote party {:?} reported an error in the handshake process: {}", ident, err)
+						error!(
+							"Remote party {:?} reported an error in the handshake process: {}",
+							ident, err
+						)
 					}
-					None => error!("Unidentified remote party reported an error in the handshake process: {}", err),
+					None => error!(
+						"Unidentified remote party reported an error in the handshake process: {}",
+						err
+					),
 				}
 				PreProtocolOutput::NoMessage
 			}
 		})
 	}
 }
-pub async fn write_preprotocol_message(json: &str, stream: &mut TcpStream) -> Result<(), std::io::Error> {
+pub async fn write_preprotocol_message(
+	json: &str,
+	stream: &mut TcpStream,
+) -> Result<(), std::io::Error> {
 	let bytes = json.as_bytes();
 	let message_len_bytes = (bytes.len() as u32).to_le_bytes();
 	assert_eq!(message_len_bytes.len(), 4);
@@ -339,8 +370,13 @@ pub async fn preprotocol_receiver_session(
 	mismatch_reporter: NewProtocolKeyReporter,
 	mismatch_approver: NewProtocolKeyApprover,
 ) {
-	let mut receiver =
-		PreProtocolReceiver::new(our_identity, our_role, protocol_dir, mismatch_reporter, mismatch_approver);
+	let mut receiver = PreProtocolReceiver::new(
+		our_identity,
+		our_role,
+		protocol_dir,
+		mismatch_reporter,
+		mismatch_approver,
+	);
 	while match read_preprotocol_message(&mut stream).await {
 		Ok(msg) => {
 			match serde_json::from_str::<PreProtocolQuery>(&msg) {
@@ -350,7 +386,9 @@ pub async fn preprotocol_receiver_session(
 							match out {
 								PreProtocolOutput::Reply(to_send) => {
 									let json_string = serde_json::to_string(&to_send).unwrap();
-									write_preprotocol_message(&json_string, &mut stream).await.unwrap();
+									write_preprotocol_message(&json_string, &mut stream)
+										.await
+										.unwrap();
 
 									match receiver.is_handshake_done() {
 										true => {
@@ -385,8 +423,14 @@ pub async fn preprotocol_receiver_session(
 														"{:?}",
 														PreProtocolError::NoIntroduction
 													));
-													let json_string = serde_json::to_string(&reply).unwrap();
-													write_preprotocol_message(&json_string, &mut stream).await.unwrap();
+													let json_string =
+														serde_json::to_string(&reply).unwrap();
+													write_preprotocol_message(
+														&json_string,
+														&mut stream,
+													)
+													.await
+													.unwrap();
 
 													false
 												}
@@ -408,9 +452,12 @@ pub async fn preprotocol_receiver_session(
 								stream.peer_addr().unwrap(),
 								e
 							);
-							let reply = PreProtocolReply::Err(format!("Preprotocol loop error: {:?}", e));
+							let reply =
+								PreProtocolReply::Err(format!("Preprotocol loop error: {:?}", e));
 							let json_string = serde_json::to_string(&reply).unwrap();
-							write_preprotocol_message(&json_string, &mut stream).await.unwrap();
+							write_preprotocol_message(&json_string, &mut stream)
+								.await
+								.unwrap();
 
 							false
 						}
@@ -422,9 +469,12 @@ pub async fn preprotocol_receiver_session(
 						stream.peer_addr().unwrap(),
 						e
 					);
-					let reply = PreProtocolReply::Err(format!("Preprotocol parsing error: {:?}", e));
+					let reply =
+						PreProtocolReply::Err(format!("Preprotocol parsing error: {:?}", e));
 					let json_string = serde_json::to_string(&reply).unwrap();
-					write_preprotocol_message(&json_string, &mut stream).await.unwrap();
+					write_preprotocol_message(&json_string, &mut stream)
+						.await
+						.unwrap();
 
 					false
 				}
@@ -432,9 +482,13 @@ pub async fn preprotocol_receiver_session(
 		}
 		Err(_) => {
 			error!("Error getting message length from {}", stream.peer_addr().unwrap());
-			let reply = PreProtocolReply::Err(String::from("Handshake error: Error getting message length."));
+			let reply = PreProtocolReply::Err(String::from(
+				"Handshake error: Error getting message length.",
+			));
 			let json_string = serde_json::to_string(&reply).unwrap();
-			write_preprotocol_message(&json_string, &mut stream).await.unwrap();
+			write_preprotocol_message(&json_string, &mut stream)
+				.await
+				.unwrap();
 
 			false
 		}
@@ -621,9 +675,12 @@ pub async fn preprotocol_connect_to_server(
 				}
 				Err(error) => {
 					error!("Handshake error connecting to server: {:?}", error);
-					let error_to_send = PreProtocolQuery::Err(format!("Handshake error: {:?}", error));
+					let error_to_send =
+						PreProtocolQuery::Err(format!("Handshake error: {:?}", error));
 					let json_error = serde_json::to_string(&error_to_send).unwrap();
-					write_preprotocol_message(&json_error, &mut stream).await.unwrap();
+					write_preprotocol_message(&json_error, &mut stream)
+						.await
+						.unwrap();
 					stream.shutdown().await.unwrap();
 					Err(error)
 				}
@@ -714,14 +771,16 @@ pub mod test {
 
 		let success_timeout = Duration::from_secs(2);
 		//Make sure it has a little time to complete this.
-		let successful_server_end = tokio::time::timeout(success_timeout, serv_completed_receiver.recv())
-			.await
-			.unwrap()
-			.unwrap();
-		let successful_client_end = tokio::time::timeout(success_timeout, client_completed_receiver.recv())
-			.await
-			.unwrap()
-			.unwrap();
+		let successful_server_end =
+			tokio::time::timeout(success_timeout, serv_completed_receiver.recv())
+				.await
+				.unwrap()
+				.unwrap();
+		let successful_client_end =
+			tokio::time::timeout(success_timeout, client_completed_receiver.recv())
+				.await
+				.unwrap()
+				.unwrap();
 		// Check if all is valid
 		assert_eq!(successful_server_end.peer_identity, client_key_pair.public);
 		assert_eq!(successful_client_end.peer_identity, server_key_pair.public);

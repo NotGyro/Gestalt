@@ -1,6 +1,7 @@
 // This file is the oldest surviving element of the Gestalt engine. It's practically a dinosaur!
 
 use std::iter::{IntoIterator, Iterator};
+use std::ops::{BitOr, BitOrAssign, BitAnd, BitAndAssign};
 
 use num::{Integer, Signed, Unsigned};
 
@@ -151,8 +152,14 @@ where
 	}
 }
 
-pub trait VoxelCoord: 'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default {}
-impl<T> VoxelCoord for T where T: 'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default {}
+pub trait VoxelCoord:
+	'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default
+{
+}
+impl<T> VoxelCoord for T where
+	T: 'static + Copy + Integer + fmt::Display + fmt::Debug + num::PrimInt + Default
+{
+}
 
 /// A point in Voxel space. (A cell.)
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,7 +243,11 @@ where
 
 macro_rules! vpos {
 	($x:expr, $y:expr, $z:expr) => {
-		VoxelPos { x: $x, y: $y, z: $z }
+		VoxelPos {
+			x: $x,
+			y: $y,
+			z: $z,
+		}
 	};
 }
 
@@ -760,15 +771,8 @@ pub mod axis {
 
 		#[inline(always)]
 		#[allow(dead_code)]
-		pub const fn to_id(&self) -> usize {
-			match self {
-				VoxelSide::PosiX => posi_x_index!(),
-				VoxelSide::PosiY => posi_y_index!(),
-				VoxelSide::PosiZ => posi_z_index!(),
-				VoxelSide::NegaX => nega_x_index!(),
-				VoxelSide::NegaY => nega_y_index!(),
-				VoxelSide::NegaZ => nega_z_index!(),
-			}
+		pub const fn to_id(&self) -> u8 {
+			*self as u8
 		}
 
 		#[inline(always)]
@@ -776,8 +780,8 @@ pub mod axis {
 		pub const fn from_id(val: u8) -> Self {
 			match val {
 				posi_x_index!() => VoxelSide::PosiX,
-				posi_z_index!() => VoxelSide::PosiY,
-				posi_y_index!() => VoxelSide::PosiZ,
+				posi_y_index!() => VoxelSide::PosiY,
+				posi_z_index!() => VoxelSide::PosiZ,
 				nega_x_index!() => VoxelSide::NegaX,
 				nega_y_index!() => VoxelSide::NegaY,
 				nega_z_index!() => VoxelSide::NegaZ,
@@ -1110,7 +1114,10 @@ where
 	/// Returns the cell adjacent to this one in the direction passed
 	#[inline]
 	#[allow(dead_code)]
-	pub fn get_neighbor_unsigned(&self, direction: VoxelSide) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
+	pub fn get_neighbor_unsigned(
+		&self,
+		direction: VoxelSide,
+	) -> Result<VoxelPos<T>, UnsignedUnderflowError> {
 		match direction {
 			VoxelSide::PosiX => Ok(VoxelPos {
 				x: self.x + T::one(),
@@ -1207,7 +1214,7 @@ impl CubeOrientation {
 #[derive(Clone, Debug)]
 pub struct VoxelRaycast {
 	pub pos: VoxelPos<i32>,
-	t_max: glam::Vec3,       //Where does the ray cross the first voxel boundary? (in all directions)
+	t_max: glam::Vec3, //Where does the ray cross the first voxel boundary? (in all directions)
 	t_delta: glam::Vec3, //How far along do we need to move for the length of that movement to equal the width of a voxel?
 	step_dir: VoxelPos<i32>, //Values are only 1 or -1, to determine the sign of the direction the ray is traveling.
 	last_direction: VoxelAxis,
@@ -1425,16 +1432,21 @@ where
 		}
 	}
 	pub const fn get(&self, dir: VoxelSide) -> &T {
-		&self.data[dir.to_id()]
+		&self.data[dir.to_id() as usize]
 	}
 	pub const fn get_i(&self, i: usize) -> &T {
 		&self.data[i]
 	}
 	pub fn set(&mut self, value: T, dir: VoxelSide) {
-		(*self.data.get_mut(dir.to_id()).unwrap()) = value;
+		(*self.data.get_mut(dir.to_id() as usize).unwrap()) = value;
 	}
 	pub fn set_i(&mut self, value: T, i: usize) {
 		(*self.data.get_mut(i).unwrap()) = value;
+	}
+
+	pub fn get_all<'a>(&'a self) -> [&'a T; 6] { 
+		[&self.data[0], &self.data[1], &self.data[2],
+		 &self.data[3], &self.data[4], &self.data[5]]
 	}
 
 	pub fn iter(&self) -> SidesArrayIterator<T> {
@@ -1482,6 +1494,108 @@ where
 			None
 		}
 	}
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SidesFlags(u8);
+
+impl SidesFlags { 
+	pub const POSI_X_MASK: SidesFlags = SidesFlags(1 << posi_x_index!());
+	pub const POSI_Y_MASK: SidesFlags = SidesFlags(1 << posi_y_index!());
+	pub const POSI_Z_MASK: SidesFlags = SidesFlags(1 << posi_z_index!());
+	pub const NEGA_X_MASK: SidesFlags = SidesFlags(1 << nega_x_index!());
+	pub const NEGA_Y_MASK: SidesFlags = SidesFlags(1 << nega_y_index!());
+	pub const NEGA_Z_MASK: SidesFlags = SidesFlags(1 << nega_z_index!());
+
+	#[inline(always)]
+	pub const fn new_all() -> Self {
+		Self(0b0_00_11111)
+	}
+
+	#[inline(always)]
+	pub const fn new_none() -> Self { 
+		Self(0)
+	}
+
+	// C-style integer-boolean return for branchlessness' sake. 
+	#[inline(always)]
+	pub const fn contains_side(&self, rhs: VoxelSide) -> u8 { 
+		self.0 & (1 << rhs.to_id()) >> rhs.to_id()
+	}
+
+	#[inline(always)]
+	pub const fn contains_side_bool(&self, rhs: VoxelSide) -> bool { 
+		self.0 & (1 << rhs.to_id()) != 0
+	}
+}
+
+impl From<VoxelSide> for SidesFlags {
+    fn from(value: VoxelSide) -> Self {
+        Self (
+			1 << value.to_id()
+		)
+    }
+}
+impl From<&[VoxelSide]> for SidesFlags {
+    fn from(value: &[VoxelSide]) -> Self {
+		let mut val = 0;
+		for side in value { 
+			val |= 1 << side.to_id();
+		}
+        Self(val)
+    }
+}
+impl BitOr<SidesFlags> for SidesFlags {
+    type Output = SidesFlags;
+
+    fn bitor(self, rhs: SidesFlags) -> Self::Output {
+        SidesFlags(self.0 | rhs.0)
+    }
+}
+
+impl BitOr<VoxelSide> for SidesFlags {
+    type Output = SidesFlags;
+
+    fn bitor(self, rhs: VoxelSide) -> Self::Output {
+        SidesFlags(self.0 | (1 << rhs.to_id()))
+    }
+}
+impl BitOrAssign<SidesFlags> for SidesFlags {
+    fn bitor_assign(&mut self, rhs: SidesFlags) {
+       self.0 |= rhs.0
+    }
+}
+impl BitOrAssign<VoxelSide> for SidesFlags {
+    fn bitor_assign(&mut self, rhs: VoxelSide) {
+       self.0 |= 1 << rhs.to_id()
+    }
+}
+
+impl BitAnd<SidesFlags> for SidesFlags {
+    type Output = SidesFlags;
+
+    fn bitand(self, rhs: SidesFlags) -> Self::Output {
+        SidesFlags(self.0 & rhs.0)
+    }
+}
+
+impl BitAnd<VoxelSide> for SidesFlags {
+    type Output = SidesFlags;
+
+    fn bitand(self, rhs: VoxelSide) -> Self::Output {
+        SidesFlags(self.0 & (1 << rhs.to_id()))
+    }
+}
+impl BitAndAssign<SidesFlags> for SidesFlags {
+    fn bitand_assign(&mut self, rhs: SidesFlags) {
+       self.0 &= rhs.0
+    }
+}
+impl BitAndAssign<VoxelSide> for SidesFlags {
+    fn bitand_assign(&mut self, rhs: VoxelSide) {
+       self.0 &= 1 << rhs.to_id()
+    }
 }
 
 #[test]
@@ -1586,8 +1700,16 @@ fn test_get_neighbor() {
 
 #[test]
 fn test_contains() {
-	let low: VoxelPos<i32> = VoxelPos { x: -40, y: -40, z: -40 };
-	let high: VoxelPos<i32> = VoxelPos { x: -10, y: -10, z: -10 };
+	let low: VoxelPos<i32> = VoxelPos {
+		x: -40,
+		y: -40,
+		z: -40,
+	};
+	let high: VoxelPos<i32> = VoxelPos {
+		x: -10,
+		y: -10,
+		z: -10,
+	};
 	let ran: VoxelRange<i32> = VoxelRange {
 		lower: low,
 		upper: high,

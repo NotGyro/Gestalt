@@ -776,8 +776,12 @@ pub mod test {
 
 		TEST_DOMAIN_CHANNEL.add_domain(&player_identity);
 		TEST_DOMAIN_CHANNEL.add_domain(&some_other_player_identity);
-		let sender = TEST_DOMAIN_CHANNEL.sender_subscribe(&player_identity).unwrap();
-		let mut receiver = TEST_DOMAIN_CHANNEL.receiver_subscribe(&player_identity).unwrap();
+		let sender = TEST_DOMAIN_CHANNEL
+			.sender_subscribe(&player_identity)
+			.unwrap();
+		let mut receiver = TEST_DOMAIN_CHANNEL
+			.receiver_subscribe(&player_identity)
+			.unwrap();
 
 		let other_channel_sender = TEST_DOMAIN_CHANNEL
 			.sender_subscribe(&some_other_player_identity)

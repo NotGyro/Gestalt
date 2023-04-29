@@ -27,7 +27,7 @@ pub enum StartServerError {
 	#[error("Could not read server config file, i/o error: {0:?}")]
 	CouldntOpenConfig(#[from] std::io::Error),
 	#[error("Could not parse server config file due to: {0}")]
-	CouldntParseConfig(#[from] ron::Error),
+	CouldntParseConfig(#[from] ron::error::SpannedError),
 	#[error("Could not initialize display: {0:?}")]
 	CreateWindowError(#[from] winit::error::OsError),
 }
@@ -50,7 +50,7 @@ pub fn load_server_config() -> Result<ServerConfig, StartServerError> {
 				.map_err(StartServerError::from)?;
 			Ok(contents)
 		})
-		.and_then(|e| ron::from_str(e.as_str()).map_err(StartServerError::from));
+		.and_then(|file| ron::from_str(file.as_str()).map_err(StartServerError::from));
 	//If that didn't load, just use built-in defaults.
 	Ok(match config_maybe {
 		Ok(c) => c,

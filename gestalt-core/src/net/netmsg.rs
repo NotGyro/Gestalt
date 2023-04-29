@@ -320,7 +320,10 @@ impl OuterEnvelope {
 		Ok((
 			OuterEnvelope {
 				session: session_name.clone(),
-				body: CiphertextMessage { counter, ciphertext },
+				body: CiphertextMessage {
+					counter,
+					ciphertext,
+				},
 			},
 			cursor + message_length as usize,
 		))
@@ -434,7 +437,9 @@ impl PacketIntermediary {
 			}
 			PacketGuarantees::UnreliableSequenced => match self.stream {
 				StreamSelector::Any => Packet::unreliable_sequenced(send_to, self.payload, None),
-				StreamSelector::Specific(id) => Packet::unreliable_sequenced(send_to, self.payload, Some(id)),
+				StreamSelector::Specific(id) => {
+					Packet::unreliable_sequenced(send_to, self.payload, Some(id))
+				}
 			},
 			PacketGuarantees::ReliableUnordered => {
 				// Unordered packets have no concept of a "stream"
@@ -442,11 +447,15 @@ impl PacketIntermediary {
 			}
 			PacketGuarantees::ReliableOrdered => match self.stream {
 				StreamSelector::Any => Packet::reliable_ordered(send_to, self.payload, None),
-				StreamSelector::Specific(id) => Packet::reliable_ordered(send_to, self.payload, Some(id)),
+				StreamSelector::Specific(id) => {
+					Packet::reliable_ordered(send_to, self.payload, Some(id))
+				}
 			},
 			PacketGuarantees::ReliableSequenced => match self.stream {
 				StreamSelector::Any => Packet::reliable_sequenced(send_to, self.payload, None),
-				StreamSelector::Specific(id) => Packet::reliable_sequenced(send_to, self.payload, Some(id)),
+				StreamSelector::Specific(id) => {
+					Packet::reliable_sequenced(send_to, self.payload, Some(id))
+				}
 			},
 		}
 	}

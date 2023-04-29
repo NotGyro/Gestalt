@@ -2,6 +2,13 @@ pub mod chunk;
 pub mod fsworldstorage;
 pub mod voxelarray;
 pub mod voxelstorage;
+pub mod tilespace;
+
+use std::ops::Add;
+use std::ops::Div;
+use std::ops::Mul;
+use std::ops::Sub;
+use std::time::Duration;
 
 use uuid::Uuid;
 
@@ -38,4 +45,111 @@ pub struct WorldInfo {
 pub struct World {
 	pub world_id: WorldId,
 	pub world_info: WorldInfo,
+}
+
+/// Length of the fixed time step used for server ticks, and therefore game world logic.
+/// This is 1/target ticks per second - but may not correspond exactly to *actual* ticks per
+/// second if the server is overtaxed.
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
+pub struct TickLength {
+	seconds_per_tick: f32,
+}
+impl TickLength {
+	pub fn from_tps(target_tps: f32) -> Self {
+		if !target_tps.is_normal() {
+			panic!(
+				"Ticks per second must not be zero, infinite, or NaN! \n\
+				{} is an invalid TPS.",
+				target_tps
+			);
+		}
+		Self {
+			seconds_per_tick: { 1.0 / target_tps },
+		}
+	}
+
+	#[inline(always)]
+	pub fn get(&self) -> f32 {
+		self.seconds_per_tick
+	}
+
+	#[inline(always)]
+	pub fn get_duration(&self) -> Duration {
+		Duration::from_secs_f32(self.seconds_per_tick)
+	}
+}
+
+pub const DEFAULT_TPS: f32 = 30.0;
+
+impl Default for TickLength {
+	fn default() -> Self {
+		Self::from_tps(DEFAULT_TPS)
+	}
+}
+
+impl Add<f32> for TickLength {
+	type Output = f32;
+
+	fn add(self, rhs: f32) -> Self::Output {
+		self.get() + rhs
+	}
+}
+impl Add<TickLength> for f32 {
+	type Output = f32;
+
+	fn add(self, rhs: TickLength) -> Self::Output {
+		self + rhs.get()
+	}
+}
+
+impl Sub<f32> for TickLength {
+	type Output = f32;
+
+	fn sub(self, rhs: f32) -> Self::Output {
+		self.get() - rhs
+	}
+}
+impl Sub<TickLength> for f32 {
+	type Output = f32;
+
+	fn sub(self, rhs: TickLength) -> Self::Output {
+		self - rhs.get()
+	}
+}
+
+impl Mul<f32> for TickLength {
+	type Output = f32;
+
+	fn mul(self, rhs: f32) -> Self::Output {
+		self.get() * rhs
+	}
+}
+impl Mul<TickLength> for f32 {
+	type Output = f32;
+
+	fn mul(self, rhs: TickLength) -> Self::Output {
+		self * rhs.get()
+	}
+}
+
+impl Div<f32> for TickLength {
+	type Output = f32;
+
+	fn div(self, rhs: f32) -> Self::Output {
+		self.get() / rhs
+	}
+}
+impl Div<TickLength> for f32 {
+	type Output = f32;
+
+	fn div(self, rhs: TickLength) -> Self::Output {
+		self / rhs.get()
+	}
+}
+
+#[test]
+#[should_panic]
+fn zero_tps_does_panic() {
+	let _value = TickLength::from_tps(0.0);
 }
