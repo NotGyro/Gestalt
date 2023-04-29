@@ -2,21 +2,19 @@ use std::collections::{HashSet, HashMap};
 use std::path::PathBuf;
 
 use glam::{Vec3, Quat, Mat4};
-use image::{Rgba, RgbaImage};
 use wgpu::util::DeviceExt;
-use wgpu::{BindGroupDescriptor, BindGroupLayout, PushConstantRange, ShaderStages, TextureView};
+use wgpu::{PushConstantRange, ShaderStages, TextureView};
 
 use super::array_texture::{ArrayTextureLayout, ArrayTexture, ArrayTextureError};
 use super::{load_test_shader, ModelPush};
 use super::voxel_art::VoxelArtMapper;
 use super::voxel_mesher::{ChunkMesh, MesherState, PackedVertex};
-use crate::common::voxelmath::SidesArray;
 use crate::resource::image::ImageProvider;
 use crate::world::tilespace::{TileSpace, TileSpaceError, world_to_chunk_pos, chunk_to_world_pos};
 //use crate::world::chunk::CHUNK_SIZE;
 //use crate::world::tilespace::{world_to_chunk_pos, TileSpaceError, TileSpace};
 use crate::world::{ChunkPos, TilePos, TileId};
-use crate::world::voxelstorage::{Voxel, VoxelSpace};
+use crate::world::voxelstorage::VoxelSpace;
 
 #[derive(thiserror::Error, Debug)]
 pub enum TerrainRendererError {
@@ -27,7 +25,13 @@ pub enum TerrainRendererError {
     #[error("Could not mesh chunk {0:?}, received error: {1:?}")]
     MeshingError(ChunkPos, String),
     #[error("Could not build tile array texture: {0}")]
-    ArrayTextureError(#[from] ArrayTextureError)
+    ArrayTextureError(#[from] ArrayTextureError),
+    #[error("Invalid array texture layout ID encountered.")]
+    NoTexLayoutForId,
+    #[error("Could not find array texture bound to a chunk mesh.")]
+    NoTexForChunk,
+    #[error("Could not find array texture bound to an array texture ID.")]
+    NoTexForId
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -255,10 +259,14 @@ impl TerrainRenderer {
                 let chunk = voxel_space.borrow_chunk(chunk_position)?;
     
                 //TODO: Handle case where texture array goes over max
-                let mesher_state = MesherState::prepare_to_mesh(chunk, tiles_to_art, self.texture_layouts.get_mut(&texture_binding.texture_id).unwrap())
-                    .map_err(|e| { 
-                        TerrainRendererError::PrepareMeshingError(*chunk_position, format!("{:?}",e))
-                    })?;
+                let mesher_state = MesherState::prepare_to_mesh(chunk, 
+                    tiles_to_art, 
+                    self.texture_layouts
+                        .get_mut(&texture_binding.texture_id)
+                        .ok_or(TerrainRendererError::NoTexLayoutForId)?
+                ).map_err(|e| { 
+                    TerrainRendererError::PrepareMeshingError(*chunk_position, format!("{:?}",e))
+                })?;
 
                 //Make sure not to waste bookkeeping pushing all-air chunks through the pipeline. 
                 if mesher_state.needs_draw() { 
@@ -288,7 +296,9 @@ impl TerrainRenderer {
         // First, handle textures.
         let mut textures_to_build: HashSet<u32> = HashSet::new();
         for (_, binding) in self.texture_for_chunk.iter() {
-            let revision = self.texture_layouts.get_mut(&binding.texture_id).unwrap().get_revision();
+            let revision = self.texture_layouts.get_mut(&binding.texture_id)
+                .ok_or(TerrainRendererError::NoTexLayoutForId)?
+                .get_revision();
             if binding.tile_array_texture_revision != revision { 
                 // Newer-than-expected atlas! Mark to rebuild it.
                 textures_to_build.insert(binding.texture_id);
@@ -296,7 +306,8 @@ impl TerrainRenderer {
         }
         for texture_id in textures_to_build.drain() {
             // Build our tile atlas
-            let tile_array_texture = self.texture_layouts.get(&texture_id).unwrap();
+            let tile_array_texture = self.texture_layouts.get(&texture_id)
+                .ok_or(TerrainRendererError::NoTexLayoutForId)?;
             let mut array_texture = ArrayTexture::new(tile_array_texture.clone(),
                 Some(tile_array_texture.get_max_textures()),
                 &self.texture_bind_group_layout,
@@ -368,9 +379,11 @@ impl TerrainRenderer {
             // This is very cursed and will be unperformant and should be replaced later.
             // Multiple arrays that are in sync, maybe? Arc<ArrayTexture> instead of weird
             // spread-out IDs in hashamps? 
-            let chunk_texture_binding = self.texture_for_chunk.get(chunk_pos).unwrap();
+            let chunk_texture_binding = self.texture_for_chunk.get(chunk_pos)
+                .ok_or(TerrainRendererError::NoTexForChunk)?;
             let id = chunk_texture_binding.texture_id; 
-            let texture_array = self.built_textures.get(&id).unwrap();
+            let texture_array = self.built_textures.get(&id)
+                .ok_or(TerrainRendererError::NoTexForId)?;
             let texture = texture_array.get_handle();
             
             // Allowing scaling, translation, and rotation of worlds will help us later when/if 

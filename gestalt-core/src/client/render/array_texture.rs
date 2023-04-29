@@ -1,12 +1,10 @@
 use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::resource::image::{
-	ImageProvider, InternalImage, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE, RetrieveImageError,
+	ImageProvider, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE, RetrieveImageError,
 };
 use crate::resource::ResourceId;
-use glam::Vec2;
-use image::{GenericImage, ImageError, RgbaImage};
+use image::RgbaImage;
 use log::{error, info, warn};
-use std::collections::HashMap;
 
 use crate::client::render::{generate_missing_texture_image, generate_pending_texture_image};
 

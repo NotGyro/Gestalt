@@ -161,60 +161,37 @@ struct TextureManager {
 	
     next_texture_handle: TextureHandle,
 	
-    missing_texture: InternalImage,
-    pending_texture: InternalImage,
-    error_texture: InternalImage,
+    missing_image: InternalImage,
+    pending_image: InternalImage,
+    error_image: InternalImage,
 }
 
 impl TextureManager {
 	pub fn new() -> Self {
         // Set up engine textures.
-        let missing_texture = generate_missing_texture_image(32, 32);
-        let pending_texture = generate_pending_texture_image(32, 32);
-        let error_texture = generate_error_texture_image(32, 32);
+        let missing_image = generate_missing_texture_image(32, 32);
+        let pending_image = generate_pending_texture_image(32, 32);
+        let error_image = generate_error_texture_image(32, 32);
 
 		Self {
 			next_texture_handle: unsafe {
 				//Actually very safe, because one is not zero, but we'll humor the compiler here.
 				TextureHandle::new_unchecked(1)
 			},
-			missing_texture,
-			pending_texture,
-			error_texture,
+			missing_image,
+			pending_image,
+			error_image,
             id_to_texture: new_fast_hash_map(), 
             loaded_textures: HashMap::with_hasher(nohash::BuildNoHashHasher::default()),
 		}
 		
 	}
-
-    // This will likely change when the engine as a whole is more structured.
-    // Probably it'll be some kind of message-passing situation. 
-    pub fn ingest_image<P>(&mut self,
-		resource_id: &ResourceId,
+	pub fn load_image(image: &InternalImage,
 		sampler_config: &wgpu::SamplerDescriptor,
 		device: &wgpu::Device,
 		queue: &wgpu::Queue,
-		bind_group_layout: &wgpu::BindGroupLayout,
-		loader: &mut P
-	) -> TextureHandle
-            where P: ImageProvider {
-
-        let image = if resource_id == &ID_PENDING_TEXTURE {
-            &self.pending_texture
-        } else if resource_id == &ID_MISSING_TEXTURE {
-            &self.missing_texture
-        }
-        else {
-            match loader.load_image(resource_id) {
-                ResourceStatus::Pending => &self.pending_texture,
-                ResourceStatus::Errored(e) => match e {
-                    crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_texture,
-                    _ => &self.error_texture,
-                },
-                ResourceStatus::Ready(image) => image,
-            }
-        };
-        
+		bind_group_layout: &wgpu::BindGroupLayout
+	) -> LoadedTexture {
         let texture_size = wgpu::Extent3d {
             width: image.dimensions().0,
             height:  image.dimensions().1,
@@ -273,17 +250,46 @@ impl TextureManager {
                 label: Some("diffuse_bind_group"),
             }
         );
-
-        let handle = self.next_texture_handle;
-        self.next_texture_handle = self.next_texture_handle.checked_add(1)
-            .expect("Ran out of texture handle IDs!");
-        let finished_texture = LoadedTexture {
+		LoadedTexture {
             buffer_handle: Box::new(texture_buffer),
             texture_view,
             bind_group,
-        };
+        }
+	}
+    // This will likely change when the engine as a whole is more structured.
+    // Probably it'll be some kind of message-passing situation. 
+    pub fn ingest_image_resource<P>(&mut self,
+		resource_id: &ResourceId,
+		sampler_config: &wgpu::SamplerDescriptor,
+		device: &wgpu::Device,
+		queue: &wgpu::Queue,
+		bind_group_layout: &wgpu::BindGroupLayout,
+		loader: &mut P
+	) -> TextureHandle
+            where P: ImageProvider {
 
-        let previous_texture = self.loaded_textures.insert(handle.get(), finished_texture);
+        let image = if resource_id == &ID_PENDING_TEXTURE {
+            &self.pending_image
+        } else if resource_id == &ID_MISSING_TEXTURE {
+            &self.missing_image
+        }
+        else {
+            match loader.load_image(resource_id) {
+                ResourceStatus::Pending => &self.pending_image,
+                ResourceStatus::Errored(e) => match e {
+                    crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_image,
+                    _ => &self.error_image,
+                },
+                ResourceStatus::Ready(image) => image,
+            }
+        };
+		
+		let loaded_texture = Self::load_image(image, sampler_config, device, queue, bind_group_layout);
+        let handle = self.next_texture_handle;
+        self.next_texture_handle = self.next_texture_handle.checked_add(1)
+            .expect("Ran out of texture handle IDs!");
+
+        let previous_texture = self.loaded_textures.insert(handle.get(), loaded_texture);
         assert!(previous_texture.is_none());
         self.id_to_texture.insert(resource_id.clone(), handle);
         
@@ -354,6 +360,10 @@ pub struct Renderer {
 	depth_texture: (wgpu::Texture, wgpu::TextureView, wgpu::Sampler),
 
 	texture_manager: TextureManager, 
+	
+    missing_texture: LoadedTexture,
+    pending_texture: LoadedTexture,
+    error_texture: LoadedTexture,
 
 	pub terrain_renderer: TerrainRenderer,
 }
@@ -390,6 +400,8 @@ impl Renderer {
 
 		// Final decision on which device gets used.
 		let adapter = match adapter_select {
+			// This path is only possible to reach if the adapter was in the set,
+			// it is okay to use unwrap here.
 			Some(adapt_name) => adapters.remove(&adapt_name).unwrap(),
 			None => instance
 				.request_adapter(&wgpu::RequestAdapterOptions {
@@ -407,7 +419,7 @@ impl Renderer {
 		// wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
 		let mut limits = wgpu::Limits::default(); 
 		limits.max_push_constant_size = std::mem::size_of::<ModelPush>() as u32;
-		let (device, queue) = adapter
+		let (mut device, mut queue) = adapter
 			.request_device(
 				&DeviceDescriptor {
 					label: None,
@@ -518,65 +530,6 @@ impl Renderer {
 			label: Some("camera_bind_group")
 		});
 
-		let render_pipeline_layout =
-			device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-				label: Some("Render Pipeline Layout"),
-				bind_group_layouts: &[
-					&texture_bind_group_layout,
-					&camera_bind_group_layout,
-				],
-				push_constant_ranges: &[PushConstantRange{ 
-					stages: ShaderStages::VERTEX,
-					range: 0..(std::mem::size_of::<ModelPush>() as u32),
-				}],
-			});
-
-		let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-			label: Some("Render Pipeline"),
-			layout: Some(&render_pipeline_layout),
-			vertex: wgpu::VertexState {
-				module: &shader,
-				entry_point: "vs_main",
-				buffers: &[
-					Vertex::desc(),
-				],
-			},
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: render_format.clone(),
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-			primitive: wgpu::PrimitiveState {
-				topology: wgpu::PrimitiveTopology::TriangleList,
-				strip_index_format: None,
-				front_face: wgpu::FrontFace::Ccw,
-				cull_mode: Some(wgpu::Face::Back),
-				polygon_mode: wgpu::PolygonMode::Fill,
-				unclipped_depth: false,
-				conservative: false,
-			},
-			depth_stencil: Some(wgpu::DepthStencilState {
-				format: Self::DEPTH_FORMAT,
-				depth_write_enabled: true,
-				depth_compare: wgpu::CompareFunction::Less,
-				stencil: wgpu::StencilState::default(),
-				bias: wgpu::DepthBiasState::default(),
-			}),
-			multisample: wgpu::MultisampleState {
-				count: 1,
-				mask: !0,
-				alpha_to_coverage_enabled: false,
-			},
-			multiview: None,
-		});
-
 		// For testing
 		let vertex_buffer = device.create_buffer_init(
 			&wgpu::util::BufferInitDescriptor {
@@ -647,11 +600,44 @@ impl Renderer {
 
 		let depth_texture = Self::create_depth_texture(&device, &surface_config, "depth_texture");
 
+		let texture_manager = TextureManager::new();
+
+		let desc = wgpu::SamplerDescriptor {
+			address_mode_u: wgpu::AddressMode::Repeat,
+			address_mode_v: wgpu::AddressMode::Repeat,
+			address_mode_w: wgpu::AddressMode::ClampToEdge,
+			mag_filter: wgpu::FilterMode::Nearest,
+			min_filter: wgpu::FilterMode::Nearest,
+			mipmap_filter: wgpu::FilterMode::Nearest,
+			..Default::default()
+		};
+
+		// Generate our various types of error textures.
+		let error_image = generate_error_texture_image(64, 64); 
+		let error_texture = TextureManager::load_image(&error_image,
+			&desc,
+			&mut device,
+			&mut queue,
+			&texture_bind_group_layout);
+		let missing_image = generate_missing_texture_image(64, 64); 
+		let missing_texture = TextureManager::load_image(&missing_image,
+			&desc,
+			&mut device,
+			&mut queue,
+			&texture_bind_group_layout);
+		let pending_image = generate_missing_texture_image(64, 64); 
+		let pending_texture = TextureManager::load_image(&pending_image,
+			&desc,
+			&mut device,
+			&mut queue,
+			&texture_bind_group_layout);
+
 		let terrain_renderer = TerrainRenderer::new(64,
 			&camera_bind_group_layout, 
 			&device,
 			render_format, 
 			&Self::DEPTH_FORMAT);
+		
 		Ok(Self {
 			aspect_ratio,
 			window_size,
@@ -670,8 +656,11 @@ impl Renderer {
 			camera_matrix_bind_group: camera_bind_group,
 
 			depth_texture,
-			texture_manager: TextureManager::new(),
+			texture_manager,
 			terrain_renderer,
+			error_texture,
+			missing_texture,
+			pending_texture,
 		})
 	}
 	/// Resize the display area
@@ -759,7 +748,10 @@ impl Renderer {
 					Some(handle) => self.texture_manager.get(*handle),
 					None => self.texture_manager.get_by_resource(&drawable.texture),
 				};
-				let texture = texture_maybe.unwrap();
+				let texture = match texture_maybe { 
+					Some(texture) => texture, 
+					None => &self.missing_texture,
+				};
 				render_pass.set_pipeline(&self.render_pipeline);
 
 				/*
@@ -913,7 +905,7 @@ impl Renderer {
 			mipmap_filter: wgpu::FilterMode::Nearest,
 			..Default::default()
 		};
-		self.texture_manager.ingest_image(resource_id, &diffuse_sampler, &self.device, &self.queue, &self.texture_bind_group_layout, texture_loader);
+		self.texture_manager.ingest_image_resource(resource_id, &diffuse_sampler, &self.device, &self.queue, &self.texture_bind_group_layout, texture_loader);
 	}
 }
 

@@ -33,6 +33,7 @@ impl VoxelError for TileSpaceError {
             TileSpaceError::NotYetLoaded(_) => VoxelErrorCategory::NotYetLoaded,
             TileSpaceError::ChunkError(e) => match e {
                 super::voxelarray::VoxelArrayError::OutOfBounds(_) => VoxelErrorCategory::OutOfBounds,
+                super::voxelarray::VoxelArrayError::NoPaletteEntry(_) => VoxelErrorCategory::PaletteIssue,
             },
             TileSpaceError::LoadExistingChunk(_) => VoxelErrorCategory::LoadingIssue,
         }

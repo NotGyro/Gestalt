@@ -278,8 +278,9 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 		self.inner.get_raw_i(i)
 	}
 	#[inline(always)]
-	pub fn get(&self, coord: VoxelPos<u8>) -> &T {
-		&self.palette[*self.get_raw(coord) as usize]
+	pub fn get(&self, coord: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
+		self.palette.get(*self.get_raw(coord) as usize)
+			.ok_or(VoxelArrayError::NoPaletteEntry(coord))
 	}
 	#[inline(always)]
 	pub fn set_raw(&mut self, coord: VoxelPos<u8>, value: u8) {
@@ -366,10 +367,10 @@ impl<T: Voxel> ChunkTilesLarge<T> {
 		self.inner.get_raw(coord)
 	}
 	#[inline(always)]
-	pub fn get(&self, coord: VoxelPos<u8>) -> &T {
+	pub fn get(&self, coord: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
 		self.palette
 			.get(self.inner.get_raw(coord).as_usize())
-			.unwrap()
+			.ok_or(VoxelArrayError::NoPaletteEntry(coord))
 	}
 	#[inline(always)]
 	pub fn get_raw_i(&self, i: usize) -> &AlwaysLeU16 {
@@ -560,8 +561,8 @@ impl<T: Voxel> VoxelStorage<T, u8> for Chunk<T> {
 	fn get(&self, pos: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
 		match &self.tiles {
 			ChunkInner::Uniform(val) => Ok(val),
-			ChunkInner::Small(inner) => Ok(inner.get(pos)),
-			ChunkInner::Large(inner) => Ok(inner.get(pos)),
+			ChunkInner::Small(inner) => inner.get(pos),
+			ChunkInner::Large(inner) => inner.get(pos),
 		}
 	}
 	#[inline]

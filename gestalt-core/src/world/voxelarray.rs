@@ -100,6 +100,9 @@ where
 {
 	#[error("Attempted to access a voxel at position {0}, which is out of bounds on this chunk.")]
 	OutOfBounds(VoxelPos<T>),
+	#[error("ID is present in a voxel array at {0} which does not have a corresponding palette \
+		entry - possible chunk file corruption.")]
+	NoPaletteEntry(VoxelPos<T>),
 }
 
 impl<T> VoxelError for VoxelArrayError<T>
@@ -109,6 +112,7 @@ where
 	fn kind(&self) -> VoxelErrorCategory {
 		match self {
 			VoxelArrayError::OutOfBounds(_) => VoxelErrorCategory::OutOfBounds,
+    		VoxelArrayError::NoPaletteEntry(_) => VoxelErrorCategory::PaletteIssue,
 		}
 	}
 }
@@ -185,35 +189,17 @@ where
 {
 	type Error = VoxelArrayError<P>;
 	fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error> {
-		let size = P::from_usize(self.size);
-		//Bounds-check.
-		if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
-			return Err(Self::Error::OutOfBounds(VoxelPos {
-				x: coord.x,
-				y: coord.y,
-				z: coord.z,
-			}));
-		}
 		//Packed array access
-		let result: Option<&T> = self.data.get(chunk_xyz_to_i(
+		self.data.get(chunk_xyz_to_i(
 			coord.x.as_usize(),
 			coord.y.as_usize(),
 			coord.z.as_usize(),
 			self.size,
-		));
-		Ok(result.unwrap())
+		)).ok_or(VoxelArrayError::OutOfBounds(coord))
 	}
 
 	fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), Self::Error> {
-		let size = P::from_usize(self.size);
-		if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
-			return Err(Self::Error::OutOfBounds(VoxelPos {
-				x: coord.x,
-				y: coord.y,
-				z: coord.z,
-			}));
-		}
-		//packed array access
+		//Packed array access
 		*self
 			.data
 			.get_mut(chunk_xyz_to_i(
@@ -222,7 +208,7 @@ where
 				coord.z.as_usize(),
 				self.size,
 			))
-			.unwrap() = value;
+			.ok_or(VoxelArrayError::OutOfBounds(coord))? = value;
 
 		Ok(())
 	}
@@ -302,23 +288,13 @@ where
 {
 	type Error = VoxelArrayError<P>;
 	fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error> {
-		let size = P::from_usize(SIZE);
-		//Bounds-check.
-		if (coord.x >= size) || (coord.y >= size) || (coord.z >= size) {
-			return Err(Self::Error::OutOfBounds(VoxelPos {
-				x: coord.x,
-				y: coord.y,
-				z: coord.z,
-			}));
-		}
 		//Packed array access
-		let result: Option<&T> = self.data.get(chunk_xyz_to_i(
+		self.data.get(chunk_xyz_to_i(
 			coord.x.as_usize(),
 			coord.y.as_usize(),
 			coord.z.as_usize(),
 			SIZE,
-		));
-		Ok(result.unwrap())
+		)).ok_or(VoxelArrayError::OutOfBounds(coord))
 	}
 
 	fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), Self::Error> {
@@ -330,7 +306,7 @@ where
 				z: coord.z,
 			}));
 		}
-		//packed array access
+		//Packed array access
 		(*self
 			.data
 			.get_mut(chunk_xyz_to_i(
@@ -339,7 +315,7 @@ where
 				coord.z.as_usize(),
 				SIZE,
 			))
-			.unwrap()) = value;
+			.ok_or(VoxelArrayError::OutOfBounds(coord))?) = value;
 
 		Ok(())
 	}

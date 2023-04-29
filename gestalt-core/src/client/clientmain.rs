@@ -157,11 +157,11 @@ pub fn gen_test_chunk(chunk_position: ChunkPos) -> Chunk<TileId> {
 	const GRASS_ID: TileId = 3;
 
 	match chunk_position.y {
-		value if value > 0 => Chunk {
+		value if value > -1 => Chunk {
 			revision: 0,
 			tiles: ChunkInner::Uniform(AIR_ID),
 		},
-		0 => {
+		-1 => {
 			let mut chunk = Chunk::new(STONE_ID);
 			for pos in chunk.get_bounds() {
 				if pos.y == (CHUNK_SIZE as u8 - 1) {
@@ -429,30 +429,19 @@ pub fn run_client(
 
     let mut test_chunk: Chunk<u32> = Chunk::new(air_id);
     for i in test_chunk.get_bounds() {
-        if i.y >= (CHUNK_SIZE as u8) / 2 {
-            let vec = Vec3::new(
-                (i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
-                (i.y as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
-                (i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
-            );
-            if vec.length_squared() <= 6.5f32 * 6.5f32 {
-                test_chunk.set(i, dome_thing_id).unwrap();
-            }
-        } else {
-			if i.y == ( (CHUNK_SIZE as u8) / 2) - 1 { 
-                test_chunk.set(i, grass_id).unwrap();
-			}
-            else if i.y > 5 {
-                test_chunk.set(i, dirt_id).unwrap();
-            } else {
-                test_chunk.set(i, stone_id).unwrap();
-            }
-        }
+		let vec = Vec3::new(
+			(i.x as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+			(i.y) as f32 + 0.5,
+			(i.z as i32 - (CHUNK_SIZE as i32) / 2) as f32 + 0.5,
+		);
+		if vec.length_squared() <= 6.5f32 * 6.5f32 {
+			test_chunk.set(i, dome_thing_id).unwrap();
+		}
     }
 
 	let mut world_space = TileSpace::new();
 	world_space.ingest_loaded_chunk(vpos!(0,0,0), test_chunk).unwrap();
-	let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-1,-1) };
+	let test_world_range: VoxelRange<i32> = VoxelRange{upper: vpos!(2,2,2), lower: vpos!(-1,-2,-1) };
 	for chunk_pos in test_world_range {
 		renderer.terrain_renderer.notify_chunk_remesh_needed(&chunk_pos);
 		if chunk_pos != vpos!(0,0,0) { 
@@ -483,19 +472,20 @@ pub fn run_client(
 	let tick_length = TickLength::from_tps(30.0);
 
 	let test_entity = entity_world.spawn((
-		EntityPos::new(EntityVec3::new(0.0, 0.0, 0.0)), 
+		EntityPos::new(EntityVec3::new(0.0, 1.0, 0.0)), 
 		EntityRot::new_from_euler(DegreeAngle(90.0), DegreeAngle(0.0), DegreeAngle(0.0)),
 		BillboardDrawable::new(testlet_image_id.clone(), BillboardStyle::Cylindrical)
 	));
 	let test_entity_2 = entity_world.spawn((
-		EntityPos::new(EntityVec3::new(5.0, 0.0, 0.0)),
+		EntityPos::new(EntityVec3::new(5.0, 4.0, 0.0)),
 		EntityVelocity::new(Vec3::new(0.0, 0.0, 0.5)),
 		LastPos::new(EntityVec3::new(5.0, 0.0, 0.0)),
 		EntityRot::new_from_euler(DegreeAngle(30.0), DegreeAngle(0.0), DegreeAngle(0.0)),
 		BillboardDrawable::new(testlet_2_image_id.clone(), BillboardStyle::Cylindrical)
 	));
+	let test_entity_2_y = 2.0;
 	let test_entity_3 = entity_world.spawn((
-		EntityPos::new(EntityVec3::new(0.0, 0.0, -10.0)),
+		EntityPos::new(EntityVec3::new(0.0, 4.0, -10.0)),
 		EntityScale::new(EntityVec3::new(8.0, 8.0, 8.0)),
 		BillboardDrawable::new(testlet_3_image_id.clone(), BillboardStyle::Cylindrical)
 	));
@@ -772,7 +762,7 @@ pub fn run_client(
 				match entity_world.query_one_mut::<&mut EntityPos>(test_entity_2) {
 					Ok(position) => {
 						let mut inner = position.get();
-						inner.y = game_start_time.elapsed().as_secs_f32().sin(); 
+						inner.y = test_entity_2_y + game_start_time.elapsed().as_secs_f32().sin(); 
 						position.set(inner);
 					},
 					Err(_) => todo!(),
@@ -785,9 +775,12 @@ pub fn run_client(
 					let was_remesh_needed = renderer.terrain_renderer.process_remesh(&world_space, &tiles_to_art).unwrap();
 					if was_remesh_needed {
 						let meshing_elapsed_millis = meshing_start.elapsed().as_micros() as f32 / 1000.0;
-						info!("Took {} milliseconds to do meshing", meshing_elapsed_millis);
+						info!("Took {meshing_elapsed_millis} milliseconds to do meshing");
 
+						let start_upload_gpu = Instant::now();
 						renderer.process_terrain_mesh_uploads(&mut image_loader).unwrap();
+						let elapsed_millis = start_upload_gpu.elapsed().as_micros() as f32 / 1000.0;
+						info!("Took {elapsed_millis} milliseconds to do push_to_gpu step");
 
 						last_remesh_time = Instant::now();
 					}

@@ -88,10 +88,11 @@ pub fn netmsg(attr: TokenStream, item: TokenStream) -> TokenStream {
 		}
 	}
 
-	impl Into<crate::net::netmsg::PacketIntermediary> for &#message {
-		fn into(self) -> crate::net::netmsg::PacketIntermediary {
+	impl TryInto<crate::net::netmsg::PacketIntermediary> for &#message {
+		type Error = Box<dyn std::error::Error>;
+		fn try_into(self) -> Result<crate::net::netmsg::PacketIntermediary, Box<dyn std::error::Error>> {
 			use crate::net::netmsg::NetMsg;
-			self.construct_packet().unwrap()
+			self.construct_packet()
 		}
 	}
 		})

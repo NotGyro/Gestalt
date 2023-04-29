@@ -15,6 +15,12 @@ pub const ID_PENDING_TEXTURE: ResourceId = ResourceId {
 	hash: [1; 32],
 };
 
+pub const ID_ERROR_TEXTURE: ResourceId = ResourceId {
+	version: 0,
+	length: 0,
+	hash: [2; 32],
+};
+
 #[derive(thiserror::Error, Debug)]
 pub enum RetrieveImageError {
 	#[error("While trying to retrieve a image, a network error was encountered: {0:?}")]
