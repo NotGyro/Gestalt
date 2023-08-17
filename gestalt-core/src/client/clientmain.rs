@@ -44,7 +44,7 @@ use crate::{
 	//client::render::CubeArt,
 	resource::{
 		image::{ImageProvider, InternalImage, RetrieveImageError},
-		update_global_resource_metadata, ResourceId, ResourceInfo, ResourceStatus,
+		update_global_resource_metadata, ResourceId, ResourceInfo, ResourcePoll,
 	},
 	world::{
 		chunk::{Chunk, CHUNK_SIZE},
@@ -72,11 +72,11 @@ impl ImageProvider for DevImageLoader {
 	fn load_image(
 		&mut self,
 		image: &ResourceId,
-	) -> ResourceStatus<&InternalImage, RetrieveImageError> {
+	) -> ResourcePoll<&InternalImage, RetrieveImageError> {
 		match self.images.get(image) {
-			Some(v) => ResourceStatus::Ready(v),
+			Some(v) => ResourcePoll::Ready(v),
 			None => {
-				ResourceStatus::Errored(RetrieveImageError::DoesNotExist(resource_debug!(image)))
+				ResourcePoll::Errored(RetrieveImageError::DoesNotExist(resource_debug!(image)))
 			}
 		}
 	}

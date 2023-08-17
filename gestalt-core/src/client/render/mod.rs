@@ -19,7 +19,7 @@ use crate::client::client_config::{ClientConfig, DisplaySize};
 use crate::common::{Color, FastHashMap, new_fast_hash_map};
 use crate::entity::{EcsWorld, EntityPos, EntityScale, EntityVelocity};
 use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
-use crate::resource::{ResourceId, ResourceStatus};
+use crate::resource::{ResourceId, ResourcePoll};
 
 use self::drawable::BillboardDrawable;
 use self::terrain_renderer::{TerrainRendererError, TerrainRenderer};
@@ -275,12 +275,12 @@ impl TextureManager {
         }
         else {
             match loader.load_image(resource_id) {
-                ResourceStatus::Pending => &self.pending_image,
-                ResourceStatus::Errored(e) => match e {
+                ResourcePoll::Pending => &self.pending_image,
+                ResourcePoll::Errored(e) => match e {
                     crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_image,
                     _ => &self.error_image,
                 },
-                ResourceStatus::Ready(image) => image,
+                ResourcePoll::Ready(image) => image,
             }
         };
 		

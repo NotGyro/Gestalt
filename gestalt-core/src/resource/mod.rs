@@ -1,3 +1,4 @@
+use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::common::identity::NodeIdentity;
 
 use base64::Engine;
@@ -251,37 +252,69 @@ impl PartialEq for ResourceInfo {
 	}
 }
 
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum ResourceLoadError {
+	#[error("While trying to retrieve a image, a network error was encountered: {0:?}")]
+	Network(Box<dyn std::error::Error + Unpin + Send>),
+	#[error("Error loading resource from disk: {0:?}")]
+	Disk(#[from] std::io::Error),
+	#[error("Tried to access a resource {0:?}, which cannot be found.")]
+	NotFound(ResourceId),
+	#[error("Resource stored in invalid state! (No error present and status is Ready, no bytes)")]
+	InvalidState
+}
+
 impl Eq for ResourceInfo {}
 
-pub enum ResourceStatus<T, E>
+pub enum ResourceStatus { 
+	NotInitiated,
+	Pending,
+	Errored(ResourceLoadError),
+	Ready
+}
+
+pub enum ResourcePoll<T>
 where
 	T: Send + Sync + Clone,
-	E: std::error::Error + Debug,
 {
+	NotInitiated,
 	Pending,
 	///Encountered a problem while trying to load this resource.
-	Errored(E),
+	Errored(ResourceLoadError),
 	Ready(T),
 }
 
-impl<T, E> From<Result<T, E>> for ResourceStatus<T, E>
+impl<T> From<&ResourcePoll<T>> for ResourceStatus
 where
 	T: Send + Sync + Clone,
-	E: std::error::Error,
 {
-	fn from(r: Result<T, E>) -> Self {
+	fn from(r: &ResourcePoll<T>) -> Self {
+		match r {
+			ResourcePoll::NotInitiated => ResourceStatus::NotInitiated,
+			ResourcePoll::Pending => ResourceStatus::Pending,
+			ResourcePoll::Errored(e) => ResourceStatus::Errored(e),
+			ResourcePoll::Ready(_) => ResourceStatus::Ready,
+		}
+	}
+}
+
+impl<T> From<Result<T, ResourceLoadError>> for ResourcePoll<T>
+where
+	T: Send + Sync + Clone,
+{
+	fn from(r: Result<T, ResourceLoadError>) -> Self {
 		match r {
 			Ok(v) => Self::Ready(v),
 			Err(e) => Self::Errored(e),
 		}
 	}
 }
-impl<T, E> From<Option<Result<T, E>>> for ResourceStatus<T, E>
+impl<T> From<Option<Result<T, ResourceLoadError>>> for ResourcePoll<T>
 where
 	T: Send + Sync + Clone,
-	E: std::error::Error,
 {
-	fn from(r: Option<Result<T, E>>) -> Self {
+	fn from(r: Option<Result<T, ResourceLoadError>>) -> Self {
 		match r {
 			Some(Ok(v)) => Self::Ready(v),
 			Some(Err(e)) => Self::Errored(e),
@@ -290,17 +323,47 @@ where
 	}
 }
 
-impl<T, E> From<ResourceStatus<T, E>> for Option<Result<T, E>>
+impl<T> From<ResourcePoll<T>> for Option<Result<T, ResourceLoadError>>
 where
 	T: Send + Sync + Clone,
-	E: std::error::Error,
 {
-	fn from(r: ResourceStatus<T, E>) -> Self {
+	fn from(r: ResourcePoll<T>) -> Self {
 		match r {
-			ResourceStatus::Ready(v) => Some(Ok(v)),
-			ResourceStatus::Errored(e) => Some(Err(e)),
-			ResourceStatus::Pending => None,
+			ResourcePoll::Ready(v) => Some(Ok(v)),
+			ResourcePoll::Errored(e) => Some(Err(e)),
+			ResourcePoll::Pending => None,
+			ResourcePoll::NotInitiated => None,
 		}
+	}
+}
+
+fn resource_id_to_bucket(resource: &ResourceId) -> usize { 
+	#[cfg(target_endian = "little")] { 
+		resource.hash[31] as usize
+	}
+
+	#[cfg(target_endian = "big")] {
+		resource.hash[0] as usize
+	}
+}
+
+// Intended to be used as a const (global)
+struct ResourceStorage<T: Send + Sized> {
+	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<ResourceId, Arc<T>>>; 256]>,
+}
+
+impl<T> ResourceStorage<T> where T: Send + Sized { 
+	pub const fn new() -> Self { 
+		Self { 
+			buckets: once_cell::sync::Lazy::new(|| { 
+				std::array::from_fn(|| {
+					tokio::sync::RwLock::new(new_fast_hash_map())
+				})
+			})
+		}
+	}
+	pub async fn get(&self, resource: &ResourceId) -> Arc<T> { 
+		self.buckets[resource_id_to_bucket(resource)].
 	}
 }
 

@@ -224,9 +224,9 @@ pub fn build_tile_atlas<TextureSource: ImageProvider>(
 	for (tile_index, resource_tile) in layout.tiles.iter().enumerate() {
 		//The rare mutable binding to an immutable reference shows its face again! Cool.
 		let mut texture_to_use = match texture_source.load_image(resource_tile) {
-			crate::resource::ResourceStatus::Pending => &pending_texture,
-			crate::resource::ResourceStatus::Errored(_) => &missing_texture,
-			crate::resource::ResourceStatus::Ready(image) => image,
+			crate::resource::ResourcePoll::Pending => &pending_texture,
+			crate::resource::ResourcePoll::Errored(_) => &missing_texture,
+			crate::resource::ResourcePoll::Ready(image) => image,
 		};
 
 		if resource_tile == &ID_PENDING_TEXTURE {
