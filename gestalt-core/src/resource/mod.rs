@@ -1,21 +1,22 @@
 use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::common::identity::NodeIdentity;
+use crate::message::{MpscChannel, MpscSender, SenderChannel, MessageSender};
 
 use base64::Engine;
 use ed25519::Signature;
-use lazy_static::lazy_static;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use std::collections::HashMap;
+use tokio::sync::oneshot;
 use std::fmt::Debug;
-use std::{cmp::PartialEq, hash::Hash, sync::Arc};
+use std::sync::Arc;
+use std::{cmp::PartialEq, hash::Hash};
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
 //use string_cache::DefaultAtom as Atom;
 
 pub mod image;
+pub mod retrieval;
 //pub mod module; //Beware of redundant names.
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
@@ -252,69 +253,78 @@ impl PartialEq for ResourceInfo {
 	}
 }
 
-
+/// Any resource-loading error that pertains to fetching the raw resource bytes in the first place,
+/// and not to parsing or processing any specific file type. 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum ResourceLoadError {
-	#[error("While trying to retrieve a image, a network error was encountered: {0:?}")]
-	Network(Box<dyn std::error::Error + Unpin + Send>),
-	#[error("Error loading resource from disk: {0:?}")]
-	Disk(#[from] std::io::Error),
-	#[error("Tried to access a resource {0:?}, which cannot be found.")]
+pub enum GeneralResourceLoadError {
+	#[error("While trying to retrieve resource {0:?}, a network error was encountered: {1}")]
+	Network(ResourceId, String),
+	#[error("Error loading resource {0:?} from disk: {1}")]
+	Disk(ResourceId, String),
+	#[error("Tried to access a resource {0:?}, which cannot be found (is not indexed) locally or on any connected server.")]
 	NotFound(ResourceId),
-	#[error("Resource stored in invalid state! (No error present and status is Ready, no bytes)")]
-	InvalidState
+	#[error("Timed out while attempting to fetch resource {0:?}.")]
+	Timeout(ResourceId),
+	#[error("Message-passing error while trying to load resource {0:?}: {1}.")]
+	ChannelError(ResourceId, String),
 }
 
 impl Eq for ResourceInfo {}
 
-pub enum ResourceStatus { 
+#[derive(Debug)]
+pub enum ResourceStatus<E> where E: Debug { 
 	NotInitiated,
 	Pending,
-	Errored(ResourceLoadError),
+	Errored(E),
 	Ready
 }
 
-pub enum ResourcePoll<T>
-where
-	T: Send + Sync + Clone,
-{
+impl<E> Clone for ResourceStatus<E> where E : Clone + Debug {
+    fn clone(&self) -> Self {
+        match self {
+            Self::NotInitiated => Self::NotInitiated,
+            Self::Pending => Self::Pending,
+            Self::Errored(e) => Self::Errored(e.clone()),
+            Self::Ready => Self::Ready
+        }
+    }
+}
+
+pub enum ResourcePoll<T, E> where T: Send, E: Debug {
 	NotInitiated,
 	Pending,
 	///Encountered a problem while trying to load this resource.
-	Errored(ResourceLoadError),
-	Ready(T),
+	Errored(E),
+	Ready(T)
 }
 
-impl<T> From<&ResourcePoll<T>> for ResourceStatus
+impl<T, E> From<&ResourcePoll<T, E>> for ResourceStatus<E>
 where
-	T: Send + Sync + Clone,
+	T: Send,
 {
-	fn from(r: &ResourcePoll<T>) -> Self {
+	fn from(r: &ResourcePoll<T, E>) -> Self {
 		match r {
 			ResourcePoll::NotInitiated => ResourceStatus::NotInitiated,
 			ResourcePoll::Pending => ResourceStatus::Pending,
 			ResourcePoll::Errored(e) => ResourceStatus::Errored(e),
-			ResourcePoll::Ready(_) => ResourceStatus::Ready,
+			ResourcePoll::Ready(_) => ResourceStatus::Ready
 		}
 	}
 }
 
-impl<T> From<Result<T, ResourceLoadError>> for ResourcePoll<T>
-where
-	T: Send + Sync + Clone,
-{
-	fn from(r: Result<T, ResourceLoadError>) -> Self {
+impl<T, E> From<Result<T, E>> for ResourcePoll<T, E> where T: Send, E: Debug {
+	fn from(r: Result<T, E>) -> Self {
 		match r {
 			Ok(v) => Self::Ready(v),
 			Err(e) => Self::Errored(e),
 		}
 	}
 }
-impl<T> From<Option<Result<T, ResourceLoadError>>> for ResourcePoll<T>
+impl<T, E> From<Option<Result<T, E>>> for ResourcePoll<T, E>
 where
-	T: Send + Sync + Clone,
+	T: Send, E: Debug
 {
-	fn from(r: Option<Result<T, ResourceLoadError>>) -> Self {
+	fn from(r: Option<Result<T, E>>) -> Self {
 		match r {
 			Some(Ok(v)) => Self::Ready(v),
 			Some(Err(e)) => Self::Errored(e),
@@ -323,18 +333,32 @@ where
 	}
 }
 
-impl<T> From<ResourcePoll<T>> for Option<Result<T, ResourceLoadError>>
+impl<T, E> From<ResourcePoll<T, E>> for Option<Result<T, E>>
 where
-	T: Send + Sync + Clone,
+	T: Send, E: Debug,
 {
-	fn from(r: ResourcePoll<T>) -> Self {
+	fn from(r: ResourcePoll<T, E>) -> Self {
 		match r {
 			ResourcePoll::Ready(v) => Some(Ok(v)),
 			ResourcePoll::Errored(e) => Some(Err(e)),
 			ResourcePoll::Pending => None,
-			ResourcePoll::NotInitiated => None,
+			ResourcePoll::NotInitiated => None
 		}
 	}
+}
+
+/// Synchronous-world interface to the resource-loading system.
+pub trait ResourceProvider<T: Send + Sync> {
+	type Error: std::error::Error + Debug;
+
+	/// Get the resource if it's already loaded. Otherwise, instuct the system to load it.
+	fn load(&mut self, id: &ResourceId, origin: &NodeIdentity) 
+		-> ResourcePoll<T, Self::Error>;
+	
+	/// Send a request to fetch a resource and save it to disk, without keeping it in memory.
+	/// Useful when you know you will need a resource *later* but there is no need to use it
+	/// right away.
+	fn preload(&mut self, id: &ResourceId, origin: &NodeIdentity);
 }
 
 fn resource_id_to_bucket(resource: &ResourceId) -> usize { 
@@ -346,49 +370,167 @@ fn resource_id_to_bucket(resource: &ResourceId) -> usize {
 		resource.hash[0] as usize
 	}
 }
-
 // Intended to be used as a const (global)
 struct ResourceStorage<T: Send + Sized> {
-	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<ResourceId, Arc<T>>>; 256]>,
+	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<ResourceId, T>>; 256]>,
 }
 
-impl<T> ResourceStorage<T> where T: Send + Sized { 
+impl<T> ResourceStorage<T> where T: Send + Sized + Clone { 
 	pub const fn new() -> Self { 
 		Self { 
 			buckets: once_cell::sync::Lazy::new(|| { 
-				std::array::from_fn(|| {
+				std::array::from_fn(| _i | {
 					tokio::sync::RwLock::new(new_fast_hash_map())
 				})
 			})
 		}
 	}
-	pub async fn get(&self, resource: &ResourceId) -> Arc<T> { 
-		self.buckets[resource_id_to_bucket(resource)].
+	pub async fn get(&self, id: &ResourceId) -> Option<T> { 
+		let guard = self.buckets[resource_id_to_bucket(id)].read().await;
+		guard.get(id).cloned()
+	}
+	pub fn get_blocking(&self, id: &ResourceId) -> Option<T> { 
+		let guard = self.buckets[resource_id_to_bucket(id)].blocking_read();
+		guard.get(id).cloned()
+	}
+	pub async fn insert(&self, id: ResourceId, value: T) -> Option<T> { 
+		let mut guard = self.buckets[resource_id_to_bucket(&id)].write().await;
+		guard.insert(id, value)
+	}
+	pub fn insert_blocking(&self, id: ResourceId, value: T) -> Option<T> { 
+		let mut guard = self.buckets[resource_id_to_bucket(&id)].blocking_write();
+		guard.insert(id, value)
+	}
+	pub async fn remove(&self, id: &ResourceId) -> Option<T> { 
+		let mut guard = self.buckets[resource_id_to_bucket(&id)].write().await;
+		guard.remove(&id)
+	}
+	pub fn remove_blocking(&self, id: &ResourceId) -> Option<T> { 
+		let mut guard = self.buckets[resource_id_to_bucket(&id)].blocking_write();
+		guard.remove(&id)
+	}
+	pub async fn update(&self, id: &ResourceId, new: T) {
+		let mut guard = self.buckets[resource_id_to_bucket(&id)].write().await;
+		let reference = guard.get_mut(id);
+		match reference { 
+			Some(inner) => *inner = new,
+			None => _ = guard.insert(id.clone(), new),
+		}
+	}
+	pub fn update_blocking(&self, id: &ResourceId, new: T) {
+		let mut guard = self.buckets[resource_id_to_bucket(&id)].blocking_write();
+		let reference = guard.get_mut(id);
+		match reference { 
+			Some(inner) => *inner = new,
+			None => _ = guard.insert(id.clone(), new),
+		}
 	}
 }
 
-/*pub trait ResourceProvider<T: Send + Sync + Clone> {
-	type Error: std::error::Error + Debug;
-	///Checks the status of the resource, returning a reference to it if it's ready.
-	fn lookup<'a>(&'a self, id: &ResourceId) -> ResourceStatus<&'a T, Self::Error>;
-	///Get the resource if it's already loaded, or load it.
-	fn load<'a>(&'a mut self, id: &ResourceId) -> ResourceStatus<&'a T, Self::Error>;
-	///Get the resource if it's already loaded, or load it, aborting with an error if it take longer than a duration of `timeout`.
-	fn load_timeout<'a>(&'a mut self, id: &ResourceId, ) -> ResourceStatus<&'a T, Self::Error>;
-}*/
+/// Used to keep track of resources we are currently in the process of retrieving, as well as 
+/// resources which cannot be loaded due to some sort of error. This is to prevent attempts to 
+/// initialize retrieval for a resource we are already working to retrieve.
+static RESOURCE_INBOX: ResourceStorage<ResourceStatus<GeneralResourceLoadError>> = ResourceStorage::new();
 
-lazy_static! {
-	pub static ref RESOURCE_METADATA: Arc<Mutex<HashMap<ResourceId, ResourceInfo>>> =
-		Arc::new(Mutex::new(HashMap::default()));
+#[derive(Debug)]
+pub(in self) struct ResourceFetch {
+	pub resource_id: ResourceId,
+	pub expected_source: NodeIdentity,
+	/// If this field contains a Some value, this is treated as a resource to be loaded
+	/// into memory, and then onto disk after that.
+	/// If this field contains a None value, this is treated as a pre-load, and the resource
+	/// is only saved to disk and not retained in memory.  
+	pub return_channel: Option<oneshot::Sender<
+		Result<Arc<Vec<u8>>, GeneralResourceLoadError>
+	>>,
 }
 
+global_channel!(MpscChannel, RESOURCE_FETCH, ResourceFetch, 65536);
+
+pub struct RawResourceFetcher {
+	request_sender: MpscSender<ResourceFetch>,
+	pending_resources: FastHashMap<ResourceId, 
+		oneshot::Receiver< 
+			Result<Arc<Vec<u8>>, GeneralResourceLoadError>
+		>
+	>,
+
+}
+impl RawResourceFetcher { 
+	pub fn new() -> Self { 
+		RawResourceFetcher {
+			request_sender: RESOURCE_FETCH.sender_subscribe(),
+			pending_resources: new_fast_hash_map(),
+		}
+	}
+}
+
+impl ResourceProvider<Vec<u8>> for RawResourceFetcher {
+    type Error = GeneralResourceLoadError;
+
+    fn load(&mut self, id: &ResourceId, origin: &NodeIdentity)
+		    -> ResourcePoll<Arc<Vec<u8>>, Self::Error> {
+		//First, check to see if we've initiated a retrieval already.
+		match self.pending_resources.get(id) {
+			Some(rec) => {
+				// Poll our message-passing channel.
+				match rec.try_recv() {
+					Ok(value) => {
+						// Request has completed, with either a successful load or an error.
+						self.pending_resources.remove(&id); 
+						value
+					},
+					Err(e) => match e {
+						// Still waiting
+						oneshot::error::TryRecvError::Empty => return ResourcePoll::Pending,
+						// Channel died, report an error.
+						oneshot::error::TryRecvError::Closed => {
+							self.pending_resources.remove(&id);
+							ResourcePoll::Errored(
+								GeneralResourceLoadError::ChannelError(
+									id.clone(), 
+									String::from("Resource retrieval channel closed, 
+										sender dropped before receiver.")
+								)
+							)
+						},
+					},
+				}
+			},
+			None => {
+				// If no request had been initiated on this resource provider yet, 
+				// start a new one!
+				let (sender, receiver) = oneshot::channel();
+				self.request_sender.send_one(ResourceFetch {
+					resource_id: id.clone(),
+					expected_source: origin.clone(),
+					return_channel: Some(sender),
+				});
+				
+				self.pending_resources.insert(id.clone(), receiver);
+
+				ResourcePoll::Pending
+			},
+		}
+    }
+
+    fn preload(&mut self, id: &ResourceId, origin: &NodeIdentity) {
+        self.request_sender.send_one(ResourceFetch {
+			resource_id: id.clone(),
+			expected_source: origin.clone(),
+			return_channel: None,
+		});
+    }
+}
+
+static RESOURCE_METADATA: ResourceStorage<ResourceInfo> = ResourceStorage::new();
+
 pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceInfo) {
-	RESOURCE_METADATA.lock().insert(*id, info);
+	RESOURCE_METADATA.update_blocking(id, info);
 }
 
 pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceInfo> {
-	let guard = RESOURCE_METADATA.lock();
-	guard.get(id).cloned()
+	RESOURCE_METADATA.get_blocking(id)
 }
 
 #[derive(Clone)]

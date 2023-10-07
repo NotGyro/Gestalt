@@ -2,7 +2,7 @@ use std::error::Error;
 
 use image::{ImageError, RgbaImage};
 
-use super::{ResourceId, ResourceInfo, ResourcePoll};
+use super::{ResourceId, ResourceInfo};
 
 pub const ID_MISSING_TEXTURE: ResourceId = ResourceId {
 	version: 0,
@@ -34,12 +34,3 @@ pub enum RetrieveImageError {
 }
 
 pub type InternalImage = RgbaImage;
-
-/// Anything from which we can load images.
-pub trait ImageProvider {
-	fn load_image(
-		&mut self,
-		image: &ResourceId,
-	) -> ResourcePoll<&InternalImage>;
-	fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceInfo>;
-}

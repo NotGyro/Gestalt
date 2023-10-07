@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use futures::{Future, TryFutureExt};
 use log::{error, info, trace};
-use tokio::sync::broadcast;
-use tokio::sync::broadcast::error::TryRecvError;
+use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast::error::TryRecvError as BroadcastTryRecvError;
+use tokio::sync::mpsc::error::TryRecvError as MpscTryRecvError;
 
 use crate::world::WorldId;
 
@@ -23,8 +24,8 @@ pub enum RecvError {
 	Other(String),
 }
 
-pub trait Message: Clone + Send + Debug {}
-impl<T> Message for T where T: Clone + Send + Debug {}
+pub trait Message: Send + Debug {}
+impl<T> Message for T where T: Send + Debug {}
 
 pub type BroadcastSender<T> = tokio::sync::broadcast::Sender<Vec<T>>;
 type UnderlyingBroadcastReceiver<T> = tokio::sync::broadcast::Receiver<Vec<T>>;
@@ -37,6 +38,8 @@ pub enum SendError {
 	MissingDomain(String),
 	#[error("Unable to encode a message so it could be sent on channel: {0}.")]
 	Encode(String),
+	#[error("Failed to send on a channel, because that channel's buffer is full of messages.")]
+	Full,
 	#[error("Implementation-specific channel error: {0}.")]
 	Other(String),
 }
@@ -44,6 +47,14 @@ pub enum SendError {
 impl<T> From<tokio::sync::broadcast::error::SendError<T>> for SendError {
 	fn from(_value: tokio::sync::broadcast::error::SendError<T>) -> Self {
 		SendError::NoReceivers
+	}
+}
+impl<T> From<tokio::sync::mpsc::error::TrySendError<T>> for SendError {
+	fn from(value: tokio::sync::mpsc::error::TrySendError<T>) -> Self {
+		match value {
+			mpsc::error::TrySendError::Full(_val) => SendError::Full,
+			mpsc::error::TrySendError::Closed(_val) => SendError::NoReceivers,
+		}
 	}
 }
 
@@ -64,14 +75,14 @@ where
 
 pub struct BroadcastReceiver<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	pub(in crate::common::message) inner: UnderlyingBroadcastReceiver<T>,
 }
 
 impl<T> BroadcastReceiver<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	pub fn new(to_wrap: tokio::sync::broadcast::Receiver<Vec<T>>) -> Self {
 		BroadcastReceiver { inner: to_wrap }
@@ -112,7 +123,7 @@ where
 
 impl<T> MessageReceiver<T> for BroadcastReceiver<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	/// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
 	fn recv_poll(&mut self) -> Result<Vec<T>, RecvError> {
@@ -128,9 +139,9 @@ where
 		}
 		if let Err(err) = next_value {
 			match err {
-				TryRecvError::Empty => {}
-				TryRecvError::Closed => return Err(RecvError::NoSenders),
-				TryRecvError::Lagged(count) => return Err(RecvError::Lagged(count)),
+				BroadcastTryRecvError::Empty => {}
+				BroadcastTryRecvError::Closed => return Err(RecvError::NoSenders),
+				BroadcastTryRecvError::Lagged(count) => return Err(RecvError::Lagged(count)),
 			}
 		}
 		Ok(results)
@@ -139,7 +150,7 @@ where
 
 impl<T> MessageReceiverAsync<T> for BroadcastReceiver<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	/// Receives new messages batch, waiting for a message if the channel is currently empty.
 	fn recv_wait(&mut self) -> impl Future<Output = Result<Vec<T>, RecvError>> + '_ {
@@ -317,7 +328,7 @@ where
 }
 impl<T> BroadcastChannel<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	/// Construct a new channel.
 	/// The argument is the channel's capacity - how long of a backlog can this channel hold?
@@ -363,7 +374,7 @@ where
 
 impl<T> SenderChannel<T> for BroadcastChannel<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	type Sender = BroadcastSender<T>;
 	fn sender_subscribe(&self) -> BroadcastSender<T> {
@@ -373,7 +384,7 @@ where
 
 impl<T> ReceiverChannel<T> for BroadcastChannel<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	type Receiver = BroadcastReceiver<T>;
 	fn receiver_subscribe(&self) -> BroadcastReceiver<T> {
@@ -393,7 +404,7 @@ where
 impl<T, R> MessageSender<T> for BroadcastChannel<R>
 where
 	T: Into<R> + Message,
-	R: Message,
+	R: Message + Clone,
 {
 	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
 	where
@@ -412,10 +423,205 @@ where
 
 impl<T> ChannelInit for BroadcastChannel<T>
 where
-	T: Message,
+	T: Message + Clone,
 {
 	fn new(capacity: usize) -> Self {
 		BroadcastChannel::new(capacity)
+	}
+}
+
+pub type MpscSender<T> = tokio::sync::mpsc::Sender<Vec<T>>;
+type UnderlyingMpscReceiver<T> = mpsc::Receiver<Vec<T>>;
+
+pub struct MpscReceiver<T>
+where
+	T: Message,
+{
+	pub(in crate::common::message) inner: UnderlyingMpscReceiver<T>,
+}
+
+impl<T> MpscReceiver<T>
+where
+	T: Message,
+{
+	pub fn new(to_wrap: tokio::sync::mpsc::Receiver<Vec<T>>) -> Self {
+		MpscReceiver { inner: to_wrap }
+	}
+
+	async fn recv_wait_inner(&mut self) -> Result<Vec<T>, RecvError> {
+		let mut resl = Vec::new();
+		while resl.is_empty() {
+			// Keep trying until we get an actual message.
+			let resl_maybe = self
+				.inner
+				.recv()
+				.await;
+			resl = match resl_maybe {
+				Some(v) => v, 
+				None => return Err(RecvError::NoSenders),
+			};
+		}
+		// Check to see if there's anything else also waiting for us, but do not block for it.
+		let mut maybe_more = self.recv_poll()?;
+		resl.append(&mut maybe_more);
+		Ok(resl)
+	}
+}
+
+impl<T> MessageReceiver<T> for MpscReceiver<T>
+where
+	T: Message,
+{
+	/// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
+	fn recv_poll(&mut self) -> Result<Vec<T>, RecvError> {
+		let mut results: Vec<T> = Vec::new();
+		let mut next_value = self.inner.try_recv();
+		while let Ok(mut val) = next_value {
+			if results.is_empty() {
+				results = val;
+			} else {
+				results.append(&mut val);
+			}
+			next_value = self.inner.try_recv();
+		}
+		if let Err(err) = next_value {
+			match err {
+				MpscTryRecvError::Empty => {}
+				MpscTryRecvError::Disconnected => return Err(RecvError::NoSenders),
+			}
+		}
+		Ok(results)
+	}
+}
+
+impl<T> MessageReceiverAsync<T> for MpscReceiver<T>
+where
+	T: Message,
+{
+	/// Receives new messages batch, waiting for a message if the channel is currently empty.
+	fn recv_wait(&mut self) -> impl Future<Output = Result<Vec<T>, RecvError>> + '_ {
+		self.recv_wait_inner()
+	}
+}
+
+
+impl<T> MessageSender<T> for MpscSender<T>
+where
+	T: Message,
+{
+	fn would_block(&self) -> bool {
+		false
+	}
+
+	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
+	where
+		V: IntoIterator<Item = T>,
+	{
+		self.try_send(messages.into_iter().collect())
+			.map(|_| ())
+			.map_err(|e| e.into())
+	}
+}
+
+pub struct MpscChannel<T>
+where
+	T: Message,
+{
+	// Does not need a mutex because you can clone it without mut.
+	sender: MpscSender<T>,
+
+	/// This will be taken once and only once.
+	retained_receiver: Arc<ChannelMutex<Option<UnderlyingMpscReceiver<T>>>>,
+}
+impl<T> MpscChannel<T>
+where
+	T: Message,
+{
+	/// Construct a new channel.
+	/// The argument is the channel's capacity - how long of a backlog can this channel hold?
+	pub fn new(capacity: usize) -> Self {
+		let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+		MpscChannel {
+			sender,
+			retained_receiver: Arc::new(ChannelMutex::new(Some(receiver))),
+		}
+	}
+
+	/// Attempt to take the single consumer in this multi-producer single-consumer message channel.
+	pub fn take_receiver(&self) -> Option<MpscReceiver<T>> { 
+		let inner_receiver = self.retained_receiver.lock(); 
+		inner_receiver.map(|r| MpscReceiver::new(r))
+	} 
+}
+
+// Implementing Clone in the Arc<T> sense here, so Clone is just creating another reference to the same
+// underlying synchronized structure.
+impl<T> Clone for MpscChannel<T>
+where
+	T: Message,
+{
+	fn clone(&self) -> Self {
+		Self {
+			sender: self.sender.clone(),
+			retained_receiver: self.retained_receiver.clone(),
+		}
+	}
+}
+
+impl<T> ReceiverCount for MpscChannel<T>
+where
+	T: Message,
+{
+	fn receiver_count(&self) -> usize {
+		let lock = self.retained_receiver.lock();
+		let has_retained = lock.is_some();
+		drop(lock);
+
+		if has_retained || self.sender.is_closed() {
+			0
+		} else {
+			1
+		}
+	}
+}
+
+impl<T> SenderChannel<T> for MpscChannel<T>
+where
+	T: Message,
+{
+	type Sender = MpscSender<T>;
+	fn sender_subscribe(&self) -> MpscSender<T> {
+		self.sender.clone()
+	}
+}
+
+//Note that sending directly on a channel rather than subscribing a sender will always be slower than getting a sender for bulk operations.
+impl<T, R> MessageSender<T> for MpscChannel<R>
+where
+	T: Into<R> + Message,
+	R: Message,
+{
+	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
+	where
+		V: IntoIterator<Item = T>,
+	{
+		self.sender
+			.try_send(messages.into_iter().map(|val| val.into()).collect())
+			.map_err(|e| e.into())
+			.map(|_val| ())
+	}
+
+	fn would_block(&self) -> bool {
+		false
+	}
+}
+
+impl<T> ChannelInit for MpscChannel<T>
+where
+	T: Message,
+{
+	fn new(capacity: usize) -> Self {
+		MpscChannel::new(capacity)
 	}
 }
 
@@ -511,7 +717,7 @@ where
 
 impl<T, D, C> DomainMessageSender<T, D> for DomainMultiChannel<T, D, C>
 where
-	T: Message,
+	T: Message + Clone,
 	D: ChannelDomain,
 	C: SenderChannel<T> + ChannelInit + MessageSender<T>,
 {
@@ -573,7 +779,7 @@ impl<T, D, R, C> MessageSender<T> for DomainMultiChannel<R, D, C>
 where
 	T: Into<R> + MessageWithDomain<D>,
 	D: ChannelDomain,
-	R: MessageWithDomain<D>,
+	R: MessageWithDomain<D> + Clone,
 	C: SenderChannel<R> + ChannelInit + MessageSender<R>,
 {
 	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
@@ -623,7 +829,7 @@ macro_rules! global_domain_channel {
 
 // A few *very universal* channels can exist in this file.
 global_channel!(BroadcastChannel, START_QUIT, (), 1);
-global_channel!(BroadcastChannel, READY_FOR_QUIT, (), 1024);
+global_channel!(BroadcastChannel, READY_FOR_QUIT, (), 4096);
 
 #[derive(Clone)]
 #[warn(unused_must_use)]
@@ -842,6 +1048,6 @@ pub mod test {
 
 		let output = receiver.recv_poll().unwrap();
 		assert_eq!(output.len(), NUM_MESSAGES);
-		assert_eq!(receiver.inner.try_recv(), Err(TryRecvError::Empty));
+		assert_eq!(receiver.inner.try_recv(), Err(BroadcastTryRecvError::Empty));
 	}
 }

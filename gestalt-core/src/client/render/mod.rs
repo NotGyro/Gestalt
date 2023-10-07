@@ -703,7 +703,7 @@ impl Renderer {
 			});
 		{
 			// In the future everything inside this block will instead exist in 
-			// separate render pass structs. 
+			// separate render pass structs.
 			let (clear_r, clear_g, clear_b) = clear_color.to_normalized_float();
 			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 				label: Some("Render Pass"),
