@@ -23,9 +23,9 @@ pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
 /// Content-addressed identifier for a Gestalt resource.
 /// String representation starts with a version number for the
-/// ResourceId structure, then a `.` delimeter, then the size (number of bytes)
+/// ResourceId structure, then a `_` delimeter, then the size (number of bytes)
 /// in the resource, then the 32-byte Sha256-512 hash encoded in base-64.
-/// For example, `1.2048.J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA` would be a version 1 ResourceID.
+/// For example, `1_2048_J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA` would be a version 1 ResourceID.
 #[repr(C)]
 #[derive(Copy, Clone, PartialOrd, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResourceId {
@@ -58,7 +58,7 @@ pub enum ParseResourceIdError {
 	#[error("could not parse {0} as a resource ID, did not recognize ResourceId format {1}. Most likely this was sent by a newer version of the Gestalt Engine")]
 	UnrecognizedVersion(String, u8),
 }
-const SEP: char = '.';
+const SEP: char = '_';
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum VerifyResourceError {
