@@ -8,7 +8,6 @@ use crate::{net::SelfNetworkRole, common::identity::IdentityKeyPair, message::{M
 
 use super::{RESOURCE_FETCH, ResourceFetch};
 
-
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ResourceSysError {
 	#[error("Could not launch resource system - \

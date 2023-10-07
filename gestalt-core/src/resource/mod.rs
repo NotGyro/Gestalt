@@ -361,7 +361,7 @@ pub trait ResourceProvider<T: Send + Sync> {
 	fn preload(&mut self, id: &ResourceId, origin: &NodeIdentity);
 }
 
-fn resource_id_to_bucket(resource: &ResourceId) -> usize { 
+pub(in self) fn resource_id_to_prefix(resource: &ResourceId) -> usize { 
 	#[cfg(target_endian = "little")] { 
 		resource.hash[31] as usize
 	}
@@ -386,31 +386,31 @@ impl<T> ResourceStorage<T> where T: Send + Sized + Clone {
 		}
 	}
 	pub async fn get(&self, id: &ResourceId) -> Option<T> { 
-		let guard = self.buckets[resource_id_to_bucket(id)].read().await;
+		let guard = self.buckets[resource_id_to_prefix(id)].read().await;
 		guard.get(id).cloned()
 	}
 	pub fn get_blocking(&self, id: &ResourceId) -> Option<T> { 
-		let guard = self.buckets[resource_id_to_bucket(id)].blocking_read();
+		let guard = self.buckets[resource_id_to_prefix(id)].blocking_read();
 		guard.get(id).cloned()
 	}
 	pub async fn insert(&self, id: ResourceId, value: T) -> Option<T> { 
-		let mut guard = self.buckets[resource_id_to_bucket(&id)].write().await;
+		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		guard.insert(id, value)
 	}
 	pub fn insert_blocking(&self, id: ResourceId, value: T) -> Option<T> { 
-		let mut guard = self.buckets[resource_id_to_bucket(&id)].blocking_write();
+		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		guard.insert(id, value)
 	}
 	pub async fn remove(&self, id: &ResourceId) -> Option<T> { 
-		let mut guard = self.buckets[resource_id_to_bucket(&id)].write().await;
+		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		guard.remove(&id)
 	}
 	pub fn remove_blocking(&self, id: &ResourceId) -> Option<T> { 
-		let mut guard = self.buckets[resource_id_to_bucket(&id)].blocking_write();
+		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		guard.remove(&id)
 	}
 	pub async fn update(&self, id: &ResourceId, new: T) {
-		let mut guard = self.buckets[resource_id_to_bucket(&id)].write().await;
+		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		let reference = guard.get_mut(id);
 		match reference { 
 			Some(inner) => *inner = new,
@@ -418,7 +418,7 @@ impl<T> ResourceStorage<T> where T: Send + Sized + Clone {
 		}
 	}
 	pub fn update_blocking(&self, id: &ResourceId, new: T) {
-		let mut guard = self.buckets[resource_id_to_bucket(&id)].blocking_write();
+		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		let reference = guard.get_mut(id);
 		match reference { 
 			Some(inner) => *inner = new,
@@ -506,7 +506,7 @@ impl ResourceProvider<Vec<u8>> for RawResourceFetcher {
 					expected_source: origin.clone(),
 					return_channel: Some(sender),
 				});
-				
+
 				self.pending_resources.insert(id.clone(), receiver);
 
 				ResourcePoll::Pending
