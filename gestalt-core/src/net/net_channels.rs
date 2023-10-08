@@ -31,13 +31,7 @@ where
 		}
 	}
 	pub fn send_untyped(&self, packet: PacketIntermediary) -> Result<(), SendError> {
-		self.inner.send_one(packet)
-	}
-	pub fn send_multi_untyped<V>(&self, packets: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = PacketIntermediary>,
-	{
-		self.inner.send_multi(packets)
+		self.inner.send(packet)
 	}
 
 	pub fn resubscribe<U>(&self) -> NetSendChannel<U>
@@ -53,31 +47,16 @@ where
 	T: Message + Into<R>,
 	R: Message + Send + NetMsg,
 {
-	fn send_multi<V>(&self, messages: V) -> Result<(), crate::message::SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
-		let mut packets: Vec<PacketIntermediary> = Vec::default();
-
-		for message in messages {
-			let packet = message.into().construct_packet().map_err(|e| {
-				SendError::Encode(format!(
-					"Could not convert packet of type {} into a packet intermediary: {:?}",
-					R::net_msg_name(),
-					e
-				))
-			})?;
-			packets.push(packet);
-		}
-
-		self.send_multi_untyped(packets)
-			.map_err(|_e| SendError::NoReceivers)?;
-
-		Ok(())
-	}
-
-	fn would_block(&self) -> bool {
-		self.inner.would_block()
+	fn send(&self, message: T) -> Result<(), crate::message::SendError> {
+		let packet = message.into().construct_packet().map_err(|e| {
+			SendError::Encode(format!(
+				"Could not convert packet of type {} into a packet intermediary: {:?}",
+				R::net_msg_name(),
+				e
+			))
+		})?;
+		self.send_untyped(packet)
+			.map_err(|_e| SendError::NoReceivers)
 	}
 }
 
@@ -87,7 +66,7 @@ pub mod net_send_channel {
 	use crate::{
 		common::identity::NodeIdentity,
 		message::{
-			BroadcastChannel, BroadcastReceiver, DomainMessageSender, DomainSubscribeErr, SendError,
+			BroadcastChannel, BroadcastReceiver, DomainSubscribeErr, SendError,
 		},
 	};
 

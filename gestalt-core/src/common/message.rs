@@ -27,8 +27,8 @@ pub enum RecvError {
 pub trait Message: Send + Debug {}
 impl<T> Message for T where T: Send + Debug {}
 
-pub type BroadcastSender<T> = tokio::sync::broadcast::Sender<Vec<T>>;
-type UnderlyingBroadcastReceiver<T> = tokio::sync::broadcast::Receiver<Vec<T>>;
+pub type BroadcastSender<T> = tokio::sync::broadcast::Sender<T>;
+type UnderlyingBroadcastReceiver<T> = tokio::sync::broadcast::Receiver<T>;
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum SendError {
@@ -63,14 +63,13 @@ where
 	T: Message,
 {
 	/// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
-	fn recv_poll(&mut self) -> Result<Vec<T>, RecvError>;
+	fn recv_poll(&mut self) -> Result<Option<T>, RecvError>;
 }
 pub trait MessageReceiverAsync<T>: MessageReceiver<T>
 where
 	T: Message,
 {
-	//type RecvFuture: Future<Output=Result<Vec<T>, RecvError>>;
-	fn recv_wait(&mut self) -> impl Future<Output = Result<Vec<T>, RecvError>> + '_;
+	fn recv_wait(&mut self) -> impl Future<Output = Result<T, RecvError>> + '_;
 }
 
 pub struct BroadcastReceiver<T>
@@ -84,7 +83,7 @@ impl<T> BroadcastReceiver<T>
 where
 	T: Message + Clone,
 {
-	pub fn new(to_wrap: tokio::sync::broadcast::Receiver<Vec<T>>) -> Self {
+	pub fn new(to_wrap: tokio::sync::broadcast::Receiver<T>) -> Self {
 		BroadcastReceiver { inner: to_wrap }
 	}
 
@@ -94,7 +93,7 @@ where
 		}
 	}
 
-	async fn recv_wait_inner(&mut self) -> Result<Vec<T>, RecvError> {
+	async fn recv_wait_inner(&mut self) -> Result<T, RecvError> {
 		let mut resl = self
 			.inner
 			.recv()
@@ -103,20 +102,6 @@ where
 				broadcast::error::RecvError::Lagged(count) => RecvError::Lagged(count),
 			})
 			.await?;
-		while resl.is_empty() {
-			// Keep trying until we get an actual thing.
-			resl = self
-				.inner
-				.recv()
-				.map_err(|e| match e {
-					broadcast::error::RecvError::Closed => RecvError::NoSenders,
-					broadcast::error::RecvError::Lagged(count) => RecvError::Lagged(count),
-				})
-				.await?;
-		}
-		// Check to see if there's anything else also waiting for us, but do not block for it.
-		let mut maybe_more = self.recv_poll()?;
-		resl.append(&mut maybe_more);
 		Ok(resl)
 	}
 }
@@ -126,25 +111,15 @@ where
 	T: Message + Clone,
 {
 	/// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
-	fn recv_poll(&mut self) -> Result<Vec<T>, RecvError> {
-		let mut results: Vec<T> = Vec::new();
-		let mut next_value = self.inner.try_recv();
-		while let Ok(mut val) = next_value {
-			if results.is_empty() {
-				results = val;
-			} else {
-				results.append(&mut val);
-			}
-			next_value = self.inner.try_recv();
-		}
-		if let Err(err) = next_value {
-			match err {
-				BroadcastTryRecvError::Empty => {}
-				BroadcastTryRecvError::Closed => return Err(RecvError::NoSenders),
-				BroadcastTryRecvError::Lagged(count) => return Err(RecvError::Lagged(count)),
+	fn recv_poll(&mut self) -> Result<Option<T>, RecvError> {
+		match self.inner.try_recv() {
+			Ok(val) => val,
+			Err(err) => match err {
+				BroadcastTryRecvError::Empty => Ok(None),
+				BroadcastTryRecvError::Closed => Err(RecvError::NoSenders),
+				BroadcastTryRecvError::Lagged(count) => Err(RecvError::Lagged(count)),
 			}
 		}
-		Ok(results)
 	}
 }
 
@@ -190,19 +165,8 @@ pub trait MessageSender<T>
 where
 	T: Message,
 {
-	/// Returns true if this sender would (most likely because the channel is full)
-	/// block on  on an attempt to send.
-	fn would_block(&self) -> bool;
-
 	/// Send a batch of messages. If the underlying
-	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>;
-
-	/// Send a single message.
-	fn send_one(&self, message: T) -> Result<(), SendError> {
-		self.send_multi(vec![message])
-	}
+	fn send(&self, message: T) -> Result<(), SendError>;
 }
 
 pub trait DomainMessageSender<T, D>
@@ -210,46 +174,22 @@ where
 	T: Message,
 	D: ChannelDomain,
 {
-	/// Send a batch of messages to one domain
-	fn send_multi_to<V>(&self, messages: V, domain: &D) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>;
-
 	/// Send one message to one domain
-	fn send_one_to(&self, message: T, domain: &D) -> Result<(), SendError> {
-		self.send_multi_to(vec![message], domain)
-	}
+	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError>;
 
 	/// Send one message to every domain
-	fn send_one_to_all(&self, message: T) -> Result<(), SendError>;
-
-	/// Send a batch of messages to every domain
-	fn send_multi_to_all<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>;
+	fn send_to_all(&self, message: T) -> Result<(), SendError>;
 
 	/// Send one message to every domain, excluding the domain 'exclude'
-	fn send_one_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError>;
-
-	/// Send a batch of messages to every domain, excluding the domain 'exclude'
-	fn send_multi_to_all_except<V>(&self, messages: V, exclude: &D) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>;
+	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError>;
 }
 
 impl<T> MessageSender<T> for BroadcastSender<T>
 where
 	T: Message,
 {
-	fn would_block(&self) -> bool {
-		false
-	}
-
-	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
-		self.send(messages.into_iter().collect())
+	fn send(&self, message: T) -> Result<(), SendError> {
+		self.send(message)
 			.map(|_| ())
 			.map_err(|e| e.into())
 	}
@@ -406,18 +346,11 @@ where
 	T: Into<R> + Message,
 	R: Message + Clone,
 {
-	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
+	fn send(&self, message: R) -> Result<(), SendError> {
 		self.sender
-			.send(messages.into_iter().map(|val| val.into()).collect())
+			.send(message.into())
 			.map_err(|_e| SendError::NoReceivers)
 			.map(|_val| ())
-	}
-
-	fn would_block(&self) -> bool {
-		false
 	}
 }
 
@@ -430,8 +363,8 @@ where
 	}
 }
 
-pub type MpscSender<T> = tokio::sync::mpsc::Sender<Vec<T>>;
-type UnderlyingMpscReceiver<T> = mpsc::Receiver<Vec<T>>;
+pub type MpscSender<T> = tokio::sync::mpsc::Sender<T>;
+type UnderlyingMpscReceiver<T> = mpsc::Receiver<T>;
 
 pub struct MpscReceiver<T>
 where
@@ -444,27 +377,16 @@ impl<T> MpscReceiver<T>
 where
 	T: Message,
 {
-	pub fn new(to_wrap: tokio::sync::mpsc::Receiver<Vec<T>>) -> Self {
+	pub fn new(to_wrap: tokio::sync::mpsc::Receiver<T>) -> Self {
 		MpscReceiver { inner: to_wrap }
 	}
 
-	async fn recv_wait_inner(&mut self) -> Result<Vec<T>, RecvError> {
-		let mut resl = Vec::new();
-		while resl.is_empty() {
-			// Keep trying until we get an actual message.
-			let resl_maybe = self
-				.inner
-				.recv()
-				.await;
-			resl = match resl_maybe {
-				Some(v) => v, 
-				None => return Err(RecvError::NoSenders),
-			};
-		}
-		// Check to see if there's anything else also waiting for us, but do not block for it.
-		let mut maybe_more = self.recv_poll()?;
-		resl.append(&mut maybe_more);
-		Ok(resl)
+	async fn recv_wait_inner(&mut self) -> Result<T, RecvError> {
+		self.inner.recv()
+			.map_err(|e| {
+				RecvError::NoSenders
+			})
+			.await?
 	}
 }
 
@@ -473,24 +395,14 @@ where
 	T: Message,
 {
 	/// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
-	fn recv_poll(&mut self) -> Result<Vec<T>, RecvError> {
-		let mut results: Vec<T> = Vec::new();
-		let mut next_value = self.inner.try_recv();
-		while let Ok(mut val) = next_value {
-			if results.is_empty() {
-				results = val;
-			} else {
-				results.append(&mut val);
-			}
-			next_value = self.inner.try_recv();
+	fn recv_poll(&mut self) -> Result<Option<T>, RecvError> {
+		match self.inner.try_recv() {
+			Ok(val) => Ok(Some(val)),
+			Err(e) => match e {
+				MpscTryRecvError::Empty => Ok(None),
+				MpscTryRecvError::Disconnected => Err(RecvError::NoSenders),
+			},
 		}
-		if let Err(err) = next_value {
-			match err {
-				MpscTryRecvError::Empty => {}
-				MpscTryRecvError::Disconnected => return Err(RecvError::NoSenders),
-			}
-		}
-		Ok(results)
 	}
 }
 
@@ -509,15 +421,8 @@ impl<T> MessageSender<T> for MpscSender<T>
 where
 	T: Message,
 {
-	fn would_block(&self) -> bool {
-		false
-	}
-
-	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
-		self.try_send(messages.into_iter().collect())
+	fn send(&self, message: T) -> Result<(), SendError> {
+		self.try_send(message)
 			.map(|_| ())
 			.map_err(|e| e.into())
 	}
@@ -601,18 +506,11 @@ where
 	T: Into<R> + Message,
 	R: Message,
 {
-	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
+	fn send<V>(&self, message: T) -> Result<(), SendError> {
 		self.sender
-			.try_send(messages.into_iter().map(|val| val.into()).collect())
+			.try_send(message.into())
 			.map_err(|e| e.into())
 			.map(|_val| ())
-	}
-
-	fn would_block(&self) -> bool {
-		false
 	}
 }
 
@@ -721,7 +619,7 @@ where
 	D: ChannelDomain,
 	C: SenderChannel<T> + ChannelInit + MessageSender<T>,
 {
-	fn send_multi_to<V>(&self, messages: V, domain: &D) -> Result<(), SendError>
+	fn send_to<V>(&self, messages: V, domain: &D) -> Result<(), SendError>
 	where
 		V: IntoIterator<Item = T>,
 	{
@@ -734,41 +632,17 @@ where
 		}
 	}
 
-	fn send_one_to_all(&self, message: T) -> Result<(), SendError> {
+	fn send_to_all(&self, message: T) -> Result<(), SendError> {
 		for chan in self.channels.lock().values() {
 			chan.send_one(message.clone())?;
 		}
 		Ok(())
 	}
 
-	fn send_multi_to_all<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
-		let message_buf: Vec<T> = messages.into_iter().collect();
-		for chan in self.channels.lock().values() {
-			chan.send_multi(message_buf.clone())?;
-		}
-		Ok(())
-	}
-
-	fn send_one_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError> {
+	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError> {
 		for (domain, chan) in self.channels.lock().iter() {
 			if domain != exclude {
 				chan.send_one(message.clone())?;
-			}
-		}
-		Ok(())
-	}
-
-	fn send_multi_to_all_except<V>(&self, messages: V, exclude: &D) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
-		let message_buf: Vec<T> = messages.into_iter().collect();
-		for (domain, chan) in self.channels.lock().iter() {
-			if domain != exclude {
-				chan.send_multi(message_buf.clone())?;
 			}
 		}
 		Ok(())
@@ -782,21 +656,11 @@ where
 	R: MessageWithDomain<D> + Clone,
 	C: SenderChannel<R> + ChannelInit + MessageSender<R>,
 {
-	fn send_multi<V>(&self, messages: V) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
-	{
-		for message in messages {
-			let message = message.into();
-			let domain = message.get_domain().clone();
-			self.send_one_to(message, &domain)
-				.map_err(|_e| SendError::NoReceivers)?;
-		}
-		Ok(())
-	}
-
-	fn would_block(&self) -> bool {
-		false
+	fn send(&self, message: T) -> Result<(), SendError> {
+		let message = message.into();
+		let domain = message.get_domain().clone();
+		self.send_to(message, &domain)
+			.map_err(|_e| SendError::NoReceivers)
 	}
 }
 

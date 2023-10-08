@@ -43,7 +43,7 @@ use crate::{
 use crate::{
 	//client::render::CubeArt,
 	resource::{
-		image::{ImageProvider, InternalImage, RetrieveImageError},
+		image::{InternalImage},
 		update_global_resource_metadata, ResourceId, ResourceInfo, ResourcePoll,
 	},
 	world::{

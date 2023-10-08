@@ -5,11 +5,17 @@
 use std::{sync::Arc, path::PathBuf};
 
 use log::{info, trace, error};
-use tokio::{sync::oneshot, io::AsyncReadExt};
+use tokio::{io::AsyncReadExt};
 
-use crate::{net::SelfNetworkRole, common::{identity::{IdentityKeyPair, NodeIdentity}, directories::GestaltDirectories}, message::{MpscReceiver, QuitReceiver, MessageReceiverAsync}};
+use crate::{
+    net::SelfNetworkRole, 
+    common::{identity::{IdentityKeyPair, NodeIdentity}, directories::GestaltDirectories},
+    message::{MpscReceiver, QuitReceiver, MessageReceiverAsync, MpscSender}
+};
 
-use super::{RESOURCE_FETCH, ResourceFetch, resource_id_to_prefix, ResourceId, GeneralResourceLoadError};
+use super::{RESOURCE_FETCH, ResourceFetch, resource_id_to_prefix, ResourceId, ResourceLoadError, ResourceFetchResponse};
+
+static LOCK_SUFFIX: &'static str = ".lock";
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ResourceSysError {
@@ -29,7 +35,7 @@ pub async fn launch_resource_system(role: SelfNetworkRole, self_identity: Identi
     Ok(())
 }
 
-fn path_for_resource(id: ResourceId, origin_identity: NodeIdentity, self_identity: NodeIdentity,
+fn path_for_resource(id: &ResourceId, origin_identity: &NodeIdentity, self_identity: &NodeIdentity,
         directories: Arc<GestaltDirectories>) -> PathBuf {
     let parent_dir: PathBuf = {
         if &origin_identity == &self_identity {
@@ -43,42 +49,54 @@ fn path_for_resource(id: ResourceId, origin_identity: NodeIdentity, self_identit
     path
 }
 
-type ReturnChannel = oneshot::Sender<Result<Arc<Vec<u8>>, GeneralResourceLoadError>>;
-
-async fn load_from_file(id: ResourceId, origin_identity: NodeIdentity, self_identity: NodeIdentity,
-        directories: Arc<GestaltDirectories>, path: PathBuf, channel: Option<ReturnChannel>) { 
-    let file = match tokio::fs::OpenOptions::new().read(true).open(path).await {
-        Ok(file) => {
-            if let Some(chan) = channel { 
-                let mut buffer = Vec::new();
-                if let Err(e) = file.read_to_end(&mut buffer).await {
-                    error!("Error when attempting to read file {0} into memory: {1:?}", path, e);
-                    chan.send(
-                        Result::Err(
-                            GeneralResourceLoadError::Disk(id.clone(), format!("{0:?}", e))
-                        )
-                    );
+async fn load_from_file(resources: Vec<ResourceId>, expected_source: NodeIdentity,
+        self_identity: NodeIdentity, directories: Arc<GestaltDirectories>, 
+        channel: Option<MpscSender<ResourceFetchResponse>>) {
+    
+    let mut not_on_disk = Vec::new();
+    for resource in resources {
+        let path = path_for_resource(&resource, 
+            &expected_source, &self_identity.public, 
+            directories.clone());
+        match tokio::fs::OpenOptions::new().read(true).open(path).await {
+            Ok(file) => {
+                // Is this a non-preload?
+                if let Some(chan) = channel { 
+                    let mut buffer = Vec::new();
+                    if let Err(e) = file.read_to_end(&mut buffer).await {
+                        error!("Error when attempting to read file {0} into memory: {1:?}", path, e);
+                        chan.send(
+                            Result::Err(
+                                ResourceLoadError::Disk(resource.clone(), format!("{0:?}", e))
+                            )
+                        );
+                    }
+                    else {
+                        chan.send(Result::Ok(Arc::new(buffer)));
+                    }
                 }
                 else {
-                    chan.send(Result::Ok(Arc::new(buffer)));
+                    trace!("Attempted to pre-load resource {0:?} which \
+                        is already present on disk - ignoring.", &resource);
                 }
-            }
-            else {
-                trace!("Attempted to pre-load resource {0:?} which \
-                    is already present on disk - ignoring.", &id);
-            }
-        },
-        Err(e) => {
-            match e.kind() {
-                std::io::ErrorKind::NotFound => {
-                    // TODO! Network retrieval goes here.
-                    todo!("File retrieval over the network is not yet implemented.")
-                },
-                _ => error!("Failed to load file {0:?} at location {1} due to error {2:?}.", 
-                        &id, &path, e),
-            }
-        },
-    };
+            },
+            Err(e) => {
+                match e.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        not_on_disk.push(resource.clone());
+                    },
+                    _ => error!("Failed to load file {0:?} at location {1} due to error {2:?}.", 
+                            &resource, &path, e),
+                }
+            },
+        }
+        // TODO! Network retrieval goes here.
+        if !not_on_disk.is_empty() {
+            todo!("File retrieval over the network is not yet implemented, cannot retrieve: {:?}",
+                &not_on_disk);
+        }
+    }
+
     
 }
 
@@ -89,12 +107,20 @@ async fn resource_system_main(role: SelfNetworkRole, self_identity: IdentityKeyP
     let mut quit_reciever = QuitReceiver::new();
     loop { 
         tokio::select! {
-            resource_fetch_cmd = resource_fetch_receiver.recv_wait() => { 
-
-                let path = path_for_resource(resource_fetch_cmd.resource_id.clone(), 
-                    resource_fetch_cmd.expected_source.clone(), self_identity.public.clone(), 
-                    directories.clone());
-                
+            resource_fetch_maybe = resource_fetch_receiver.recv_wait() => { 
+                let resource_fetch_cmds = resource_fetch_maybe.unwrap();
+                for resource_fetch_cmd in resource_fetch_cmds {
+                    tokio::spawn(async move {
+                        // Network retrieval is invoked in a failure case of an attempt to load from
+                        // a file, when the file is not found. So, network handling will not be inside
+                        // this function, but invoked inside load_from_file().
+                        // Hopefully there will be a performance benefit from not having to touch
+                        // the file twice.
+                        load_from_file(resource_fetch_cmd.resources,
+                            resource_fetch_cmd.expected_source, self_identity.public.clone(), 
+                            directories.clone(), resource_fetch_cmd.return_channel).await
+                    });
+                }
             }
             quit_ready_indicator = quit_reciever.wait_for_quit() => {
                 info!("Shutting down resource loading system.");

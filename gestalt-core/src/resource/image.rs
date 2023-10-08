@@ -1,8 +1,6 @@
-use std::error::Error;
-
 use image::{ImageError, RgbaImage};
 
-use super::{ResourceId, ResourceInfo};
+use super::{ResourceId, ResourceLoadError};
 
 pub const ID_MISSING_TEXTURE: ResourceId = ResourceId {
 	version: 0,
@@ -22,11 +20,9 @@ pub const ID_ERROR_TEXTURE: ResourceId = ResourceId {
 };
 
 #[derive(thiserror::Error, Debug)]
-pub enum RetrieveImageError {
-	#[error("While trying to retrieve a image, a network error was encountered: {0:?}")]
-	Network(Box<dyn Error>),
-	#[error("Error loading image from disk: {0:?}")]
-	Disk(#[from] std::io::Error),
+pub enum LoadImageError {
+	#[error("Error while retrieving an image: {0:?}")]
+	Retrieval(#[from] ResourceLoadError),
 	#[error("Error while decoding or transcoding an image: {0:?}")]
 	EncodeDecodeError(#[from] ImageError),
 	#[error("Tried to access a image named {0}, which does not appear to exist.")]
@@ -34,3 +30,4 @@ pub enum RetrieveImageError {
 }
 
 pub type InternalImage = RgbaImage;
+

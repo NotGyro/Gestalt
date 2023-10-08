@@ -1,12 +1,14 @@
 use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::common::identity::NodeIdentity;
-use crate::message::{MpscChannel, MpscSender, SenderChannel, MessageSender};
+use crate::message::{
+	MpscChannel, 
+	MpscSender,
+};
 
 use base64::Engine;
 use ed25519::Signature;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
-use tokio::sync::oneshot;
 use std::fmt::Debug;
 use std::sync::Arc;
 use std::{cmp::PartialEq, hash::Hash};
@@ -256,7 +258,7 @@ impl PartialEq for ResourceInfo {
 /// Any resource-loading error that pertains to fetching the raw resource bytes in the first place,
 /// and not to parsing or processing any specific file type. 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum GeneralResourceLoadError {
+pub enum ResourceLoadError {
 	#[error("While trying to retrieve resource {0:?}, a network error was encountered: {1}")]
 	Network(ResourceId, String),
 	#[error("Error loading resource {0:?} from disk: {1}")]
@@ -347,18 +349,9 @@ where
 	}
 }
 
-/// Synchronous-world interface to the resource-loading system.
-pub trait ResourceProvider<T: Send + Sync> {
-	type Error: std::error::Error + Debug;
-
-	/// Get the resource if it's already loaded. Otherwise, instuct the system to load it.
-	fn load(&mut self, id: &ResourceId, origin: &NodeIdentity) 
-		-> ResourcePoll<T, Self::Error>;
-	
-	/// Send a request to fetch a resource and save it to disk, without keeping it in memory.
-	/// Useful when you know you will need a resource *later* but there is no need to use it
-	/// right away.
-	fn preload(&mut self, id: &ResourceId, origin: &NodeIdentity);
+pub struct ResourceLoadResult<T: Send + Sync, E: std::error::Error + Debug> {
+	pub id: ResourceId, 
+	pub result: ResourcePoll<T, E>,
 }
 
 pub(in self) fn resource_id_to_prefix(resource: &ResourceId) -> usize { 
@@ -427,99 +420,30 @@ impl<T> ResourceStorage<T> where T: Send + Sized + Clone {
 	}
 }
 
-/// Used to keep track of resources we are currently in the process of retrieving, as well as 
-/// resources which cannot be loaded due to some sort of error. This is to prevent attempts to 
-/// initialize retrieval for a resource we are already working to retrieve.
-static RESOURCE_INBOX: ResourceStorage<ResourceStatus<GeneralResourceLoadError>> = ResourceStorage::new();
-
 #[derive(Debug)]
 pub(in self) struct ResourceFetch {
-	pub resource_id: ResourceId,
+	pub resources: Vec<ResourceId>,
 	pub expected_source: NodeIdentity,
 	/// If this field contains a Some value, this is treated as a resource to be loaded
 	/// into memory, and then onto disk after that.
 	/// If this field contains a None value, this is treated as a pre-load, and the resource
-	/// is only saved to disk and not retained in memory.  
-	pub return_channel: Option<oneshot::Sender<
-		Result<Arc<Vec<u8>>, GeneralResourceLoadError>
-	>>,
+	/// is only saved to disk and not retained in memory.
+	pub return_channel: Option<MpscSender<ResourceFetchResponse>>,
+}
+
+pub(in self) struct ResourceFetchResponse { 
+	pub id: ResourceId,
+	pub data: Result<Arc<Vec<u8>>, ResourceLoadError>,
 }
 
 global_channel!(MpscChannel, RESOURCE_FETCH, ResourceFetch, 65536);
 
-pub struct RawResourceFetcher {
-	request_sender: MpscSender<ResourceFetch>,
-	pending_resources: FastHashMap<ResourceId, 
-		oneshot::Receiver< 
-			Result<Arc<Vec<u8>>, GeneralResourceLoadError>
-		>
-	>,
-
-}
-impl RawResourceFetcher { 
-	pub fn new() -> Self { 
-		RawResourceFetcher {
-			request_sender: RESOURCE_FETCH.sender_subscribe(),
-			pending_resources: new_fast_hash_map(),
-		}
-	}
-}
-
-impl ResourceProvider<Vec<u8>> for RawResourceFetcher {
-    type Error = GeneralResourceLoadError;
-
-    fn load(&mut self, id: &ResourceId, origin: &NodeIdentity)
-		    -> ResourcePoll<Arc<Vec<u8>>, Self::Error> {
-		//First, check to see if we've initiated a retrieval already.
-		match self.pending_resources.get(id) {
-			Some(rec) => {
-				// Poll our message-passing channel.
-				match rec.try_recv() {
-					Ok(value) => {
-						// Request has completed, with either a successful load or an error.
-						self.pending_resources.remove(&id); 
-						value
-					},
-					Err(e) => match e {
-						// Still waiting
-						oneshot::error::TryRecvError::Empty => return ResourcePoll::Pending,
-						// Channel died, report an error.
-						oneshot::error::TryRecvError::Closed => {
-							self.pending_resources.remove(&id);
-							ResourcePoll::Errored(
-								GeneralResourceLoadError::ChannelError(
-									id.clone(), 
-									String::from("Resource retrieval channel closed, 
-										sender dropped before receiver.")
-								)
-							)
-						},
-					},
-				}
-			},
-			None => {
-				// If no request had been initiated on this resource provider yet, 
-				// start a new one!
-				let (sender, receiver) = oneshot::channel();
-				self.request_sender.send_one(ResourceFetch {
-					resource_id: id.clone(),
-					expected_source: origin.clone(),
-					return_channel: Some(sender),
-				});
-
-				self.pending_resources.insert(id.clone(), receiver);
-
-				ResourcePoll::Pending
-			},
-		}
-    }
-
-    fn preload(&mut self, id: &ResourceId, origin: &NodeIdentity) {
-        self.request_sender.send_one(ResourceFetch {
-			resource_id: id.clone(),
-			expected_source: origin.clone(),
-			return_channel: None,
-		});
+impl Into<ResourceLoadResult<Arc<Vec<u8>>, ResourceLoadError>> for ResourceFetchResponse {
+    fn into(self) -> ResourceLoadResult<Arc<Vec<u8>>, ResourceLoadError> {
+        match self.data {
+            Ok(val) => ResourceLoadResult { id: self.id, result: ResourcePoll::Ready(val) },
+            Err(e) => ResourceLoadResult { id: self.id, result: ResourcePoll::Errored(e) },
+        }
     }
 }
 
