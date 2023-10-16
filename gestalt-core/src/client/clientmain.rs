@@ -44,7 +44,7 @@ use crate::{
 	//client::render::CubeArt,
 	resource::{
 		image::{InternalImage},
-		update_global_resource_metadata, ResourceId, ResourceInfo, ResourcePoll,
+		update_global_resource_metadata, ResourceId, ResourceInfo, ResourceResult,
 	},
 	world::{
 		chunk::{Chunk, CHUNK_SIZE},
@@ -61,83 +61,6 @@ pub const CLIENT_CONFIG_FILENAME: &str = "client_config.ron";
 // Input events come in through here.
 // Very important that input does not live on the same thread as any heavy compute tasks!
 // We need to still be able to read input when the weird stuff is happening.
-
-// Loads images for the purposes of testing in development.
-pub struct DevImageLoader {
-	pub(crate) images: HashMap<ResourceId, RgbaImage>,
-	pub(crate) metadata: HashMap<ResourceId, ResourceInfo>,
-}
-
-impl ImageProvider for DevImageLoader {
-	fn load_image(
-		&mut self,
-		image: &ResourceId,
-	) -> ResourcePoll<&InternalImage, RetrieveImageError> {
-		match self.images.get(image) {
-			Some(v) => ResourcePoll::Ready(v),
-			None => {
-				ResourcePoll::Errored(RetrieveImageError::DoesNotExist(resource_debug!(image)))
-			}
-		}
-	}
-
-	fn get_metadata(&self, image: &ResourceId) -> Option<&ResourceInfo> {
-		self.metadata.get(image)
-	}
-}
-
-impl DevImageLoader {
-	pub fn new() -> Self {
-		Self {
-			images: HashMap::default(),
-			metadata: HashMap::default(),
-		}
-	}
-
-	//A simple function for the purposes of testing in development
-	fn preload_image_file(
-		&mut self,
-		filename: &str,
-		creator_identity: IdentityKeyPair,
-	) -> Result<ResourceId, Box<dyn Error>> {
-		let mut open_options = std::fs::OpenOptions::new();
-		open_options.read(true).create(false);
-
-		let mut file = open_options.open(filename)?;
-		let mut buf: Vec<u8> = Vec::default();
-		let _len = file.read_to_end(&mut buf)?;
-
-		let rid = ResourceId::from_buf(buf.as_slice());
-
-		let image = image::load_from_memory(buf.as_slice())?;
-
-		rid.verify(buf.as_slice())?;
-
-		info!("Loaded {filename} as resource ID {rid}");
-
-		let metadata = ResourceInfo {
-			id: rid,
-			filename: filename.to_string(),
-			creator: creator_identity.public,
-			resource_type: "image/png".to_string(),
-			authors: "Gyro".to_string(),
-			description: Some("Image for early testing purposes.".to_string()),
-			kind: ResourceKind::PlainOldData,
-			signature: creator_identity.sign(&buf)?,
-		};
-		update_global_resource_metadata(&rid, metadata.clone());
-
-		self.images.insert(rid, image.into_rgba8());
-		self.metadata.insert(rid, metadata);
-
-		Ok(rid)
-	}
-}
-impl Default for DevImageLoader {
-	fn default() -> Self {
-		Self::new()
-	}
-}
 
 #[derive(thiserror::Error, Debug)]
 pub enum StartClientError {
@@ -649,7 +572,7 @@ pub fn run_client(
 											pos: result_position.clone(),
 											new_tile: stone_id,
 										};
-										voxel_event_sender.send_one(voxel_msg).unwrap();
+										voxel_event_sender.send(voxel_msg).unwrap();
 									}
 
 									renderer.terrain_renderer.notify_changed(&placement_position);

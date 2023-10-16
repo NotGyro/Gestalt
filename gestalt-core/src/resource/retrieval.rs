@@ -56,7 +56,7 @@ async fn load_from_file(resources: Vec<ResourceId>, expected_source: NodeIdentit
     let mut not_on_disk = Vec::new();
     for resource in resources {
         let path = path_for_resource(&resource, 
-            &expected_source, &self_identity.public, 
+            &expected_source, &self_identity, 
             directories.clone());
         match tokio::fs::OpenOptions::new().read(true).open(path).await {
             Ok(file) => {

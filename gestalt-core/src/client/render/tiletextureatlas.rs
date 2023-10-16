@@ -1,7 +1,7 @@
 use crate::resource::image::{
-	ImageProvider, InternalImage, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE,
+	InternalImage, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE, LoadImageError,
 };
-use crate::resource::ResourceId;
+use crate::resource::{ResourceId, ResourceProvider};
 use glam::Vec2;
 use image::{GenericImage, ImageError};
 use log::error;
@@ -210,10 +210,11 @@ impl TileAtlasLayout {
 	}
 }
 
-pub fn build_tile_atlas<TextureSource: ImageProvider>(
+pub fn build_tile_atlas<TextureSource>(
 	layout: &TileAtlasLayout,
 	texture_source: &mut TextureSource,
-) -> Result<InternalImage, TileAtlasError> {
+) -> Result<InternalImage, TileAtlasError>
+		where TextureSource: ResourceProvider<InternalImage, Error=LoadImageError> {
 	let missing_texture = generate_missing_texture_image(layout.tile_size, layout.tile_size);
 	let pending_texture = generate_pending_texture_image(layout.tile_size, layout.tile_size);
 
@@ -224,9 +225,9 @@ pub fn build_tile_atlas<TextureSource: ImageProvider>(
 	for (tile_index, resource_tile) in layout.tiles.iter().enumerate() {
 		//The rare mutable binding to an immutable reference shows its face again! Cool.
 		let mut texture_to_use = match texture_source.load_image(resource_tile) {
-			crate::resource::ResourcePoll::Pending => &pending_texture,
-			crate::resource::ResourcePoll::Errored(_) => &missing_texture,
-			crate::resource::ResourcePoll::Ready(image) => image,
+			crate::resource::ResourceResult::Pending => &pending_texture,
+			crate::resource::ResourceResult::Errored(_) => &missing_texture,
+			crate::resource::ResourceResult::Ready(image) => image,
 		};
 
 		if resource_tile == &ID_PENDING_TEXTURE {

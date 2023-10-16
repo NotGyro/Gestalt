@@ -12,7 +12,7 @@ use snow::params::NoiseParams;
 
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
 use crate::common::{identity::NodeIdentity, Version};
-use crate::message::{BroadcastReceiver, BroadcastSender, MessageReceiverAsync, MessageSender};
+use crate::message::{BroadcastReceiver, BroadcastSender, MessageReceiverAsync};
 use lazy_static::lazy_static;
 
 use super::preprotocol::HandshakeStepMessage;
@@ -191,12 +191,10 @@ async fn await_key_approver_response(
 	// I really really do hate having to implement it like this. Very messy. Hopefully I figure out a better system for this soon.
 	loop {
 		match approver.recv_wait().await {
-			Ok(responses) => {
-				for resp in responses {
-					// Matches this peer's identity.
-					if &resp.0 == &identity {
-						return Ok(resp.1);
-					}
+			Ok(resp) => {
+				// Matches this peer's identity.
+				if &resp.0 == &identity {
+					return Ok(resp.1);
 				}
 			}
 			_ => {
@@ -314,7 +312,7 @@ async fn load_validate_noise_peer_key(
 					false => {
 						info!("Unrecognized peer key, prompting for approval.");
 						// Check with the rest of the engine - are we okay with this new Noise protocol key?
-						report_mismatch.send_one(peer_identity.clone()).unwrap();
+						report_mismatch.send(peer_identity.clone()).unwrap();
 						// I really really do hate having to implement it like this.
 						match await_key_approver_response(peer_identity.clone(), mismatch_approver)
 							.await?
@@ -346,7 +344,7 @@ async fn load_validate_noise_peer_key(
 			}
 			Err(e) => {
 				error!("Unable to load existing key due to an error. Treating it as an unrecognized key, creating a new file if callback returns true. The error was: {:?}", &e);
-				report_mismatch.send_one(peer_identity.clone()).unwrap();
+				report_mismatch.send(peer_identity.clone()).unwrap();
 				match await_key_approver_response(peer_identity.clone(), mismatch_approver).await? {
 					true => {
 						// Delete broken file

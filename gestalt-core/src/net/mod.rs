@@ -230,7 +230,7 @@ impl NetworkSystem {
 
 				self.join_handles.push(jh);
 				// Let the rest of the engine know we're connected now.
-				CONNECTED.send_one(peer_identity).unwrap();
+				CONNECTED.send(peer_identity).unwrap();
 			}
 			Err(e) => {
 				error!("Error initializing new session: {:?}", e);
@@ -633,7 +633,7 @@ mod test {
 			.unwrap();
 
 		let connected_peer = connected_notifier.recv_wait().await.unwrap();
-		assert!(connected_peer.contains(&server_key_pair.public));
+		assert!(connected_peer == server_key_pair.public);
 
 		net_send_channel::send_to(
 			JoinDefaultEntry {
@@ -650,7 +650,7 @@ mod test {
 		};
 		let client_to_server_sender: NetSendChannel<TestNetMsg> =
 			net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
-		client_to_server_sender.send_one(test.clone()).unwrap();
+		client_to_server_sender.send(test.clone()).unwrap();
 		info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
 
 		{
@@ -673,7 +673,7 @@ mod test {
 			net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
 		info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
 		server_to_client_sender
-			.send_one(test_reply.clone())
+			.send(test_reply.clone())
 			.unwrap();
 
 		{

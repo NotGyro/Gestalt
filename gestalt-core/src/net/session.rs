@@ -487,7 +487,7 @@ impl Session {
 pub async fn handle_session(
 	mut session_manager: Session,
 	mut incoming_packets: mpsc::UnboundedReceiver<Vec<CiphertextEnvelope>>,
-	mut from_game: BroadcastReceiver<PacketIntermediary>,
+	mut from_game: BroadcastReceiver<Vec<PacketIntermediary>>,
 	session_tick: Duration,
 	kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
 	mut kill_from_outside: tokio::sync::oneshot::Receiver<()>,

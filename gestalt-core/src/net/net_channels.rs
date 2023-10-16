@@ -14,7 +14,7 @@ pub struct NetSendChannel<T>
 where
 	T: Send + NetMsg,
 {
-	pub(in crate::net::net_channels) inner: BroadcastSender<PacketIntermediary>,
+	pub(in crate::net::net_channels) inner: BroadcastSender<Vec<PacketIntermediary>>,
 	//pub(in crate::net::net_channel) peer_addr: SocketAddr,
 	_t: PhantomData<T>,
 }
@@ -23,7 +23,7 @@ impl<T> NetSendChannel<T>
 where
 	T: Send + NetMsg,
 {
-	pub fn new(sender: BroadcastSender<PacketIntermediary>) -> Self {
+	pub fn new(sender: BroadcastSender<Vec<PacketIntermediary>>) -> Self {
 		NetSendChannel {
 			inner: sender,
 			//peer_addr,
@@ -31,7 +31,25 @@ where
 		}
 	}
 	pub fn send_untyped(&self, packet: PacketIntermediary) -> Result<(), SendError> {
-		self.inner.send(packet)
+		self.inner.send(vec![packet]).map(|_v| () ).map_err(|_e| SendError::NoReceivers)
+	}
+
+	pub fn send_many<R, V>(&self, messages: Vec<R>)
+			-> Result<(), crate::message::SendError> 
+			where R: Message + Into<T>,
+			V: IntoIterator<Item=R> { 
+		for message in messages { 
+			let packet = message.into().construct_packet().map_err(|e| {
+				SendError::Encode(format!(
+					"Could not convert packet of type {} into a packet intermediary: {:?}",
+					T::net_msg_name(),
+					e
+				))
+			})?;
+			self.send_untyped(packet)
+				.map_err(|_e| SendError::NoReceivers)?;
+		}
+		Ok(())
 	}
 
 	pub fn resubscribe<U>(&self) -> NetSendChannel<U>
@@ -66,14 +84,14 @@ pub mod net_send_channel {
 	use crate::{
 		common::identity::NodeIdentity,
 		message::{
-			BroadcastChannel, BroadcastReceiver, DomainSubscribeErr, SendError,
+			BroadcastChannel, BroadcastReceiver, DomainSubscribeErr, SendError, DomainMessageSender,
 		},
 	};
 
 	global_domain_channel!(
 		BroadcastChannel,
 		PACKET_TO_SESSION,
-		PacketIntermediary,
+		Vec<PacketIntermediary>,
 		NodeIdentity,
 		4096
 	);
@@ -89,7 +107,7 @@ pub mod net_send_channel {
 	}
 	pub(in crate::net) fn subscribe_receiver(
 		peer: &NodeIdentity,
-	) -> Result<BroadcastReceiver<PacketIntermediary>, DomainSubscribeErr<NodeIdentity>> {
+	) -> Result<BroadcastReceiver<Vec<PacketIntermediary>>, DomainSubscribeErr<NodeIdentity>> {
 		PACKET_TO_SESSION.receiver_subscribe(peer)
 	}
 
@@ -106,29 +124,10 @@ pub mod net_send_channel {
 			))
 		})?;
 
-		PACKET_TO_SESSION.send_one_to(packet, peer)
+		PACKET_TO_SESSION.send_to(vec![packet], peer)
 	}
 
-	pub fn send_multi_to<T, V>(messages: V, peer: &NodeIdentity) -> Result<(), SendError>
-	where
-		T: NetMsg,
-		V: IntoIterator<Item = T>,
-	{
-		let mut packets = Vec::new();
-		for message in messages {
-			let packet = message.construct_packet().map_err(|e| {
-				SendError::Encode(format!(
-					"Could not convert packet of type {} into a packet intermediary: {:?}",
-					T::net_msg_name(),
-					e
-				))
-			})?;
-			packets.push(packet);
-		}
-		PACKET_TO_SESSION.send_multi_to(packets, peer)
-	}
-
-	pub fn send_one_to_all<T>(message: T) -> Result<(), SendError>
+	pub fn send_to_all<T>(message: T) -> Result<(), SendError>
 	where
 		T: NetMsg,
 	{
@@ -139,29 +138,10 @@ pub mod net_send_channel {
 				e
 			))
 		})?;
-		PACKET_TO_SESSION.send_one_to_all(packet)
+		PACKET_TO_SESSION.send_to_all(vec![packet])
 	}
 
-	pub fn send_multi_to_all<T, V>(messages: V) -> Result<(), SendError>
-	where
-		T: NetMsg,
-		V: IntoIterator<Item = T>,
-	{
-		let mut packets = Vec::new();
-		for message in messages {
-			let packet = message.construct_packet().map_err(|e| {
-				SendError::Encode(format!(
-					"Could not convert packet of type {} into a packet intermediary: {:?}",
-					T::net_msg_name(),
-					e
-				))
-			})?;
-			packets.push(packet);
-		}
-		PACKET_TO_SESSION.send_multi_to_all(packets)
-	}
-
-	pub fn send_one_to_all_except<T>(message: T, exclude: &NodeIdentity) -> Result<(), SendError>
+	pub fn send_to_all_except<T>(message: T, exclude: &NodeIdentity) -> Result<(), SendError>
 	where
 		T: NetMsg,
 	{
@@ -172,42 +152,20 @@ pub mod net_send_channel {
 				e
 			))
 		})?;
-		PACKET_TO_SESSION.send_one_to_all_except(packet, exclude)
-	}
-
-	pub fn send_multi_to_all_except<T, C, D, V>(
-		messages: V,
-		exclude: &NodeIdentity,
-	) -> Result<(), SendError>
-	where
-		T: NetMsg,
-		V: IntoIterator<Item = T>,
-	{
-		let mut packets = Vec::new();
-		for message in messages {
-			let packet = message.construct_packet().map_err(|e| {
-				SendError::Encode(format!(
-					"Could not convert packet of type {} into a packet intermediary: {:?}",
-					T::net_msg_name(),
-					e
-				))
-			})?;
-			packets.push(packet);
-		}
-		PACKET_TO_SESSION.send_multi_to_all_except(packets, exclude)
+		PACKET_TO_SESSION.send_to_all_except(vec![packet], exclude)
 	}
 }
 
-pub const NET_MSG_CHANNEL_CAPACITY: usize = 1024;
+pub const NET_MSG_CHANNEL_CAPACITY: usize = 4096;
 global_domain_channel!(
 	BroadcastChannel,
 	INBOUND_NET_MESSAGES,
-	InboundNetMsg,
+	Vec<InboundNetMsg>,
 	NetMsgDomain,
 	NET_MSG_CHANNEL_CAPACITY
 );
 
-pub type InboundMsgSender = BroadcastSender<InboundNetMsg>;
+pub type InboundMsgSender = BroadcastSender<Vec<InboundNetMsg>>;
 
 pub const CONNECTION_READY_CAPACITY: usize = 1024;
 
@@ -225,11 +183,11 @@ pub mod net_recv_channel {
 	use super::INBOUND_NET_MESSAGES;
 
 	pub struct NetMsgReceiver<T> {
-		pub inner: BroadcastReceiver<InboundNetMsg>,
+		pub inner: BroadcastReceiver<Vec<InboundNetMsg>>,
 		_t: PhantomData<T>,
 	}
 	impl<T: NetMsg> NetMsgReceiver<T> {
-		pub fn new(inner: BroadcastReceiver<InboundNetMsg>) -> Self {
+		pub fn new(inner: BroadcastReceiver<Vec<InboundNetMsg>>) -> Self {
 			NetMsgReceiver {
 				inner,
 				_t: PhantomData::default(),
@@ -260,8 +218,15 @@ pub mod net_recv_channel {
 			Ok(output)
 		}
 
+		/// Returns an empty vec when no new messages are ready.
 		pub fn recv_poll(&mut self) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {
-			Self::decode(self.inner.recv_poll()?)
+			match self.inner.recv_poll()? { 
+				Some(buffer) => {
+					Self::decode(buffer)
+				}, 
+				None => Ok(Vec::new())
+			}
+			
 		}
 
 		pub async fn recv_wait(&mut self) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {

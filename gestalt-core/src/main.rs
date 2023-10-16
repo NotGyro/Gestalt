@@ -1,4 +1,4 @@
-//! Voxel metaverse "game" you can have some fun in.
+//! Voxel social-art-space "game" you can have some fun in.
 #![feature(drain_filter)]
 #![feature(string_remove_matches)]
 #![feature(generic_const_exprs)]
@@ -213,17 +213,15 @@ pub async fn protocol_key_change_approver(
 ) {
 	loop {
 		match receiver.recv_wait().await {
-			Ok(idents) => {
-				for ident in idents {
-					warn!(
-						"Protocol key has changed for peer {:?} - most likely this is the same user \n\
-                    connecting with a new device, but it's possible it's an attempt to impersonate them.",
-						ident.to_base64()
-					);
-					//Approve implicitly.
-					//When GUI is a thing, we want this to generate a popup for clients.
-					sender.send_one((ident.clone(), true)).unwrap();
-				}
+			Ok(ident) => {
+				warn!(
+					"Protocol key has changed for peer {:?} - most likely this is the same user \n\
+				connecting with a new device, but it's possible it's an attempt to impersonate them.",
+					ident.to_base64()
+				);
+				//Approve implicitly.
+				//When GUI is a thing, we want this to generate a popup for clients.
+				sender.send((ident.clone(), true)).unwrap();
 			}
 			Err(e) => panic!("Protocol key change approver channel died: {:?}", e),
 		}
@@ -432,7 +430,7 @@ fn main() {
 								//world_space.set(event.pos, event.new_tile).unwrap();
 								info!("Received {:?} from {}", &event, ident.to_base64());
 								let announce: VoxelChangeAnnounce = event.into();
-								net_send_channel::send_one_to_all_except(announce.clone(), &ident).unwrap();
+								net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
 								total_changes.push(announce);
 							}
 						}
@@ -445,9 +443,14 @@ fn main() {
 									display_name: event.display_name,
 									identity: ident,
 								};
-								net_send_channel::send_one_to_all_except(announce.clone(), &ident).unwrap();
+								net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
 								info!("Sending all previous changes to the newly-joined user.");
-								net_send_channel::send_multi_to(total_changes.clone(), &ident).unwrap();
+								// TODO: Reintroduce batching to net send channels specifically. 
+								// or more of an inner-batching inside voxel change messages? Maybe.
+								//net_send_channel::send_multi_to(total_changes.clone(), &ident).unwrap();
+								for change in total_changes { 
+									net_send_channel::send_to(change.clone(), &ident).unwrap(); 
+								}
 							}
 						}
 					}

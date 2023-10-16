@@ -94,15 +94,12 @@ where
 	}
 
 	async fn recv_wait_inner(&mut self) -> Result<T, RecvError> {
-		let mut resl = self
-			.inner
-			.recv()
+		self.inner.recv()
 			.map_err(|e| match e {
 				broadcast::error::RecvError::Closed => RecvError::NoSenders,
 				broadcast::error::RecvError::Lagged(count) => RecvError::Lagged(count),
 			})
-			.await?;
-		Ok(resl)
+			.await
 	}
 }
 
@@ -113,7 +110,7 @@ where
 	/// Nonblockingly polls for new messages, returning an empty vector if the channel is empty.  
 	fn recv_poll(&mut self) -> Result<Option<T>, RecvError> {
 		match self.inner.try_recv() {
-			Ok(val) => val,
+			Ok(val) => Ok(Some(val)),
 			Err(err) => match err {
 				BroadcastTryRecvError::Empty => Ok(None),
 				BroadcastTryRecvError::Closed => Err(RecvError::NoSenders),
@@ -128,7 +125,7 @@ where
 	T: Message + Clone,
 {
 	/// Receives new messages batch, waiting for a message if the channel is currently empty.
-	fn recv_wait(&mut self) -> impl Future<Output = Result<Vec<T>, RecvError>> + '_ {
+	fn recv_wait(&mut self) -> impl Future<Output = Result<T, RecvError>> + '_ {
 		self.recv_wait_inner()
 	}
 }
@@ -346,7 +343,7 @@ where
 	T: Into<R> + Message,
 	R: Message + Clone,
 {
-	fn send(&self, message: R) -> Result<(), SendError> {
+	fn send(&self, message: T) -> Result<(), SendError> {
 		self.sender
 			.send(message.into())
 			.map_err(|_e| SendError::NoReceivers)
@@ -383,10 +380,8 @@ where
 
 	async fn recv_wait_inner(&mut self) -> Result<T, RecvError> {
 		self.inner.recv()
-			.map_err(|e| {
-				RecvError::NoSenders
-			})
-			.await?
+			.await
+			.ok_or(RecvError::NoSenders)
 	}
 }
 
@@ -411,7 +406,7 @@ where
 	T: Message,
 {
 	/// Receives new messages batch, waiting for a message if the channel is currently empty.
-	fn recv_wait(&mut self) -> impl Future<Output = Result<Vec<T>, RecvError>> + '_ {
+	fn recv_wait(&mut self) -> impl Future<Output = Result<T, RecvError>> + '_ {
 		self.recv_wait_inner()
 	}
 }
@@ -506,7 +501,7 @@ where
 	T: Into<R> + Message,
 	R: Message,
 {
-	fn send<V>(&self, message: T) -> Result<(), SendError> {
+	fn send(&self, message: T) -> Result<(), SendError> {
 		self.sender
 			.try_send(message.into())
 			.map_err(|e| e.into())
@@ -619,13 +614,11 @@ where
 	D: ChannelDomain,
 	C: SenderChannel<T> + ChannelInit + MessageSender<T>,
 {
-	fn send_to<V>(&self, messages: V, domain: &D) -> Result<(), SendError>
-	where
-		V: IntoIterator<Item = T>,
+	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError>
 	{
 		match self.channels.lock().get(domain) {
 			Some(chan) => chan
-				.send_multi(messages)
+				.send(message)
 				.map_err(|_e| SendError::NoReceivers)
 				.map(|_val| ()),
 			None => Err(SendError::MissingDomain(format!("{:?}", domain))),
@@ -634,7 +627,7 @@ where
 
 	fn send_to_all(&self, message: T) -> Result<(), SendError> {
 		for chan in self.channels.lock().values() {
-			chan.send_one(message.clone())?;
+			chan.send(message.clone())?;
 		}
 		Ok(())
 	}
@@ -642,7 +635,7 @@ where
 	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError> {
 		for (domain, chan) in self.channels.lock().iter() {
 			if domain != exclude {
-				chan.send_one(message.clone())?;
+				chan.send(message.clone())?;
 			}
 		}
 		Ok(())
@@ -704,7 +697,7 @@ pub struct QuitReadyNotifier {
 impl QuitReadyNotifier {
 	pub fn notify_ready(self) {
 		trace!("Sending quit-ready notification.");
-		let _ = self.inner.send_one(());
+		let _ = self.inner.send(());
 	}
 }
 
@@ -728,7 +721,7 @@ impl QuitReceiver {
 /// Only errors if the initial message to start a shutdown cannot start.
 pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 	let mut ready_receiver = READY_FOR_QUIT.receiver_subscribe();
-	START_QUIT.send_one(())?;
+	START_QUIT.send(())?;
 	let num_receivers = START_QUIT.receiver_count();
 
 	info!(
@@ -742,12 +735,11 @@ pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 
 	while count_received < num_receivers {
 		tokio::select! {
-			replies_maybe = ready_receiver.recv_wait() => {
-				match replies_maybe {
+			reply_maybe = ready_receiver.recv_wait() => {
+				match reply_maybe {
 					Ok(v) => {
-						let count = v.len();
-						trace!("Received {} quit ready notifications.", count);
-						count_received += count;
+						trace!("Received {} quit ready notifications.", count_received);
+						count_received += 1;
 					}
 					Err(e) => {
 						error!("Error polling for READY_FOR_QUIT messages, exiting immediately. Error was: {:?}", e);
@@ -811,14 +803,12 @@ pub mod test {
 		let mut receiver = channel.receiver_subscribe();
 		let mut second_receiver = channel.receiver_subscribe();
 		//send_one
-		sender.send_one(test_struct.into()).unwrap();
+		sender.send(test_struct.into()).unwrap();
 
 		let out = receiver.recv_wait().await.unwrap();
-		let out = out.first().unwrap();
 		assert_eq!(out.second, 1234);
 
 		let out2 = second_receiver.recv_wait().await.unwrap();
-		let out2 = out2.first().unwrap();
 		assert_eq!(out2.second, 1234);
 	}
 
@@ -828,13 +818,11 @@ pub mod test {
 		let mut receiver = TEST_CHANNEL.receiver_subscribe();
 
 		sender
-			.send_one(MessageA {
+			.send(MessageA {
 				msg: String::from("Hello, world!"),
 			})
 			.unwrap();
-		let mut output = receiver.recv_wait().await.unwrap();
-		assert_eq!(output.len(), 1);
-		let out_msg = output.drain(0..1).next().unwrap();
+		let mut out_msg = receiver.recv_wait().await.unwrap();
 
 		assert_eq!(out_msg.msg, String::from("Hello, world!"));
 	}
@@ -861,57 +849,24 @@ pub mod test {
 			.unwrap();
 
 		sender
-			.send_one(MessageB {
+			.send(MessageB {
 				msg: String::from("Hello, player1!"),
 			})
 			.unwrap();
 		other_channel_sender
-			.send_one(MessageB {
+			.send(MessageB {
 				msg: String::from("Hello, player2!"),
 			})
 			.unwrap();
 
 		{
-			let mut output = receiver.recv_wait().await.unwrap();
-			assert_eq!(output.len(), 1);
-			let out_msg = output.drain(0..1).next().unwrap();
+			let mut out_msg = receiver.recv_wait().await.unwrap();
 			assert_eq!(out_msg.msg, String::from("Hello, player1!"));
 		}
 
 		{
-			let mut output = other_channel_receiver.recv_wait().await.unwrap();
-			assert_eq!(output.len(), 1);
-			let out_msg = output.drain(0..1).next().unwrap();
+			let mut out_msg = other_channel_receiver.recv_wait().await.unwrap();
 			assert_eq!(out_msg.msg, String::from("Hello, player2!"));
 		}
-	}
-
-	#[derive(Clone, Debug, PartialEq, Eq)]
-	pub struct MessageC {
-		pub msg: String,
-		pub val: u64,
-	}
-
-	global_channel!(BroadcastChannel, TEST_CHANNEL_C, MessageC, 128);
-
-	#[tokio::test(flavor = "multi_thread")]
-	async fn message_batching() {
-		let sender = TEST_CHANNEL_C.sender_subscribe();
-		let mut receiver = TEST_CHANNEL_C.receiver_subscribe();
-
-		const NUM_MESSAGES: usize = 64;
-		//Many separate sends...
-		for i in 0..NUM_MESSAGES as u64 {
-			sender
-				.send_one(MessageC {
-					msg: String::from("Hello, world!"),
-					val: i,
-				})
-				.unwrap();
-		}
-
-		let output = receiver.recv_poll().unwrap();
-		assert_eq!(output.len(), NUM_MESSAGES);
-		assert_eq!(receiver.inner.try_recv(), Err(BroadcastTryRecvError::Empty));
 	}
 }

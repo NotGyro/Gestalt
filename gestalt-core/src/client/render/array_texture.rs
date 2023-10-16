@@ -1,8 +1,8 @@
 use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::resource::image::{
-	ImageProvider, ID_MISSING_TEXTURE, ID_PENDING_TEXTURE, RetrieveImageError,
+	ID_MISSING_TEXTURE, ID_PENDING_TEXTURE, InternalImage, LoadImageError,
 };
-use crate::resource::ResourceId;
+use crate::resource::{ResourceId, ResourceProvider};
 use image::RgbaImage;
 use log::{error, info, warn};
 
@@ -244,7 +244,7 @@ impl ArrayTexture {
 			bind_group,
 		};
 	}
-	pub fn full_rebuild<TextureSource: ImageProvider>(&mut self, 
+	pub fn full_rebuild<TextureSource: ResourceProvider<InternalImage, Error=LoadImageError>>(&mut self, 
 			bind_group_layout: &wgpu::BindGroupLayout,
 			device: &mut wgpu::Device,
 			queue: &mut wgpu::Queue,
@@ -280,8 +280,8 @@ impl ArrayTexture {
 				&ID_PENDING_TEXTURE => &self.pending_image,
 				&ID_MISSING_TEXTURE => &self.missing_image,
 				_ => match texture_source.load_image(resource_texture) {
-					crate::resource::ResourcePoll::Pending => &self.pending_image,
-					crate::resource::ResourcePoll::Errored(e) => match e { 
+					crate::resource::ResourceResult::Pending => &self.pending_image,
+					crate::resource::ResourceResult::Errored(e) => match e { 
 						RetrieveImageError::DoesNotExist(_) => { 
 							warn!("No texture found for {resource_texture}, \
 								using missing-texture placeholder.");
@@ -289,7 +289,7 @@ impl ArrayTexture {
 						}, 
 						_ => &self.error_image,
 					},
-					crate::resource::ResourcePoll::Ready(image) => image,
+					crate::resource::ResourceResult::Ready(image) => image,
 				}
 			};
 

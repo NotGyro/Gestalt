@@ -9,7 +9,8 @@ use super::array_texture::{ArrayTextureLayout, ArrayTexture, ArrayTextureError};
 use super::{load_test_shader, ModelPush};
 use super::voxel_art::VoxelArtMapper;
 use super::voxel_mesher::{ChunkMesh, MesherState, PackedVertex};
-use crate::resource::image::ImageProvider;
+use crate::resource::ResourceProvider;
+use crate::resource::image::{InternalImage, LoadImageError};
 use crate::world::tilespace::{TileSpace, TileSpaceError, world_to_chunk_pos, chunk_to_world_pos};
 //use crate::world::chunk::CHUNK_SIZE;
 //use crate::world::tilespace::{world_to_chunk_pos, TileSpaceError, TileSpace};
@@ -288,11 +289,12 @@ impl TerrainRenderer {
     }
 
     /// Takes any of the changed or new chunk meshes made in process_remesh() and makes them available for rendering. 
-    pub fn push_to_gpu<TextureSource: ImageProvider>(&mut self,
+    pub fn push_to_gpu<TextureSource>(&mut self,
             device: &mut wgpu::Device,
             queue: &mut wgpu::Queue,
             texture_source: &mut TextureSource) 
-                -> Result<(), TerrainRendererError> {
+                -> Result<(), TerrainRendererError>
+                where TextureSource: ResourceProvider<InternalImage, Error=LoadImageError> {
         // First, handle textures.
         let mut textures_to_build: HashSet<u32> = HashSet::new();
         for (_, binding) in self.texture_for_chunk.iter() {

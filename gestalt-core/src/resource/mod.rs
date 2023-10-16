@@ -2,11 +2,14 @@ use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::common::identity::NodeIdentity;
 use crate::message::{
 	MpscChannel, 
-	MpscSender,
+	MpscSender, 
+	MpscReceiver,
+	MessageReceiver, RecvError, MessageReceiverAsync, SenderChannel
 };
 
 use base64::Engine;
 use ed25519::Signature;
+use futures::Future;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::fmt::Debug;
@@ -273,6 +276,12 @@ pub enum ResourceLoadError {
 
 impl Eq for ResourceInfo {}
 
+pub const ID_ERRORED_RESOURCE: ResourceId = ResourceId {
+	version: 0,
+	length: 0,
+	hash: [0; 32],
+};
+
 #[derive(Debug)]
 pub enum ResourceStatus<E> where E: Debug { 
 	NotInitiated,
@@ -292,7 +301,7 @@ impl<E> Clone for ResourceStatus<E> where E : Clone + Debug {
     }
 }
 
-pub enum ResourcePoll<T, E> where T: Send, E: Debug {
+pub enum ResourceResult<T, E> where E: Debug {
 	NotInitiated,
 	Pending,
 	///Encountered a problem while trying to load this resource.
@@ -300,21 +309,21 @@ pub enum ResourcePoll<T, E> where T: Send, E: Debug {
 	Ready(T)
 }
 
-impl<T, E> From<&ResourcePoll<T, E>> for ResourceStatus<E>
+impl<T, E> From<ResourceResult<T, E>> for ResourceStatus<E>
 where
-	T: Send,
+	E: Debug,
 {
-	fn from(r: &ResourcePoll<T, E>) -> Self {
+	fn from(r: ResourceResult<T, E>) -> Self {
 		match r {
-			ResourcePoll::NotInitiated => ResourceStatus::NotInitiated,
-			ResourcePoll::Pending => ResourceStatus::Pending,
-			ResourcePoll::Errored(e) => ResourceStatus::Errored(e),
-			ResourcePoll::Ready(_) => ResourceStatus::Ready
+			ResourceResult::NotInitiated => ResourceStatus::NotInitiated,
+			ResourceResult::Pending => ResourceStatus::Pending,
+			ResourceResult::Errored(e) => ResourceStatus::Errored(e),
+			ResourceResult::Ready(_) => ResourceStatus::Ready
 		}
 	}
 }
 
-impl<T, E> From<Result<T, E>> for ResourcePoll<T, E> where T: Send, E: Debug {
+impl<T, E> From<Result<T, E>> for ResourceResult<T, E> where T: Send, E: Debug {
 	fn from(r: Result<T, E>) -> Self {
 		match r {
 			Ok(v) => Self::Ready(v),
@@ -322,7 +331,7 @@ impl<T, E> From<Result<T, E>> for ResourcePoll<T, E> where T: Send, E: Debug {
 		}
 	}
 }
-impl<T, E> From<Option<Result<T, E>>> for ResourcePoll<T, E>
+impl<T, E> From<Option<Result<T, E>>> for ResourceResult<T, E>
 where
 	T: Send, E: Debug
 {
@@ -335,23 +344,18 @@ where
 	}
 }
 
-impl<T, E> From<ResourcePoll<T, E>> for Option<Result<T, E>>
+impl<T, E> From<ResourceResult<T, E>> for Option<Result<T, E>>
 where
 	T: Send, E: Debug,
 {
-	fn from(r: ResourcePoll<T, E>) -> Self {
+	fn from(r: ResourceResult<T, E>) -> Self {
 		match r {
-			ResourcePoll::Ready(v) => Some(Ok(v)),
-			ResourcePoll::Errored(e) => Some(Err(e)),
-			ResourcePoll::Pending => None,
-			ResourcePoll::NotInitiated => None
+			ResourceResult::Ready(v) => Some(Ok(v)),
+			ResourceResult::Errored(e) => Some(Err(e)),
+			ResourceResult::Pending => None,
+			ResourceResult::NotInitiated => None
 		}
 	}
-}
-
-pub struct ResourceLoadResult<T: Send + Sync, E: std::error::Error + Debug> {
-	pub id: ResourceId, 
-	pub result: ResourcePoll<T, E>,
 }
 
 pub(in self) fn resource_id_to_prefix(resource: &ResourceId) -> usize { 
@@ -431,6 +435,7 @@ pub(in self) struct ResourceFetch {
 	pub return_channel: Option<MpscSender<ResourceFetchResponse>>,
 }
 
+#[derive(Debug)]
 pub(in self) struct ResourceFetchResponse { 
 	pub id: ResourceId,
 	pub data: Result<Arc<Vec<u8>>, ResourceLoadError>,
@@ -438,12 +443,100 @@ pub(in self) struct ResourceFetchResponse {
 
 global_channel!(MpscChannel, RESOURCE_FETCH, ResourceFetch, 65536);
 
-impl Into<ResourceLoadResult<Arc<Vec<u8>>, ResourceLoadError>> for ResourceFetchResponse {
-    fn into(self) -> ResourceLoadResult<Arc<Vec<u8>>, ResourceLoadError> {
-        match self.data {
-            Ok(val) => ResourceLoadResult { id: self.id, result: ResourcePoll::Ready(val) },
-            Err(e) => ResourceLoadResult { id: self.id, result: ResourcePoll::Errored(e) },
-        }
+pub enum ResourcePoll<T, E> where E: Debug { 
+	Ready(ResourceId, T), 
+	ChannelError(RecvError),
+	RetrievalError(ResourceLoadError),
+	ResourceError(ResourceId, E),
+	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling. 
+	None,
+}
+
+pub trait ResourceProvider<T> { 
+	type Error : Debug + From<ResourceLoadError>;
+
+	fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) -> ResourceResult<T, Self::Error>;
+	fn request_one(&mut self, resource: ResourceId, expected_source: NodeIdentity) -> ResourceResult<T, Self::Error> {
+		self.request_batch(vec![resource], expected_source)
+	}
+
+	/// Request that we download files, except that there isn't any immediate need to use them
+	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
+	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity);
+	fn preload_one(&mut self, resource: ResourceId, expected_source: NodeIdentity) { 
+		self.preload_batch(vec![resource], expected_source)
+	}
+
+	fn recv_poll(&mut self) -> ResourcePoll<T, Self::Error>;
+	fn recv_wait(&mut self) -> impl Future<Output = ResourcePoll<T, Self::Error>> + '_;
+}
+
+pub struct RawResourceProvider { 
+	fetch_sender: MpscSender<ResourceFetch>,
+	return_receiver: MpscReceiver<ResourceFetchResponse>,
+	return_template: MpscSender<ResourceFetchResponse>,
+}
+impl RawResourceProvider {
+	pub fn new(return_channel_capacity: usize) -> Self { 
+		let return_channel = MpscChannel::new(return_channel_capacity); 
+		Self {
+			fetch_sender: RESOURCE_FETCH.sender_subscribe(),
+			return_receiver: return_channel.take_receiver().unwrap(),
+			return_template: return_channel.sender_subscribe(),
+		}
+	}
+
+	fn request_inner(&self, resources: Vec<ResourceId>, expected_source: NodeIdentity, 
+		return_channel: Option<MpscSender<ResourceFetchResponse>>)
+		-> ResourceResult<Arc<Vec<u8>>, ResourceLoadError> { 
+		self.fetch_sender.blocking_send(ResourceFetch {
+			resources,
+			expected_source,
+			return_channel,
+		});
+		ResourceResult::Pending
+	}
+
+	async fn recv_wait_inner(&self) -> ResourcePoll<Arc<Vec<u8>>, ResourceLoadError> { 
+		match self.return_receiver.recv_wait().await { 
+			Ok(Some(v)) => {
+				match v.data { 
+					Ok(value) => ResourcePoll::Ready(v.id, value),
+					Err(e) => ResourcePoll::RetrievalError(e),
+				}
+			}
+			Ok(None) => ResourcePoll::None,
+            Err(e) => ResourcePoll::ChannelError(e),
+		}
+	}
+}
+
+impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
+    type Error = ResourceLoadError;
+
+    fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) -> ResourceResult<Arc<Vec<u8>>, Self::Error> {
+        self.request_inner(resources, expected_source, Some(self.return_template.clone()))
+    }
+
+    fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) {
+        self.request_inner(resources, expected_source, None); 
+    }
+
+    fn recv_poll(&mut self) -> ResourcePoll<Arc<Vec<u8>>, Self::Error> {
+        match self.return_receiver.recv_poll() { 
+			Ok(Some(v)) => {
+				match v.data { 
+					Ok(value) => ResourcePoll::Ready(v.id, value),
+					Err(e) => ResourcePoll::RetrievalError(e),
+				}
+			}
+			Ok(None) => ResourcePoll::None,
+            Err(e) => ResourcePoll::ChannelError(e),
+		}
+    }
+
+    fn recv_wait(&mut self) -> impl Future<Output = ResourcePoll<Arc<Vec<u8>>, Self::Error>> + '_ {
+        self.recv_wait_inner()
     }
 }
 

@@ -18,8 +18,8 @@ use winit::window::Window;
 use crate::client::client_config::{ClientConfig, DisplaySize};
 use crate::common::{Color, FastHashMap, new_fast_hash_map};
 use crate::entity::{EcsWorld, EntityPos, EntityScale, EntityVelocity};
-use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, ImageProvider, InternalImage};
-use crate::resource::{ResourceId, ResourcePoll};
+use crate::resource::image::{ID_PENDING_TEXTURE, ID_MISSING_TEXTURE, InternalImage, LoadImageError};
+use crate::resource::{ResourceId, ResourceResult, ResourceProvider};
 
 use self::drawable::BillboardDrawable;
 use self::terrain_renderer::{TerrainRendererError, TerrainRenderer};
@@ -266,7 +266,7 @@ impl TextureManager {
 		bind_group_layout: &wgpu::BindGroupLayout,
 		loader: &mut P
 	) -> TextureHandle
-            where P: ImageProvider {
+            where P: ResourceProvider<InternalImage, Error=LoadImageError> {
 
         let image = if resource_id == &ID_PENDING_TEXTURE {
             &self.pending_image
@@ -275,12 +275,12 @@ impl TextureManager {
         }
         else {
             match loader.load_image(resource_id) {
-                ResourcePoll::Pending => &self.pending_image,
-                ResourcePoll::Errored(e) => match e {
+                ResourceResult::Pending => &self.pending_image,
+                ResourceResult::Errored(e) => match e {
                     crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_image,
                     _ => &self.error_image,
                 },
-                ResourcePoll::Ready(image) => image,
+                ResourceResult::Ready(image) => image,
             }
         };
 		
@@ -844,7 +844,7 @@ impl Renderer {
 
 	pub fn process_terrain_mesh_uploads<P>(&mut self, image_loader: &mut P) 
 			-> Result<(), TerrainRendererError> 
-			where P: ImageProvider { 
+			where P: ResourceProvider<InternalImage, Error=LoadImageError> { 
 		self.terrain_renderer.push_to_gpu(&mut self.device, &mut self.queue, image_loader)
 	}
 
@@ -894,7 +894,7 @@ impl Renderer {
 	pub fn ingest_image<P>(&mut self,
 		resource_id: &ResourceId,
 		texture_loader: &mut P)
-			where P: ImageProvider {
+			where P: ResourceProvider<InternalImage, Error=LoadImageError> {
 				
 		let diffuse_sampler = wgpu::SamplerDescriptor {
 			address_mode_u: wgpu::AddressMode::Repeat,
