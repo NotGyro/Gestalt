@@ -956,6 +956,7 @@ dependencies = [
  "ed25519",
  "ed25519-dalek",
  "futures",
+ "gestalt_names",
  "gestalt_proc_macros",
  "glam",
  "hecs",

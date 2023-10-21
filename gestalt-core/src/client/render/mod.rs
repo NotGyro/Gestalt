@@ -276,7 +276,7 @@ impl TextureManager {
         else {
             match loader.load_image(resource_id) {
                 ResourceResult::Pending => &self.pending_image,
-                ResourceResult::Errored(e) => match e {
+                ResourceResult::Err(e) => match e {
                     crate::resource::image::RetrieveImageError::DoesNotExist(_) => &self.missing_image,
                     _ => &self.error_image,
                 },

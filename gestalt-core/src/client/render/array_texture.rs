@@ -281,7 +281,7 @@ impl ArrayTexture {
 				&ID_MISSING_TEXTURE => &self.missing_image,
 				_ => match texture_source.load_image(resource_texture) {
 					crate::resource::ResourceResult::Pending => &self.pending_image,
-					crate::resource::ResourceResult::Errored(e) => match e { 
+					crate::resource::ResourceResult::Err(e) => match e { 
 						RetrieveImageError::DoesNotExist(_) => { 
 							warn!("No texture found for {resource_texture}, \
 								using missing-texture placeholder.");

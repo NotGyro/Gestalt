@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 #Internal
-# This will be used later. gestalt_names = { path = "../gestalt-names" }
+gestalt_names = { path = "../gestalt-names" }
 gestalt_proc_macros = { path = "../gestalt-proc-macros" }
 
 toolbelt = { git = "https://github.com/trashbyte/toolbelt" }

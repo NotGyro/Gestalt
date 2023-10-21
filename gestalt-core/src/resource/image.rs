@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use gestalt_names::gestalt_atom::GestaltAtom;
 use image::{ImageError, RgbaImage};
 
 use crate::common::identity::NodeIdentity;
 
-use super::{ResourceId, ResourceLoadError, ResourceProvider, RawResourceProvider, ResourcePoll, ResourceResult};
+use super::{ResourceId, ResourceLoadError, ResourceProvider, RawResourceProvider, ResourcePoll, ResourceResult, ArchiveFileIndex};
 
 pub const ID_MISSING_TEXTURE: ResourceId = ResourceId {
 	version: 0,
@@ -35,6 +36,27 @@ pub enum LoadImageError {
 
 pub type InternalImage = RgbaImage;
 
+pub struct ImageCoord { 
+	pub x: u32, 
+	pub y: u32,
+}
+
+pub struct ImageRect { 
+	/// Upper-left, positive Y is down and positive X is right. Image-space coordinates.
+	pub origin: ImageCoord,
+	pub width: u32,
+	pub height: u32,
+}
+
+/// Which part of the underlying ResourceId are we seeking to use for our texture?
+/// For use as the T in SubResource<T>
+pub enum SubImageIndex {
+	/// A portion of an image file
+	Section(ImageRect),
+	ArchiveFile(ArchiveFileIndex),
+	/// A portion of an image file in an archive.
+	ArchiveFileSection(ArchiveFileIndex, ImageRect),
+}
 pub struct ImageProvider { 
 	inner: RawResourceProvider,
 }
@@ -69,7 +91,7 @@ impl ResourceProvider<InternalImage> for ImageProvider {
         match self.inner.request_batch(resources, expected_source) {
             ResourceResult::NotInitiated => todo!(),
             ResourceResult::Pending => todo!(),
-            ResourceResult::Errored(e) => ResourceResult::Errored(e),
+            ResourceResult::Err(e) => ResourceResult::Err(LoadImageError::Retrieval(e)),
             ResourceResult::Ready(buf) => todo!(),
         }
     }

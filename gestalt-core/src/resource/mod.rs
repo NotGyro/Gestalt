@@ -10,6 +10,7 @@ use crate::message::{
 use base64::Engine;
 use ed25519::Signature;
 use futures::Future;
+use gestalt_names::gestalt_atom::GestaltAtom;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::fmt::Debug;
@@ -305,7 +306,7 @@ pub enum ResourceResult<T, E> where E: Debug {
 	NotInitiated,
 	Pending,
 	///Encountered a problem while trying to load this resource.
-	Errored(E),
+	Err(E),
 	Ready(T)
 }
 
@@ -317,7 +318,7 @@ where
 		match r {
 			ResourceResult::NotInitiated => ResourceStatus::NotInitiated,
 			ResourceResult::Pending => ResourceStatus::Pending,
-			ResourceResult::Errored(e) => ResourceStatus::Errored(e),
+			ResourceResult::Err(e) => ResourceStatus::Errored(e),
 			ResourceResult::Ready(_) => ResourceStatus::Ready
 		}
 	}
@@ -327,7 +328,7 @@ impl<T, E> From<Result<T, E>> for ResourceResult<T, E> where T: Send, E: Debug {
 	fn from(r: Result<T, E>) -> Self {
 		match r {
 			Ok(v) => Self::Ready(v),
-			Err(e) => Self::Errored(e),
+			Err(e) => Self::Err(e),
 		}
 	}
 }
@@ -338,7 +339,7 @@ where
 	fn from(r: Option<Result<T, E>>) -> Self {
 		match r {
 			Some(Ok(v)) => Self::Ready(v),
-			Some(Err(e)) => Self::Errored(e),
+			Some(Err(e)) => Self::Err(e),
 			None => Self::Pending,
 		}
 	}
@@ -351,7 +352,7 @@ where
 	fn from(r: ResourceResult<T, E>) -> Self {
 		match r {
 			ResourceResult::Ready(v) => Some(Ok(v)),
-			ResourceResult::Errored(e) => Some(Err(e)),
+			ResourceResult::Err(e) => Some(Err(e)),
 			ResourceResult::Pending => None,
 			ResourceResult::NotInitiated => None
 		}
@@ -451,6 +452,23 @@ pub enum ResourcePoll<T, E> where E: Debug {
 	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling. 
 	None,
 }
+pub enum ResourcePollError<E> where E: Debug { 
+	Channel(RecvError),
+	Retrieval(ResourceLoadError),
+	Resource(ResourceId, E),
+}
+
+impl<T, E> ResourcePoll<T, E> where E: Debug { 
+	pub fn is_none(&self) -> bool {
+		match self {
+			ResourcePoll::Ready(_, _) => false,
+			ResourcePoll::ChannelError(_) => false,
+			ResourcePoll::RetrievalError(_) => false,
+			ResourcePoll::ResourceError(_, _) => false,
+			ResourcePoll::None => true,
+		}
+	}
+}
 
 pub trait ResourceProvider<T> { 
 	type Error : Debug + From<ResourceLoadError>;
@@ -469,6 +487,29 @@ pub trait ResourceProvider<T> {
 
 	fn recv_poll(&mut self) -> ResourcePoll<T, Self::Error>;
 	fn recv_wait(&mut self) -> impl Future<Output = ResourcePoll<T, Self::Error>> + '_;
+
+	/// Poll until there are no remaining results. 
+	fn recv_poll_all(&mut self) -> Vec<ResourcePoll<T, Self::Error>> { 
+		let mut next = self.recv_poll();
+		let mut buf = vec![];
+		while !next.is_none() { 
+			match next {
+				ResourcePoll::Ready(id, val) => buf.push(ResourcePoll::Ready(id, val)),
+				ResourcePoll::RetrievalError(e) => buf.push(ResourcePoll::RetrievalError(e)),
+				ResourcePoll::ResourceError(id, e) => buf.push(ResourcePoll::ResourceError(id, e)),
+				ResourcePoll::ChannelError(e) => {
+					// Return early - we won't be getting any more results out of this one.
+					buf.push(ResourcePoll::ChannelError(e)); 
+					return buf;
+				},
+				ResourcePoll::None => unreachable!(
+					"See \"while next != ResourcePoll::None\" above."
+				),
+			}
+			next = self.recv_poll(); // Set up next iteration of the loop.
+		}
+		return buf;
+	}
 }
 
 pub struct RawResourceProvider { 
@@ -497,15 +538,14 @@ impl RawResourceProvider {
 		ResourceResult::Pending
 	}
 
-	async fn recv_wait_inner(&self) -> ResourcePoll<Arc<Vec<u8>>, ResourceLoadError> { 
+	async fn recv_wait_inner(&mut self) -> ResourcePoll<Arc<Vec<u8>>, ResourceLoadError> { 
 		match self.return_receiver.recv_wait().await { 
-			Ok(Some(v)) => {
-				match v.data { 
-					Ok(value) => ResourcePoll::Ready(v.id, value),
+			Ok(value) => {
+				match value.data {
+					Ok(v) => ResourcePoll::Ready(value.id, v),
 					Err(e) => ResourcePoll::RetrievalError(e),
 				}
 			}
-			Ok(None) => ResourcePoll::None,
             Err(e) => ResourcePoll::ChannelError(e),
 		}
 	}
@@ -514,7 +554,8 @@ impl RawResourceProvider {
 impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
     type Error = ResourceLoadError;
 
-    fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) -> ResourceResult<Arc<Vec<u8>>, Self::Error> {
+    fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) 
+			-> ResourceResult<Arc<Vec<u8>>, Self::Error> {
         self.request_inner(resources, expected_source, Some(self.return_template.clone()))
     }
 
@@ -539,6 +580,28 @@ impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
         self.recv_wait_inner()
     }
 }
+
+/// Reference to a specific file that's in a larger resource, such as an individual file in 
+/// an archive, an individual cell in a texture atlas,
+pub enum SubResource<T> where T: Clone + Send { 
+	/// The entire content-addressed ResourceId refers to exactly the bytes we need 
+	/// in order to use them for this purpose - for example, our texture is just the
+	/// entire file referred to by this ResourceId, not in any archive. 
+	Whole(ResourceId),
+	/// This is only using a portion of the resource, such as a file in an archive.
+	Part(ResourceId, T),
+}
+
+impl<T> SubResource<T> where T: Clone + Send { 
+	fn get_id<'a>(&'a self) -> &'a ResourceId { 
+		match self {
+			SubResource::Whole(id) => id,
+			SubResource::Part(id, _) => id,
+		}
+	}
+}
+// This may need to be something cleverer / better optimized later.
+pub type ArchiveFileIndex = GestaltAtom; 
 
 static RESOURCE_METADATA: ResourceStorage<ResourceInfo> = ResourceStorage::new();
 

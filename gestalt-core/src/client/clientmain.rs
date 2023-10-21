@@ -526,7 +526,7 @@ pub fn run_client(
 									pos: result_position.clone(),
 									new_tile: air_id,
 								};
-								voxel_event_sender.send_one(voxel_msg).unwrap();
+								voxel_event_sender.send(voxel_msg).unwrap();
 							}
 
 							renderer.terrain_renderer.notify_changed(&result_position);

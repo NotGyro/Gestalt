@@ -49,30 +49,36 @@ fn path_for_resource(id: &ResourceId, origin_identity: &NodeIdentity, self_ident
     path
 }
 
-async fn load_from_file(resources: Vec<ResourceId>, expected_source: NodeIdentity,
+async fn load_from_file(mut resources: Vec<ResourceId>, expected_source: NodeIdentity,
         self_identity: NodeIdentity, directories: Arc<GestaltDirectories>, 
         channel: Option<MpscSender<ResourceFetchResponse>>) {
     
     let mut not_on_disk = Vec::new();
-    for resource in resources {
+    for resource in resources.drain(..) {
         let path = path_for_resource(&resource, 
             &expected_source, &self_identity, 
             directories.clone());
-        match tokio::fs::OpenOptions::new().read(true).open(path).await {
-            Ok(file) => {
+        match tokio::fs::OpenOptions::new().read(true).open(path.clone()).await {
+            Ok(mut file) => {
                 // Is this a non-preload?
-                if let Some(chan) = channel { 
+                if let Some(ref chan) = channel { 
                     let mut buffer = Vec::new();
                     if let Err(e) = file.read_to_end(&mut buffer).await {
-                        error!("Error when attempting to read file {0} into memory: {1:?}", path, e);
+                        error!("Error when attempting to read file {0:?} into memory: {1:?}", path, e);
                         chan.send(
-                            Result::Err(
-                                ResourceLoadError::Disk(resource.clone(), format!("{0:?}", e))
-                            )
+                            ResourceFetchResponse{
+                                id: resource,
+                                data: Err(ResourceLoadError::Disk(resource.clone(), format!("{0:?}", e))),
+                            }
                         );
                     }
                     else {
-                        chan.send(Result::Ok(Arc::new(buffer)));
+                        chan.send(
+                            ResourceFetchResponse{
+                                id: resource,
+                                data: Result::Ok(Arc::new(buffer)),
+                            }
+                        );
                     }
                 }
                 else {
@@ -85,7 +91,7 @@ async fn load_from_file(resources: Vec<ResourceId>, expected_source: NodeIdentit
                     std::io::ErrorKind::NotFound => {
                         not_on_disk.push(resource.clone());
                     },
-                    _ => error!("Failed to load file {0:?} at location {1} due to error {2:?}.", 
+                    _ => error!("Failed to load file {0:?} at location {1:?} due to error {2:?}.", 
                             &resource, &path, e),
                 }
             },
@@ -102,25 +108,25 @@ async fn load_from_file(resources: Vec<ResourceId>, expected_source: NodeIdentit
 
 /// Mainloop for the resource-loading system.
 async fn resource_system_main(role: SelfNetworkRole, self_identity: IdentityKeyPair,
-    resource_fetch_receiver: MpscReceiver<ResourceFetch>, directories: Arc<GestaltDirectories>) 
-        -> Result<(), ResourceSysError> {
+        mut resource_fetch_receiver: MpscReceiver<ResourceFetch>, 
+        directories: Arc<GestaltDirectories>) -> Result<(), ResourceSysError> {
     let mut quit_reciever = QuitReceiver::new();
-    loop { 
+    loop {
+        // Should be cheap because it's an ARC.
+        let dir_clone = directories.clone();
         tokio::select! {
             resource_fetch_maybe = resource_fetch_receiver.recv_wait() => { 
-                let resource_fetch_cmds = resource_fetch_maybe.unwrap();
-                for resource_fetch_cmd in resource_fetch_cmds {
-                    tokio::spawn(async move {
-                        // Network retrieval is invoked in a failure case of an attempt to load from
-                        // a file, when the file is not found. So, network handling will not be inside
-                        // this function, but invoked inside load_from_file().
-                        // Hopefully there will be a performance benefit from not having to touch
-                        // the file twice.
-                        load_from_file(resource_fetch_cmd.resources,
-                            resource_fetch_cmd.expected_source, self_identity.public.clone(), 
-                            directories.clone(), resource_fetch_cmd.return_channel).await
-                    });
-                }
+                let resource_fetch_cmd = resource_fetch_maybe.unwrap();
+                tokio::spawn(async move {
+                    // Network retrieval is invoked in a failure case of an attempt to load from
+                    // a file, when the file is not found. So, network handling will not be inside
+                    // this function, but invoked inside load_from_file().
+                    // Hopefully there will be a performance benefit from not having to touch
+                    // the file twice.
+                    load_from_file(resource_fetch_cmd.resources,
+                        resource_fetch_cmd.expected_source, self_identity.public.clone(), 
+                        dir_clone, resource_fetch_cmd.return_channel).await
+                });
             }
             quit_ready_indicator = quit_reciever.wait_for_quit() => {
                 info!("Shutting down resource loading system.");
