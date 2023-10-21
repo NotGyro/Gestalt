@@ -425,6 +425,66 @@ impl<T> ResourceStorage<T> where T: Send + Sized + Clone {
 	}
 }
 
+// This may need to be something cleverer / better optimized later.
+pub type ArchiveFileIndex = GestaltAtom; 
+
+/// Reference to a specific file, which could be direct use of a Resource, or inside of a file.
+/// Written as archive_resource_id::path/to/file.ext
+/// For example, `1_2048_J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA::sprites/imp.png`
+#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
+pub enum ResourcePath { 
+	/// The entire content-addressed ResourceId refers to exactly the bytes we need 
+	/// in order to use them for this purpose. 
+	Whole(ResourceId),
+	/// This is using one file inside an archive.
+	Archived(ResourceId, ArchiveFileIndex),
+}
+
+impl ResourcePath { 
+	fn get_id<'a>(&'a self) -> &'a ResourceId { 
+		match self {
+			ResourcePath::Whole(id) => id,
+			ResourcePath::Archived(id, _) => id,
+		}
+	}
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Serializer-friendly form of the ResourcePath, for network traffic.
+pub struct ResourcePathFlat { 
+	pub(in super::resource) id: ResourceId,
+	/// string_cache's Serde impls just serialize to/from strings, so this should be fine.
+	pub(in super::resource) file: ArchiveFileIndex,
+}
+
+impl Into<ResourcePath> for ResourcePathFlat {
+    fn into(self) -> ResourcePath {
+		// Default is empty-string in string_cache's implementation. 
+        if self.file == GestaltAtom::default() { 
+			ResourcePath::Whole(self.id)
+		}
+		else { 
+			ResourcePath::Archived(self.id, self.file)
+		}
+    }
+}
+impl Into<ResourcePathFlat> for ResourcePath {
+    fn into(self) -> ResourcePathFlat {
+		match self {
+			ResourcePath::Whole(id) => ResourcePathFlat {
+				id,
+				file: Default::default(),
+			},
+			ResourcePath::Archived(id, file) => {
+				ResourcePathFlat { 
+					id, 
+					file
+				}
+			},
+		}
+    }
+}
+
 #[derive(Debug)]
 pub(in self) struct ResourceFetch {
 	pub resources: Vec<ResourceId>,
@@ -580,28 +640,6 @@ impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
         self.recv_wait_inner()
     }
 }
-
-/// Reference to a specific file that's in a larger resource, such as an individual file in 
-/// an archive, an individual cell in a texture atlas,
-pub enum SubResource<T> where T: Clone + Send { 
-	/// The entire content-addressed ResourceId refers to exactly the bytes we need 
-	/// in order to use them for this purpose - for example, our texture is just the
-	/// entire file referred to by this ResourceId, not in any archive. 
-	Whole(ResourceId),
-	/// This is only using a portion of the resource, such as a file in an archive.
-	Part(ResourceId, T),
-}
-
-impl<T> SubResource<T> where T: Clone + Send { 
-	fn get_id<'a>(&'a self) -> &'a ResourceId { 
-		match self {
-			SubResource::Whole(id) => id,
-			SubResource::Part(id, _) => id,
-		}
-	}
-}
-// This may need to be something cleverer / better optimized later.
-pub type ArchiveFileIndex = GestaltAtom; 
 
 static RESOURCE_METADATA: ResourceStorage<ResourceInfo> = ResourceStorage::new();
 

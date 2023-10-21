@@ -36,27 +36,6 @@ pub enum LoadImageError {
 
 pub type InternalImage = RgbaImage;
 
-pub struct ImageCoord { 
-	pub x: u32, 
-	pub y: u32,
-}
-
-pub struct ImageRect { 
-	/// Upper-left, positive Y is down and positive X is right. Image-space coordinates.
-	pub origin: ImageCoord,
-	pub width: u32,
-	pub height: u32,
-}
-
-/// Which part of the underlying ResourceId are we seeking to use for our texture?
-/// For use as the T in SubResource<T>
-pub enum SubImageIndex {
-	/// A portion of an image file
-	Section(ImageRect),
-	ArchiveFile(ArchiveFileIndex),
-	/// A portion of an image file in an archive.
-	ArchiveFileSection(ArchiveFileIndex, ImageRect),
-}
 pub struct ImageProvider { 
 	inner: RawResourceProvider,
 }
