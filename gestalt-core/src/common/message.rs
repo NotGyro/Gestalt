@@ -449,8 +449,8 @@ where
 
 	/// Attempt to take the single consumer in this multi-producer single-consumer message channel.
 	pub fn take_receiver(&self) -> Option<MpscReceiver<T>> { 
-		let inner_receiver = self.retained_receiver.lock(); 
-		inner_receiver.map(|r| MpscReceiver::new(r))
+		let mut inner_receiver = self.retained_receiver.lock(); 
+		inner_receiver.take().map(|r| MpscReceiver::new(r))
 	} 
 }
 

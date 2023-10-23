@@ -22,7 +22,7 @@ pub mod net;
 #[macro_use]
 pub mod resource;
 
-pub mod client;
+//pub mod client;
 pub mod entity;
 pub mod message_types;
 pub mod script;
@@ -448,7 +448,7 @@ fn main() {
 								// TODO: Reintroduce batching to net send channels specifically. 
 								// or more of an inner-batching inside voxel change messages? Maybe.
 								//net_send_channel::send_multi_to(total_changes.clone(), &ident).unwrap();
-								for change in total_changes { 
+								for change in total_changes.iter() { 
 									net_send_channel::send_to(change.clone(), &ident).unwrap(); 
 								}
 							}
@@ -546,17 +546,17 @@ fn main() {
 			net_system_join_handle.await; //This is why quit_ready_sender exists. Make sure that's all done.
 			quit_ready.notify_ready();
 		});
-
+		/*
 		client::clientmain::run_client(
 			keys,
 			voxel_event_sender,
 			client_voxel_receiver_from_server,
 			Some(server_identity),
 			async_runtime,
-		);
+		);*/
 	} else {
 		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
-		let voxel_event_sender = NetSendChannel::new(voxel_event_sender);
+		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> = NetSendChannel::new(voxel_event_sender);
 
 		let client_voxel_receiver_from_server =
 			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
@@ -566,13 +566,13 @@ fn main() {
 				//redirect to /dev/null
 				let _ = voxel_event_receiver.recv().await;
 			}
-		});
+		}); /*
 		client::clientmain::run_client(
 			keys,
 			voxel_event_sender,
 			client_voxel_receiver_from_server,
 			None,
 			async_runtime,
-		);
+		);*/
 	}
 }

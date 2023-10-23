@@ -13,7 +13,12 @@ use crate::{
     message::{MpscReceiver, QuitReceiver, MessageReceiverAsync, MpscSender}
 };
 
-use super::{RESOURCE_FETCH, ResourceFetch, resource_id_to_prefix, ResourceId, ResourceLoadError, ResourceFetchResponse};
+use super::{
+    RESOURCE_FETCH, 
+    resource_id_to_prefix,
+    ResourceId,
+    ResourceRetrievalError,
+};
 
 static LOCK_SUFFIX: &'static str = ".lock";
 
@@ -23,6 +28,24 @@ pub enum ResourceSysError {
         Resource fetch request channel has already been claimed. \
         It is possible launch_resource_system() has been invoked twice.")]
 	NoFetchReceiver,
+}
+
+
+#[derive(Debug)]
+pub struct ResourceFetch {
+	pub resources: Vec<ResourceId>,
+	pub expected_source: NodeIdentity,
+	/// If this field contains a Some value, this is treated as a resource to be loaded
+	/// into memory, and then onto disk after that.
+	/// If this field contains a None value, this is treated as a pre-load, and the resource
+	/// is only saved to disk and not retained in memory.
+	pub return_channel: Option<MpscSender<ResourceFetchResponse>>,
+}
+
+#[derive(Debug)]
+pub struct ResourceFetchResponse { 
+	pub id: ResourceId,
+	pub data: Result<Arc<Vec<u8>>, ResourceRetrievalError>,
 }
 
 /// Initializes the asynchronous end (i.e. most of it) of the resource-loading system. 
@@ -42,7 +65,7 @@ fn path_for_resource(id: &ResourceId, origin_identity: &NodeIdentity, self_ident
             directories.resources_local.clone()
         }
         else {
-            directories.resources_cache_buckets[resource_id_to_prefix(&id)]
+            directories.resources_cache_buckets[resource_id_to_prefix(&id)].clone()
         }
     };
     let path = parent_dir.join(id.to_string());
@@ -68,7 +91,7 @@ async fn load_from_file(mut resources: Vec<ResourceId>, expected_source: NodeIde
                         chan.send(
                             ResourceFetchResponse{
                                 id: resource,
-                                data: Err(ResourceLoadError::Disk(resource.clone(), format!("{0:?}", e))),
+                                data: Err(ResourceRetrievalError::Disk(resource.clone(), format!("{0:?}", e))),
                             }
                         );
                     }

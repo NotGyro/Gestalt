@@ -1,11 +1,18 @@
-use std::sync::Arc;
-
-use gestalt_names::gestalt_atom::GestaltAtom;
+use futures::Future;
 use image::{ImageError, RgbaImage};
 
 use crate::common::identity::NodeIdentity;
 
-use super::{ResourceId, ResourceLoadError, ResourceProvider, RawResourceProvider, ResourcePoll, ResourceResult, ArchiveFileIndex};
+use super::{
+	ResourceId, 
+	ResourceRetrievalError, 
+	ResourcePoll,
+	ResourceError,
+	provider::{ 
+		ResourceProvider, 
+		RawResourceProvider
+	}, ResourcePath
+};
 
 pub const ID_MISSING_TEXTURE: ResourceId = ResourceId {
 	version: 0,
@@ -26,12 +33,21 @@ pub const ID_ERROR_TEXTURE: ResourceId = ResourceId {
 
 #[derive(thiserror::Error, Debug)]
 pub enum LoadImageError {
-	#[error("Error while retrieving an image: {0:?}")]
-	Retrieval(#[from] ResourceLoadError),
 	#[error("Error while decoding or transcoding an image: {0:?}")]
 	EncodeDecodeError(#[from] ImageError),
 	#[error("Tried to access a image named {0}, which does not appear to exist.")]
 	DoesNotExist(String),
+}
+
+
+impl From<ResourceError<ResourceRetrievalError>> for ResourceError<LoadImageError> {
+    fn from(value: ResourceError<ResourceRetrievalError>) -> Self {
+        match value {
+            ResourceError::Channel(e) => Self::Channel(e),
+            ResourceError::Retrieval(e) => Self::Retrieval(e),
+            ResourceError::Parse(_, e) => Self::Retrieval(e),
+        }
+    }
 }
 
 pub type InternalImage = RgbaImage;
@@ -47,54 +63,54 @@ impl ImageProvider {
 		}
 	}
 
-	async fn recv_wait_inner(&mut self) -> ResourcePoll<InternalImage, LoadImageError> { 
+	async fn recv_wait_inner(&mut self) -> Result<(ResourcePath, InternalImage), ResourceError<LoadImageError>> {
 		match self.inner.recv_wait().await {
-			ResourcePoll::Ready(id, buf) => {
+			Ok((id, buf)) => {
 				match image::load_from_memory(buf.as_slice()) {
-					Ok(image) => ResourcePoll::Ready(id, image.into_rgba8()),
-					Err(e) => ResourcePoll::ResourceError(id, e.into()),
+					Ok(image) => Ok((id, image.into_rgba8())),
+					Err(e) => Err(ResourceError::Parse(id,e.into())),
 				}
 			},
-			ResourcePoll::ChannelError(e) => ResourcePoll::ChannelError(e),
-			ResourcePoll::RetrievalError(e) => ResourcePoll::RetrievalError(e),
-			ResourcePoll::ResourceError(id, e) => ResourcePoll::RetrievalError(e),
-			ResourcePoll::None => ResourcePoll::None,
+			Err(e) => Err(e.into()),
 		}
 	}
 }
 
 impl ResourceProvider<InternalImage> for ImageProvider {
-    type Error = LoadImageError;
+    type ParseError = LoadImageError;
 
-    fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) -> super::ResourceResult<InternalImage, Self::Error> {
-        match self.inner.request_batch(resources, expected_source) {
-            ResourceResult::NotInitiated => todo!(),
-            ResourceResult::Pending => todo!(),
-            ResourceResult::Err(e) => ResourceResult::Err(LoadImageError::Retrieval(e)),
-            ResourceResult::Ready(buf) => todo!(),
-        }
-    }
+	/// Returns the subset of these resources that are ready *now.* 
+	/// If it returns an empty vec, that means all resources are pending. 
+	fn request_batch(&mut self, resources: Vec<ResourcePath>, expected_source: NodeIdentity) 
+			-> Vec<Result<(ResourcePath, InternalImage), ResourceError<LoadImageError>>> {
+		self.inner.request_batch(resources, expected_source).iter()
+			.map(|value| { 
+				match value {
+					Ok(buf) => todo!(),
+					Err(_) => todo!(),
+				}
+			}).collect()	
+	}
+	/// Request that we download files, except that there isn't any immediate need to use them
+	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
+	fn preload_batch(&mut self, resources: Vec<ResourcePath>, expected_source: NodeIdentity) {
+		self.inner.preload_batch(resources, expected_source)
+	}
 
-    fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) {
-        self.inner.preload_batch(resources, expected_source)
-    }
-
-    fn recv_poll(&mut self) -> super::ResourcePoll<InternalImage, Self::Error> {
-        match self.inner.recv_poll() {
-            ResourcePoll::Ready(id, buf) => {
+	fn recv_poll(&mut self) -> ResourcePoll<InternalImage, Self::ParseError> {
+		match self.inner.recv_poll() {
+			ResourcePoll::Ready(id, buf) => {
 				match image::load_from_memory(buf.as_slice()) {
 					Ok(image) => ResourcePoll::Ready(id, image.into_rgba8()),
-					Err(e) => ResourcePoll::ResourceError(id, e.into()),
+					Err(e) => ResourcePoll::Err(super::ResourceError::Parse(id,e.into())),
 				}
 			},
-            ResourcePoll::ChannelError(_) => todo!(),
-            ResourcePoll::RetrievalError(_) => todo!(),
-            ResourcePoll::ResourceError(_, _) => todo!(),
-            ResourcePoll::None => todo!(),
-        }
-    }
+			ResourcePoll::Err(e) => ResourcePoll::Err(e.into()),
+			ResourcePoll::None => ResourcePoll::None,
+		}
+	}
 
-    fn recv_wait(&mut self) -> impl futures::Future<Output = super::ResourcePoll<InternalImage, Self::Error>> + '_ {
+	fn recv_wait(&mut self) -> impl Future<Output = Result<(ResourcePath, InternalImage), ResourceError<Self::ParseError>>> + '_ {
         self.recv_wait_inner()
     }
 }

@@ -1,28 +1,25 @@
 use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::common::identity::NodeIdentity;
-use crate::message::{
-	MpscChannel, 
-	MpscSender, 
-	MpscReceiver,
-	MessageReceiver, RecvError, MessageReceiverAsync, SenderChannel
-};
+use crate::message::RecvError;
 
 use base64::Engine;
 use ed25519::Signature;
-use futures::Future;
 use gestalt_names::gestalt_atom::GestaltAtom;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::fmt::Debug;
-use std::sync::Arc;
 use std::{cmp::PartialEq, hash::Hash};
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
+use self::channels::RESOURCE_FETCH;
+
 //use string_cache::DefaultAtom as Atom;
 
+pub mod channels;
 pub mod image;
 pub mod retrieval;
+pub mod provider;
 //pub mod module; //Beware of redundant names.
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
@@ -205,6 +202,72 @@ pub mod resourceid_base64_string {
 	}
 }
 
+// This may need to be something cleverer / better optimized later.
+pub type ArchiveFileIndex = GestaltAtom; 
+
+/// Reference to a specific file, which could be direct use of a Resource, or inside of a file.
+/// Written as archive_resource_id::path/to/file.ext
+/// For example, `1_2048_J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA::sprites/imp.png`
+#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
+pub enum ResourcePath { 
+	/// The entire content-addressed ResourceId refers to exactly the bytes we need 
+	/// in order to use them for this purpose. 
+	Whole(ResourceId),
+	/// This is using one file inside an archive.
+	Archived(ResourceId, ArchiveFileIndex),
+}
+
+impl ResourcePath { 
+	fn get_id<'a>(&'a self) -> &'a ResourceId { 
+		match self {
+			ResourcePath::Whole(id) => id,
+			ResourcePath::Archived(id, _) => id,
+		}
+	}
+}
+
+impl Into<ResourcePath> for ResourceId {
+    fn into(self) -> ResourcePath {
+        ResourcePath::Whole(self)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+/// Serializer-friendly form of the ResourcePath, for network traffic.
+pub struct ResourcePathFlat { 
+	pub(in super::resource) id: ResourceId,
+	/// string_cache's Serde impls just serialize to/from strings, so this should be fine.
+	pub(in super::resource) file: ArchiveFileIndex,
+}
+
+impl Into<ResourcePath> for ResourcePathFlat {
+    fn into(self) -> ResourcePath {
+		// Default is empty-string in string_cache's implementation. 
+        if self.file == GestaltAtom::default() { 
+			ResourcePath::Whole(self.id)
+		}
+		else { 
+			ResourcePath::Archived(self.id, self.file)
+		}
+    }
+}
+impl Into<ResourcePathFlat> for ResourcePath {
+    fn into(self) -> ResourcePathFlat {
+		match self {
+			ResourcePath::Whole(id) => ResourcePathFlat {
+				id,
+				file: Default::default(),
+			},
+			ResourcePath::Archived(id, file) => {
+				ResourcePathFlat { 
+					id, 
+					file
+				}
+			},
+		}
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub enum ResourceKind {
 	/// A "Manifest" is any kind of declarative config structure as a resource.
@@ -262,7 +325,7 @@ impl PartialEq for ResourceInfo {
 /// Any resource-loading error that pertains to fetching the raw resource bytes in the first place,
 /// and not to parsing or processing any specific file type. 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum ResourceLoadError {
+pub enum ResourceRetrievalError {
 	#[error("While trying to retrieve resource {0:?}, a network error was encountered: {1}")]
 	Network(ResourceId, String),
 	#[error("Error loading resource {0:?} from disk: {1}")]
@@ -271,8 +334,54 @@ pub enum ResourceLoadError {
 	NotFound(ResourceId),
 	#[error("Timed out while attempting to fetch resource {0:?}.")]
 	Timeout(ResourceId),
+	#[error("Failed to verify resource {0:?} due to error {1:?}.")]
+	Verification(ResourceId, VerifyResourceError),
 	#[error("Message-passing error while trying to load resource {0:?}: {1}.")]
 	ChannelError(ResourceId, String),
+}
+
+pub enum ResourceError<E> where E: Debug {
+	Channel(RecvError), 
+	Retrieval(ResourceRetrievalError),
+	Parse(ResourcePath, E)
+}
+
+impl<E> Clone for ResourceError<E> where E: Debug + Clone {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Channel(arg0) => Self::Channel(arg0.clone()),
+            Self::Retrieval(arg0) => Self::Retrieval(arg0.clone()),
+            Self::Parse(arg0, arg1) => Self::Parse(arg0.clone(), arg1.clone()),
+        }
+    }
+}
+
+impl<E> Debug for ResourceError<E> where E: Debug + Clone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Channel(recv) => f.write_fmt(
+				format_args!("Error encountered while polling a channel\
+				to retrieve resources: {0:?}", recv)
+			),
+            Self::Retrieval(e) => e.fmt(f),
+            Self::Parse(id, e) => f.write_fmt(
+				format_args!("While attempting to parse / load resource ID {0:?},\
+				an error was encountered: {1:?}", id, e)
+			)
+        }
+    }
+} 
+
+impl<E> From<RecvError> for ResourceError<E> where E: Debug {
+    fn from(value: RecvError) -> Self {
+        Self::Channel(value)
+    }
+} 
+
+impl<E> From<ResourceRetrievalError> for ResourceError<E> where E: Debug { 
+	fn from(value: ResourceRetrievalError) -> Self { 
+		Self::Retrieval(value)
+	}
 }
 
 impl Eq for ResourceInfo {}
@@ -300,63 +409,6 @@ impl<E> Clone for ResourceStatus<E> where E : Clone + Debug {
             Self::Ready => Self::Ready
         }
     }
-}
-
-pub enum ResourceResult<T, E> where E: Debug {
-	NotInitiated,
-	Pending,
-	///Encountered a problem while trying to load this resource.
-	Err(E),
-	Ready(T)
-}
-
-impl<T, E> From<ResourceResult<T, E>> for ResourceStatus<E>
-where
-	E: Debug,
-{
-	fn from(r: ResourceResult<T, E>) -> Self {
-		match r {
-			ResourceResult::NotInitiated => ResourceStatus::NotInitiated,
-			ResourceResult::Pending => ResourceStatus::Pending,
-			ResourceResult::Err(e) => ResourceStatus::Errored(e),
-			ResourceResult::Ready(_) => ResourceStatus::Ready
-		}
-	}
-}
-
-impl<T, E> From<Result<T, E>> for ResourceResult<T, E> where T: Send, E: Debug {
-	fn from(r: Result<T, E>) -> Self {
-		match r {
-			Ok(v) => Self::Ready(v),
-			Err(e) => Self::Err(e),
-		}
-	}
-}
-impl<T, E> From<Option<Result<T, E>>> for ResourceResult<T, E>
-where
-	T: Send, E: Debug
-{
-	fn from(r: Option<Result<T, E>>) -> Self {
-		match r {
-			Some(Ok(v)) => Self::Ready(v),
-			Some(Err(e)) => Self::Err(e),
-			None => Self::Pending,
-		}
-	}
-}
-
-impl<T, E> From<ResourceResult<T, E>> for Option<Result<T, E>>
-where
-	T: Send, E: Debug,
-{
-	fn from(r: ResourceResult<T, E>) -> Self {
-		match r {
-			ResourceResult::Ready(v) => Some(Ok(v)),
-			ResourceResult::Err(e) => Some(Err(e)),
-			ResourceResult::Pending => None,
-			ResourceResult::NotInitiated => None
-		}
-	}
 }
 
 pub(in self) fn resource_id_to_prefix(resource: &ResourceId) -> usize { 
@@ -425,220 +477,21 @@ impl<T> ResourceStorage<T> where T: Send + Sized + Clone {
 	}
 }
 
-// This may need to be something cleverer / better optimized later.
-pub type ArchiveFileIndex = GestaltAtom; 
-
-/// Reference to a specific file, which could be direct use of a Resource, or inside of a file.
-/// Written as archive_resource_id::path/to/file.ext
-/// For example, `1_2048_J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA::sprites/imp.png`
-#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
-pub enum ResourcePath { 
-	/// The entire content-addressed ResourceId refers to exactly the bytes we need 
-	/// in order to use them for this purpose. 
-	Whole(ResourceId),
-	/// This is using one file inside an archive.
-	Archived(ResourceId, ArchiveFileIndex),
-}
-
-impl ResourcePath { 
-	fn get_id<'a>(&'a self) -> &'a ResourceId { 
-		match self {
-			ResourcePath::Whole(id) => id,
-			ResourcePath::Archived(id, _) => id,
-		}
-	}
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-/// Serializer-friendly form of the ResourcePath, for network traffic.
-pub struct ResourcePathFlat { 
-	pub(in super::resource) id: ResourceId,
-	/// string_cache's Serde impls just serialize to/from strings, so this should be fine.
-	pub(in super::resource) file: ArchiveFileIndex,
-}
-
-impl Into<ResourcePath> for ResourcePathFlat {
-    fn into(self) -> ResourcePath {
-		// Default is empty-string in string_cache's implementation. 
-        if self.file == GestaltAtom::default() { 
-			ResourcePath::Whole(self.id)
-		}
-		else { 
-			ResourcePath::Archived(self.id, self.file)
-		}
-    }
-}
-impl Into<ResourcePathFlat> for ResourcePath {
-    fn into(self) -> ResourcePathFlat {
-		match self {
-			ResourcePath::Whole(id) => ResourcePathFlat {
-				id,
-				file: Default::default(),
-			},
-			ResourcePath::Archived(id, file) => {
-				ResourcePathFlat { 
-					id, 
-					file
-				}
-			},
-		}
-    }
-}
-
-#[derive(Debug)]
-pub(in self) struct ResourceFetch {
-	pub resources: Vec<ResourceId>,
-	pub expected_source: NodeIdentity,
-	/// If this field contains a Some value, this is treated as a resource to be loaded
-	/// into memory, and then onto disk after that.
-	/// If this field contains a None value, this is treated as a pre-load, and the resource
-	/// is only saved to disk and not retained in memory.
-	pub return_channel: Option<MpscSender<ResourceFetchResponse>>,
-}
-
-#[derive(Debug)]
-pub(in self) struct ResourceFetchResponse { 
-	pub id: ResourceId,
-	pub data: Result<Arc<Vec<u8>>, ResourceLoadError>,
-}
-
-global_channel!(MpscChannel, RESOURCE_FETCH, ResourceFetch, 65536);
-
 pub enum ResourcePoll<T, E> where E: Debug { 
-	Ready(ResourceId, T), 
-	ChannelError(RecvError),
-	RetrievalError(ResourceLoadError),
-	ResourceError(ResourceId, E),
+	Ready(ResourcePath, T), 
+	Err(ResourceError<E>),
 	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling. 
 	None,
-}
-pub enum ResourcePollError<E> where E: Debug { 
-	Channel(RecvError),
-	Retrieval(ResourceLoadError),
-	Resource(ResourceId, E),
 }
 
 impl<T, E> ResourcePoll<T, E> where E: Debug { 
 	pub fn is_none(&self) -> bool {
 		match self {
 			ResourcePoll::Ready(_, _) => false,
-			ResourcePoll::ChannelError(_) => false,
-			ResourcePoll::RetrievalError(_) => false,
-			ResourcePoll::ResourceError(_, _) => false,
+			ResourcePoll::Err(_) => false,
 			ResourcePoll::None => true,
 		}
 	}
-}
-
-pub trait ResourceProvider<T> { 
-	type Error : Debug + From<ResourceLoadError>;
-
-	fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) -> ResourceResult<T, Self::Error>;
-	fn request_one(&mut self, resource: ResourceId, expected_source: NodeIdentity) -> ResourceResult<T, Self::Error> {
-		self.request_batch(vec![resource], expected_source)
-	}
-
-	/// Request that we download files, except that there isn't any immediate need to use them
-	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
-	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity);
-	fn preload_one(&mut self, resource: ResourceId, expected_source: NodeIdentity) { 
-		self.preload_batch(vec![resource], expected_source)
-	}
-
-	fn recv_poll(&mut self) -> ResourcePoll<T, Self::Error>;
-	fn recv_wait(&mut self) -> impl Future<Output = ResourcePoll<T, Self::Error>> + '_;
-
-	/// Poll until there are no remaining results. 
-	fn recv_poll_all(&mut self) -> Vec<ResourcePoll<T, Self::Error>> { 
-		let mut next = self.recv_poll();
-		let mut buf = vec![];
-		while !next.is_none() { 
-			match next {
-				ResourcePoll::Ready(id, val) => buf.push(ResourcePoll::Ready(id, val)),
-				ResourcePoll::RetrievalError(e) => buf.push(ResourcePoll::RetrievalError(e)),
-				ResourcePoll::ResourceError(id, e) => buf.push(ResourcePoll::ResourceError(id, e)),
-				ResourcePoll::ChannelError(e) => {
-					// Return early - we won't be getting any more results out of this one.
-					buf.push(ResourcePoll::ChannelError(e)); 
-					return buf;
-				},
-				ResourcePoll::None => unreachable!(
-					"See \"while next != ResourcePoll::None\" above."
-				),
-			}
-			next = self.recv_poll(); // Set up next iteration of the loop.
-		}
-		return buf;
-	}
-}
-
-pub struct RawResourceProvider { 
-	fetch_sender: MpscSender<ResourceFetch>,
-	return_receiver: MpscReceiver<ResourceFetchResponse>,
-	return_template: MpscSender<ResourceFetchResponse>,
-}
-impl RawResourceProvider {
-	pub fn new(return_channel_capacity: usize) -> Self { 
-		let return_channel = MpscChannel::new(return_channel_capacity); 
-		Self {
-			fetch_sender: RESOURCE_FETCH.sender_subscribe(),
-			return_receiver: return_channel.take_receiver().unwrap(),
-			return_template: return_channel.sender_subscribe(),
-		}
-	}
-
-	fn request_inner(&self, resources: Vec<ResourceId>, expected_source: NodeIdentity, 
-		return_channel: Option<MpscSender<ResourceFetchResponse>>)
-		-> ResourceResult<Arc<Vec<u8>>, ResourceLoadError> { 
-		self.fetch_sender.blocking_send(ResourceFetch {
-			resources,
-			expected_source,
-			return_channel,
-		});
-		ResourceResult::Pending
-	}
-
-	async fn recv_wait_inner(&mut self) -> ResourcePoll<Arc<Vec<u8>>, ResourceLoadError> { 
-		match self.return_receiver.recv_wait().await { 
-			Ok(value) => {
-				match value.data {
-					Ok(v) => ResourcePoll::Ready(value.id, v),
-					Err(e) => ResourcePoll::RetrievalError(e),
-				}
-			}
-            Err(e) => ResourcePoll::ChannelError(e),
-		}
-	}
-}
-
-impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
-    type Error = ResourceLoadError;
-
-    fn request_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) 
-			-> ResourceResult<Arc<Vec<u8>>, Self::Error> {
-        self.request_inner(resources, expected_source, Some(self.return_template.clone()))
-    }
-
-    fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) {
-        self.request_inner(resources, expected_source, None); 
-    }
-
-    fn recv_poll(&mut self) -> ResourcePoll<Arc<Vec<u8>>, Self::Error> {
-        match self.return_receiver.recv_poll() { 
-			Ok(Some(v)) => {
-				match v.data { 
-					Ok(value) => ResourcePoll::Ready(v.id, value),
-					Err(e) => ResourcePoll::RetrievalError(e),
-				}
-			}
-			Ok(None) => ResourcePoll::None,
-            Err(e) => ResourcePoll::ChannelError(e),
-		}
-    }
-
-    fn recv_wait(&mut self) -> impl Future<Output = ResourcePoll<Arc<Vec<u8>>, Self::Error>> + '_ {
-        self.recv_wait_inner()
-    }
 }
 
 static RESOURCE_METADATA: ResourceStorage<ResourceInfo> = ResourceStorage::new();
