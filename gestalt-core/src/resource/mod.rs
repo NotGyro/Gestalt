@@ -1,5 +1,5 @@
-use crate::common::{FastHashMap, new_fast_hash_map};
 use crate::common::identity::NodeIdentity;
+use crate::common::{new_fast_hash_map, FastHashMap};
 use crate::message::RecvError;
 
 use base64::Engine;
@@ -18,8 +18,8 @@ use self::channels::RESOURCE_FETCH;
 
 pub mod channels;
 pub mod image;
-pub mod retrieval;
 pub mod provider;
+pub mod retrieval;
 //pub mod module; //Beware of redundant names.
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
@@ -203,22 +203,22 @@ pub mod resourceid_base64_string {
 }
 
 // This may need to be something cleverer / better optimized later.
-pub type ArchiveFileIndex = GestaltAtom; 
+pub type ArchiveFileIndex = GestaltAtom;
 
 /// Reference to a specific file, which could be direct use of a Resource, or inside of a file.
 /// Written as archive_resource_id::path/to/file.ext
 /// For example, `1_2048_J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA::sprites/imp.png`
 #[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
-pub enum ResourcePath { 
-	/// The entire content-addressed ResourceId refers to exactly the bytes we need 
-	/// in order to use them for this purpose. 
+pub enum ResourcePath {
+	/// The entire content-addressed ResourceId refers to exactly the bytes we need
+	/// in order to use them for this purpose.
 	Whole(ResourceId),
 	/// This is using one file inside an archive.
 	Archived(ResourceId, ArchiveFileIndex),
 }
 
-impl ResourcePath { 
-	fn get_id<'a>(&'a self) -> &'a ResourceId { 
+impl ResourcePath {
+	fn get_id<'a>(&'a self) -> &'a ResourceId {
 		match self {
 			ResourcePath::Whole(id) => id,
 			ResourcePath::Archived(id, _) => id,
@@ -227,45 +227,39 @@ impl ResourcePath {
 }
 
 impl Into<ResourcePath> for ResourceId {
-    fn into(self) -> ResourcePath {
-        ResourcePath::Whole(self)
-    }
+	fn into(self) -> ResourcePath {
+		ResourcePath::Whole(self)
+	}
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 /// Serializer-friendly form of the ResourcePath, for network traffic.
-pub struct ResourcePathFlat { 
+pub struct ResourcePathFlat {
 	pub(in super::resource) id: ResourceId,
 	/// string_cache's Serde impls just serialize to/from strings, so this should be fine.
 	pub(in super::resource) file: ArchiveFileIndex,
 }
 
 impl Into<ResourcePath> for ResourcePathFlat {
-    fn into(self) -> ResourcePath {
-		// Default is empty-string in string_cache's implementation. 
-        if self.file == GestaltAtom::default() { 
+	fn into(self) -> ResourcePath {
+		// Default is empty-string in string_cache's implementation.
+		if self.file == GestaltAtom::default() {
 			ResourcePath::Whole(self.id)
-		}
-		else { 
+		} else {
 			ResourcePath::Archived(self.id, self.file)
 		}
-    }
+	}
 }
 impl Into<ResourcePathFlat> for ResourcePath {
-    fn into(self) -> ResourcePathFlat {
+	fn into(self) -> ResourcePathFlat {
 		match self {
 			ResourcePath::Whole(id) => ResourcePathFlat {
 				id,
 				file: Default::default(),
 			},
-			ResourcePath::Archived(id, file) => {
-				ResourcePathFlat { 
-					id, 
-					file
-				}
-			},
+			ResourcePath::Archived(id, file) => ResourcePathFlat { id, file },
 		}
-    }
+	}
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
@@ -323,7 +317,7 @@ impl PartialEq for ResourceInfo {
 }
 
 /// Any resource-loading error that pertains to fetching the raw resource bytes in the first place,
-/// and not to parsing or processing any specific file type. 
+/// and not to parsing or processing any specific file type.
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ResourceRetrievalError {
 	#[error("While trying to retrieve resource {0:?}, a network error was encountered: {1}")]
@@ -340,46 +334,63 @@ pub enum ResourceRetrievalError {
 	ChannelError(ResourceId, String),
 }
 
-pub enum ResourceError<E> where E: Debug {
-	Channel(RecvError), 
+pub enum ResourceError<E>
+where
+	E: Debug,
+{
+	Channel(RecvError),
 	Retrieval(ResourceRetrievalError),
-	Parse(ResourcePath, E)
+	Parse(ResourcePath, E),
 }
 
-impl<E> Clone for ResourceError<E> where E: Debug + Clone {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Channel(arg0) => Self::Channel(arg0.clone()),
-            Self::Retrieval(arg0) => Self::Retrieval(arg0.clone()),
-            Self::Parse(arg0, arg1) => Self::Parse(arg0.clone(), arg1.clone()),
-        }
-    }
+impl<E> Clone for ResourceError<E>
+where
+	E: Debug + Clone,
+{
+	fn clone(&self) -> Self {
+		match self {
+			Self::Channel(arg0) => Self::Channel(arg0.clone()),
+			Self::Retrieval(arg0) => Self::Retrieval(arg0.clone()),
+			Self::Parse(arg0, arg1) => Self::Parse(arg0.clone(), arg1.clone()),
+		}
+	}
 }
 
-impl<E> Debug for ResourceError<E> where E: Debug + Clone {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Channel(recv) => f.write_fmt(
-				format_args!("Error encountered while polling a channel\
-				to retrieve resources: {0:?}", recv)
-			),
-            Self::Retrieval(e) => e.fmt(f),
-            Self::Parse(id, e) => f.write_fmt(
-				format_args!("While attempting to parse / load resource ID {0:?},\
-				an error was encountered: {1:?}", id, e)
-			)
-        }
-    }
-} 
+impl<E> Debug for ResourceError<E>
+where
+	E: Debug + Clone,
+{
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::Channel(recv) => f.write_fmt(format_args!(
+				"Error encountered while polling a channel\
+				to retrieve resources: {0:?}",
+				recv
+			)),
+			Self::Retrieval(e) => e.fmt(f),
+			Self::Parse(id, e) => f.write_fmt(format_args!(
+				"While attempting to parse / load resource ID {0:?},\
+				an error was encountered: {1:?}",
+				id, e
+			)),
+		}
+	}
+}
 
-impl<E> From<RecvError> for ResourceError<E> where E: Debug {
-    fn from(value: RecvError) -> Self {
-        Self::Channel(value)
-    }
-} 
+impl<E> From<RecvError> for ResourceError<E>
+where
+	E: Debug,
+{
+	fn from(value: RecvError) -> Self {
+		Self::Channel(value)
+	}
+}
 
-impl<E> From<ResourceRetrievalError> for ResourceError<E> where E: Debug { 
-	fn from(value: ResourceRetrievalError) -> Self { 
+impl<E> From<ResourceRetrievalError> for ResourceError<E>
+where
+	E: Debug,
+{
+	fn from(value: ResourceRetrievalError) -> Self {
 		Self::Retrieval(value)
 	}
 }
@@ -393,30 +404,38 @@ pub const ID_ERRORED_RESOURCE: ResourceId = ResourceId {
 };
 
 #[derive(Debug)]
-pub enum ResourceStatus<E> where E: Debug { 
+pub enum ResourceStatus<E>
+where
+	E: Debug,
+{
 	NotInitiated,
 	Pending,
 	Errored(E),
-	Ready
+	Ready,
 }
 
-impl<E> Clone for ResourceStatus<E> where E : Clone + Debug {
-    fn clone(&self) -> Self {
-        match self {
-            Self::NotInitiated => Self::NotInitiated,
-            Self::Pending => Self::Pending,
-            Self::Errored(e) => Self::Errored(e.clone()),
-            Self::Ready => Self::Ready
-        }
-    }
+impl<E> Clone for ResourceStatus<E>
+where
+	E: Clone + Debug,
+{
+	fn clone(&self) -> Self {
+		match self {
+			Self::NotInitiated => Self::NotInitiated,
+			Self::Pending => Self::Pending,
+			Self::Errored(e) => Self::Errored(e.clone()),
+			Self::Ready => Self::Ready,
+		}
+	}
 }
 
-pub(in self) fn resource_id_to_prefix(resource: &ResourceId) -> usize { 
-	#[cfg(target_endian = "little")] { 
+pub(self) fn resource_id_to_prefix(resource: &ResourceId) -> usize {
+	#[cfg(target_endian = "little")]
+	{
 		resource.hash[31] as usize
 	}
 
-	#[cfg(target_endian = "big")] {
+	#[cfg(target_endian = "big")]
+	{
 		resource.hash[0] as usize
 	}
 }
@@ -425,44 +444,45 @@ struct ResourceStorage<T: Send + Sized> {
 	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<ResourceId, T>>; 256]>,
 }
 
-impl<T> ResourceStorage<T> where T: Send + Sized + Clone { 
-	pub const fn new() -> Self { 
-		Self { 
-			buckets: once_cell::sync::Lazy::new(|| { 
-				std::array::from_fn(| _i | {
-					tokio::sync::RwLock::new(new_fast_hash_map())
-				})
-			})
+impl<T> ResourceStorage<T>
+where
+	T: Send + Sized + Clone,
+{
+	pub const fn new() -> Self {
+		Self {
+			buckets: once_cell::sync::Lazy::new(|| {
+				std::array::from_fn(|_i| tokio::sync::RwLock::new(new_fast_hash_map()))
+			}),
 		}
 	}
-	pub async fn get(&self, id: &ResourceId) -> Option<T> { 
+	pub async fn get(&self, id: &ResourceId) -> Option<T> {
 		let guard = self.buckets[resource_id_to_prefix(id)].read().await;
 		guard.get(id).cloned()
 	}
-	pub fn get_blocking(&self, id: &ResourceId) -> Option<T> { 
+	pub fn get_blocking(&self, id: &ResourceId) -> Option<T> {
 		let guard = self.buckets[resource_id_to_prefix(id)].blocking_read();
 		guard.get(id).cloned()
 	}
-	pub async fn insert(&self, id: ResourceId, value: T) -> Option<T> { 
+	pub async fn insert(&self, id: ResourceId, value: T) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		guard.insert(id, value)
 	}
-	pub fn insert_blocking(&self, id: ResourceId, value: T) -> Option<T> { 
+	pub fn insert_blocking(&self, id: ResourceId, value: T) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		guard.insert(id, value)
 	}
-	pub async fn remove(&self, id: &ResourceId) -> Option<T> { 
+	pub async fn remove(&self, id: &ResourceId) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		guard.remove(&id)
 	}
-	pub fn remove_blocking(&self, id: &ResourceId) -> Option<T> { 
+	pub fn remove_blocking(&self, id: &ResourceId) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		guard.remove(&id)
 	}
 	pub async fn update(&self, id: &ResourceId, new: T) {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		let reference = guard.get_mut(id);
-		match reference { 
+		match reference {
 			Some(inner) => *inner = new,
 			None => _ = guard.insert(id.clone(), new),
 		}
@@ -470,21 +490,27 @@ impl<T> ResourceStorage<T> where T: Send + Sized + Clone {
 	pub fn update_blocking(&self, id: &ResourceId, new: T) {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		let reference = guard.get_mut(id);
-		match reference { 
+		match reference {
 			Some(inner) => *inner = new,
 			None => _ = guard.insert(id.clone(), new),
 		}
 	}
 }
 
-pub enum ResourcePoll<T, E> where E: Debug { 
-	Ready(ResourcePath, T), 
+pub enum ResourcePoll<T, E>
+where
+	E: Debug,
+{
+	Ready(ResourcePath, T),
 	Err(ResourceError<E>),
-	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling. 
+	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling.
 	None,
 }
 
-impl<T, E> ResourcePoll<T, E> where E: Debug { 
+impl<T, E> ResourcePoll<T, E>
+where
+	E: Debug,
+{
 	pub fn is_none(&self) -> bool {
 		match self {
 			ResourcePoll::Ready(_, _) => false,

@@ -4,6 +4,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
+use gestalt_proc_macros::netmsg;
 use laminar::ConnectionMessenger;
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};

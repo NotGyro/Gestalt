@@ -31,14 +31,18 @@ where
 		}
 	}
 	pub fn send_untyped(&self, packet: PacketIntermediary) -> Result<(), SendError> {
-		self.inner.send(vec![packet]).map(|_v| () ).map_err(|_e| SendError::NoReceivers)
+		self.inner
+			.send(vec![packet])
+			.map(|_v| ())
+			.map_err(|_e| SendError::NoReceivers)
 	}
 
-	pub fn send_many<R, V>(&self, messages: Vec<R>)
-			-> Result<(), crate::message::SendError> 
-			where R: Message + Into<T>,
-			V: IntoIterator<Item=R> { 
-		for message in messages { 
+	pub fn send_many<R, V>(&self, messages: Vec<R>) -> Result<(), crate::message::SendError>
+	where
+		R: Message + Into<T>,
+		V: IntoIterator<Item = R>,
+	{
+		for message in messages {
 			let packet = message.into().construct_packet().map_err(|e| {
 				SendError::Encode(format!(
 					"Could not convert packet of type {} into a packet intermediary: {:?}",
@@ -84,7 +88,7 @@ pub mod net_send_channel {
 	use crate::{
 		common::identity::NodeIdentity,
 		message::{
-			BroadcastChannel, BroadcastReceiver, DomainSubscribeErr, SendError, DomainMessageSender,
+			BroadcastChannel, BroadcastReceiver, DomainMessageSender, DomainSubscribeErr, SendError,
 		},
 	};
 
@@ -220,13 +224,10 @@ pub mod net_recv_channel {
 
 		/// Returns an empty vec when no new messages are ready.
 		pub fn recv_poll(&mut self) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {
-			match self.inner.recv_poll()? { 
-				Some(buffer) => {
-					Self::decode(buffer)
-				}, 
-				None => Ok(Vec::new())
+			match self.inner.recv_poll()? {
+				Some(buffer) => Self::decode(buffer),
+				None => Ok(Vec::new()),
 			}
-			
 		}
 
 		pub async fn recv_wait(&mut self) -> Result<Vec<(NodeIdentity, T)>, NetMsgRecvError> {

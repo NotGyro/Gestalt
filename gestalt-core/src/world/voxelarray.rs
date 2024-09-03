@@ -100,8 +100,10 @@ where
 {
 	#[error("Attempted to access a voxel at position {0}, which is out of bounds on this chunk.")]
 	OutOfBounds(VoxelPos<T>),
-	#[error("ID is present in a voxel array at {0} which does not have a corresponding palette \
-		entry - possible chunk file corruption.")]
+	#[error(
+		"ID is present in a voxel array at {0} which does not have a corresponding palette \
+		entry - possible chunk file corruption."
+	)]
 	NoPaletteEntry(VoxelPos<T>),
 }
 
@@ -112,7 +114,7 @@ where
 	fn kind(&self) -> VoxelErrorCategory {
 		match self {
 			VoxelArrayError::OutOfBounds(_) => VoxelErrorCategory::OutOfBounds,
-    		VoxelArrayError::NoPaletteEntry(_) => VoxelErrorCategory::PaletteIssue,
+			VoxelArrayError::NoPaletteEntry(_) => VoxelErrorCategory::PaletteIssue,
 		}
 	}
 }
@@ -190,12 +192,14 @@ where
 	type Error = VoxelArrayError<P>;
 	fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error> {
 		//Packed array access
-		self.data.get(chunk_xyz_to_i(
-			coord.x.as_usize(),
-			coord.y.as_usize(),
-			coord.z.as_usize(),
-			self.size,
-		)).ok_or(VoxelArrayError::OutOfBounds(coord))
+		self.data
+			.get(chunk_xyz_to_i(
+				coord.x.as_usize(),
+				coord.y.as_usize(),
+				coord.z.as_usize(),
+				self.size,
+			))
+			.ok_or(VoxelArrayError::OutOfBounds(coord))
 	}
 
 	fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), Self::Error> {
@@ -289,12 +293,9 @@ where
 	type Error = VoxelArrayError<P>;
 	fn get(&self, coord: VoxelPos<P>) -> Result<&T, Self::Error> {
 		//Packed array access
-		self.data.get(chunk_xyz_to_i(
-			coord.x.as_usize(),
-			coord.y.as_usize(),
-			coord.z.as_usize(),
-			SIZE,
-		)).ok_or(VoxelArrayError::OutOfBounds(coord))
+		self.data
+			.get(chunk_xyz_to_i(coord.x.as_usize(), coord.y.as_usize(), coord.z.as_usize(), SIZE))
+			.ok_or(VoxelArrayError::OutOfBounds(coord))
 	}
 
 	fn set(&mut self, coord: VoxelPos<P>, value: T) -> Result<(), Self::Error> {
@@ -391,9 +392,9 @@ fn chunk_index_reverse() {
 	let chunk_sz = 16_usize;
 	let mut rng = rand::thread_rng();
 	for _ in 0..4096 {
-		let x = rng.gen_range(0, 16);
-		let y = rng.gen_range(0, 16);
-		let z = rng.gen_range(0, 16);
+		let x = rng.gen_range(0..16);
+		let y = rng.gen_range(0..16);
+		let z = rng.gen_range(0..16);
 
 		let i_value = chunk_xyz_to_i(x, y, z, chunk_sz);
 		let (x1, y1, z1) = chunk_i_to_xyz(i_value, chunk_sz);

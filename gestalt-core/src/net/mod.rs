@@ -510,6 +510,7 @@ mod test {
 	use super::preprotocol::launch_preprotocol_listener;
 	use super::preprotocol::preprotocol_connect_to_server;
 	use super::*;
+	use gestalt_proc_macros::netmsg;
 	use lazy_static::lazy_static;
 	use log::LevelFilter;
 	use serde::Deserialize;
@@ -672,9 +673,7 @@ mod test {
 		let server_to_client_sender: NetSendChannel<TestNetMsg> =
 			net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
 		info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
-		server_to_client_sender
-			.send(test_reply.clone())
-			.unwrap();
+		server_to_client_sender.send(test_reply.clone()).unwrap();
 
 		{
 			let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait())

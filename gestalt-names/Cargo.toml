@@ -1,8 +1,9 @@
+cargo-features = ["edition2024"]
 [package]
 name = "gestalt_names"
 version = "0.0.1"
 authors = ["Emily 'Gyro' C. <gyrocoder@gmail.com>", "trashbyte"]
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 
 [dependencies]

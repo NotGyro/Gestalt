@@ -7,7 +7,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use log::{error, info, trace};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use signature::Signature;
 use snow::params::NoiseParams;
 
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
@@ -67,7 +66,9 @@ pub enum HandshakeError {
 	ProtocolKeyWrongSize(usize),
 	#[error("Remote static noise key was expected at handshake step {0}, but it was not present!")]
 	MissingRemoteStatic(u8),
-	#[error("Unable to sign a buffer so that we can confirm our identity to a peer in a handshake: {0:?}")]
+	#[error(
+		"Unable to sign a buffer so that we can confirm our identity to a peer in a handshake: {0}"
+	)]
 	CannotSign(ed25519_dalek::SignatureError),
 	#[error("Gestalt signature sent to us by a peer did not pass validation. The other side's attempt to sign the nonce we gave it resulted in a signature which seems invalid.")]
 	BadSignature(ed25519_dalek::SignatureError),
@@ -87,12 +88,23 @@ pub enum HandshakeError {
 	NoProtocolsInCommon,
 	#[error("Key challenge header failed to validate in handshake.")]
 	BadChallengeHeader,
-	#[error("Timeout in handshake: {0:?}.")]
+	#[error("Timeout in handshake: {0}.")]
 	Timeout(#[from] tokio::time::error::Elapsed),
 	#[error("Mismatch channel closed")]
 	MismatchChannelClosed,
 	#[error("Mismatch channel instances were used already")]
 	NoMismatchChannels,
+	#[error("Bad signature length. Expected 64 bytes, got: {0}")]
+	SignatureLengthWrong(usize),
+}
+
+fn buf_to_64(buf: &Vec<u8>) -> Result<[u8; 64], usize> {
+	if buf.len() != 64 {
+		return Err(buf.len());
+	}
+	let mut out: [u8; 64] = [0; 64];
+	out.copy_from_slice(&buf);
+	Ok(out)
 }
 
 pub(super) fn noise_protocol_dir(protocol_store_dir: &PathBuf) -> PathBuf {
@@ -523,7 +535,7 @@ pub async fn initiator_reply(
 
 fn make_signing_nonce() -> [u8; 32] {
 	let mut rng = rand_core::OsRng::default();
-	rng.gen()
+	rng.r#gen()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -654,7 +666,7 @@ pub fn initiator_sign_buf(
 		let our_signature = our_keys
 			.sign(challenge_string.as_bytes())
 			.map_err(HandshakeError::CannotSign)?;
-		let our_signature_bytes = our_signature.as_bytes();
+		let our_signature_bytes = our_signature.to_bytes();
 		let our_signature_b64 = BASE_64.encode(our_signature_bytes);
 
 		// Validate header
@@ -736,6 +748,8 @@ pub fn responder_sign(
 
 		// Validate their signature
 		let their_sig = BASE_64.decode(msg.initiator_signature.as_bytes())?;
+		let their_sig =
+			buf_to_64(&their_sig).map_err(|length| HandshakeError::SignatureLengthWrong(length))?;
 		peer_identity
 			.verify_signature(our_challenge.as_bytes(), &their_sig)
 			.map_err(HandshakeError::BadSignature)?;
@@ -745,7 +759,7 @@ pub fn responder_sign(
 		let our_signature = our_keys
 			.sign(challenge_string.as_bytes())
 			.map_err(HandshakeError::CannotSign)?;
-		let our_signature_bytes = our_signature.as_bytes();
+		let our_signature_bytes = our_signature.to_bytes();
 		let our_signature_b64 = BASE_64.encode(our_signature_bytes);
 
 		// Validate their header
@@ -813,6 +827,8 @@ pub fn initiator_final(
 		let msg: HandshakeMessage6 = serde_json::from_slice(&read_buf[0..read_buf_len])?;
 		// Validate their signature
 		let their_sig = BASE_64.decode(msg.responder_signature)?;
+		let their_sig =
+			buf_to_64(&their_sig).map_err(|length| HandshakeError::SignatureLengthWrong(length))?;
 		peer_identity
 			.verify_signature(our_challenge.as_bytes(), &their_sig)
 			.map_err(HandshakeError::BadSignature)?;

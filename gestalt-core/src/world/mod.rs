@@ -1,8 +1,8 @@
 pub mod chunk;
 pub mod fsworldstorage;
+pub mod tilespace;
 pub mod voxelarray;
 pub mod voxelstorage;
-pub mod tilespace;
 
 use std::ops::Add;
 use std::ops::Div;

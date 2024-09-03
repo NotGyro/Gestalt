@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
-use crate::common::{voxelmath::*, Version, FastHashMap, new_fast_hash_map};
+use crate::common::{new_fast_hash_map, voxelmath::*, FastHashMap, Version};
 
 use super::{
 	voxelarray::{VoxelArrayError, VoxelArrayStatic},
@@ -279,7 +279,8 @@ impl<T: Voxel> ChunkTilesSmall<T> {
 	}
 	#[inline(always)]
 	pub fn get(&self, coord: VoxelPos<u8>) -> Result<&T, VoxelArrayError<u8>> {
-		self.palette.get(*self.get_raw(coord) as usize)
+		self.palette
+			.get(*self.get_raw(coord) as usize)
 			.ok_or(VoxelArrayError::NoPaletteEntry(coord))
 	}
 	#[inline(always)]
@@ -669,9 +670,9 @@ fn chunk_index_reverse() {
 
 	let mut rng = rand::thread_rng();
 	for _ in 0..4096 {
-		let x = rng.gen_range(0, CHUNK_SIZE);
-		let y = rng.gen_range(0, CHUNK_SIZE);
-		let z = rng.gen_range(0, CHUNK_SIZE);
+		let x = rng.gen_range(0..CHUNK_SIZE);
+		let y = rng.gen_range(0..CHUNK_SIZE);
+		let z = rng.gen_range(0..CHUNK_SIZE);
 
 		let i_value = crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE);
 		let (x1, y1, z1) = crate::world::voxelarray::chunk_i_to_xyz(i_value, CHUNK_SIZE);
@@ -763,9 +764,9 @@ fn assignemnts_to_chunk() {
 
 	{
 		for i in 0..253 {
-			let x = rng.gen_range(0, CHUNK_SIZE);
-			let y = rng.gen_range(0, CHUNK_SIZE);
-			let z = rng.gen_range(0, CHUNK_SIZE);
+			let x = rng.gen_range(0..CHUNK_SIZE);
+			let y = rng.gen_range(0..CHUNK_SIZE);
+			let z = rng.gen_range(0..CHUNK_SIZE);
 			let pos = vpos!(x as u8, y as u8, z as u8);
 
 			let tile = format!("{}.test", i);
@@ -795,9 +796,9 @@ fn assignemnts_to_chunk() {
 
 	{
 		for i in 253..1024 {
-			let x = rng.gen_range(0, CHUNK_SIZE);
-			let y = rng.gen_range(0, CHUNK_SIZE);
-			let z = rng.gen_range(0, CHUNK_SIZE);
+			let x = rng.gen_range(0..CHUNK_SIZE);
+			let y = rng.gen_range(0..CHUNK_SIZE);
+			let z = rng.gen_range(0..CHUNK_SIZE);
 			let pos = vpos!(x as u8, y as u8, z as u8);
 
 			let tile = format!("{}.test", i);

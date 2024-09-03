@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use futures::{Future, TryFutureExt};
 use log::{error, info, trace};
-use tokio::sync::{broadcast, mpsc};
 use tokio::sync::broadcast::error::TryRecvError as BroadcastTryRecvError;
 use tokio::sync::mpsc::error::TryRecvError as MpscTryRecvError;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::world::WorldId;
 
@@ -94,7 +94,8 @@ where
 	}
 
 	async fn recv_wait_inner(&mut self) -> Result<T, RecvError> {
-		self.inner.recv()
+		self.inner
+			.recv()
 			.map_err(|e| match e {
 				broadcast::error::RecvError::Closed => RecvError::NoSenders,
 				broadcast::error::RecvError::Lagged(count) => RecvError::Lagged(count),
@@ -115,7 +116,7 @@ where
 				BroadcastTryRecvError::Empty => Ok(None),
 				BroadcastTryRecvError::Closed => Err(RecvError::NoSenders),
 				BroadcastTryRecvError::Lagged(count) => Err(RecvError::Lagged(count)),
-			}
+			},
 		}
 	}
 }
@@ -186,9 +187,7 @@ where
 	T: Message,
 {
 	fn send(&self, message: T) -> Result<(), SendError> {
-		self.send(message)
-			.map(|_| ())
-			.map_err(|e| e.into())
+		self.send(message).map(|_| ()).map_err(|e| e.into())
 	}
 }
 
@@ -379,9 +378,7 @@ where
 	}
 
 	async fn recv_wait_inner(&mut self) -> Result<T, RecvError> {
-		self.inner.recv()
-			.await
-			.ok_or(RecvError::NoSenders)
+		self.inner.recv().await.ok_or(RecvError::NoSenders)
 	}
 }
 
@@ -411,15 +408,12 @@ where
 	}
 }
 
-
 impl<T> MessageSender<T> for MpscSender<T>
 where
 	T: Message,
 {
 	fn send(&self, message: T) -> Result<(), SendError> {
-		self.try_send(message)
-			.map(|_| ())
-			.map_err(|e| e.into())
+		self.try_send(message).map(|_| ()).map_err(|e| e.into())
 	}
 }
 
@@ -448,10 +442,10 @@ where
 	}
 
 	/// Attempt to take the single consumer in this multi-producer single-consumer message channel.
-	pub fn take_receiver(&self) -> Option<MpscReceiver<T>> { 
-		let mut inner_receiver = self.retained_receiver.lock(); 
+	pub fn take_receiver(&self) -> Option<MpscReceiver<T>> {
+		let mut inner_receiver = self.retained_receiver.lock();
 		inner_receiver.take().map(|r| MpscReceiver::new(r))
-	} 
+	}
 }
 
 // Implementing Clone in the Arc<T> sense here, so Clone is just creating another reference to the same
@@ -614,8 +608,7 @@ where
 	D: ChannelDomain,
 	C: SenderChannel<T> + ChannelInit + MessageSender<T>,
 {
-	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError>
-	{
+	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError> {
 		match self.channels.lock().get(domain) {
 			Some(chan) => chan
 				.send(message)

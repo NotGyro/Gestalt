@@ -4,7 +4,7 @@ pub mod identity;
 pub mod message;
 #[macro_use]
 pub mod voxelmath;
-pub mod directories; 
+pub mod directories;
 
 use std::{
 	collections::{HashMap, HashSet},
@@ -34,49 +34,49 @@ pub struct DegreeAngle(pub f32);
 
 impl Angle for RadianAngle {
 	#[inline(always)]
-    fn get_degrees(&self) -> f32 {
-        self.0.to_degrees()
-    }
+	fn get_degrees(&self) -> f32 {
+		self.0.to_degrees()
+	}
 
 	#[inline(always)]
-    fn get_radians(&self) -> f32 {
-        self.0
-    }
+	fn get_radians(&self) -> f32 {
+		self.0
+	}
 
 	#[inline(always)]
 	fn from_degrees(value: f32) -> Self {
-        RadianAngle(value.to_radians())
-    }
+		RadianAngle(value.to_radians())
+	}
 
 	#[inline(always)]
 	fn from_radians(value: f32) -> Self {
-        RadianAngle(value)
-    }
+		RadianAngle(value)
+	}
 }
 
 impl Angle for DegreeAngle {
 	#[inline(always)]
-    fn get_degrees(&self) -> f32 {
-        self.0
-    }
+	fn get_degrees(&self) -> f32 {
+		self.0
+	}
 
 	#[inline(always)]
-    fn get_radians(&self) -> f32 {
-        self.0.to_radians()
-    }
+	fn get_radians(&self) -> f32 {
+		self.0.to_radians()
+	}
 
 	#[inline(always)]
 	fn from_degrees(value: f32) -> Self {
-        DegreeAngle(value)
-    }
+		DegreeAngle(value)
+	}
 
 	#[inline(always)]
 	fn from_radians(value: f32) -> Self {
-        DegreeAngle(value.to_degrees())
-    }
+		DegreeAngle(value.to_degrees())
+	}
 }
 
-pub struct Color { 
+pub struct Color {
 	/// Red
 	pub r: u8,
 	/// Green
@@ -84,29 +84,23 @@ pub struct Color {
 	/// Blue
 	pub b: u8,
 }
-impl Color { 
+impl Color {
 	pub fn to_normalized_float(&self) -> (f32, f32, f32) {
-		(self.r as f32 / 255.0,
-		self.g as f32 / 255.0,
-		self.b as f32 / 255.0)
+		(self.r as f32 / 255.0, self.g as f32 / 255.0, self.b as f32 / 255.0)
 	}
 }
 
-pub struct ColorAlpha { 
-	pub color: Color, 
+pub struct ColorAlpha {
+	pub color: Color,
 	/// Transparency
 	pub alpha: u8,
 }
-impl ColorAlpha { 
+impl ColorAlpha {
 	pub fn to_normalized_float(&self) -> (f32, f32, f32, f32) {
 		let color = self.color.to_normalized_float();
-		(color.0,
-		color.1,
-		color.2,
-		self.alpha as f32 / 255.0)
+		(color.0, color.1, color.2, self.alpha as f32 / 255.0)
 	}
 }
-
 
 /// Non-cryptographic hashmap for internally-generated structures.
 pub type FastHashMap<K, V> = std::collections::HashMap<K, V, Xxh3Builder>;
@@ -392,7 +386,7 @@ const HEX_TABLE: [&'static str; 256] = [
 	"f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "fa", "fb", "fc", "fd", "fe", "ff",
 ];
 
-pub const fn byte_to_hex(value: u8) -> &'static str { 
+pub const fn byte_to_hex(value: u8) -> &'static str {
 	HEX_TABLE[value as usize]
 }
 

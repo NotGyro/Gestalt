@@ -1,7 +1,7 @@
 // This file is the oldest surviving element of the Gestalt engine. It's practically a dinosaur!
 
 use std::iter::{IntoIterator, Iterator};
-use std::ops::{BitOr, BitOrAssign, BitAnd, BitAndAssign};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 use num::{Integer, Signed, Unsigned};
 
@@ -1444,9 +1444,15 @@ where
 		(*self.data.get_mut(i).unwrap()) = value;
 	}
 
-	pub fn get_all<'a>(&'a self) -> [&'a T; 6] { 
-		[&self.data[0], &self.data[1], &self.data[2],
-		 &self.data[3], &self.data[4], &self.data[5]]
+	pub fn get_all<'a>(&'a self) -> [&'a T; 6] {
+		[
+			&self.data[0],
+			&self.data[1],
+			&self.data[2],
+			&self.data[3],
+			&self.data[4],
+			&self.data[5],
+		]
 	}
 
 	pub fn iter(&self) -> SidesArrayIterator<T> {
@@ -1500,7 +1506,7 @@ where
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SidesFlags(u8);
 
-impl SidesFlags { 
+impl SidesFlags {
 	pub const POSI_X_MASK: SidesFlags = SidesFlags(1 << posi_x_index!());
 	pub const POSI_Y_MASK: SidesFlags = SidesFlags(1 << posi_y_index!());
 	pub const POSI_Z_MASK: SidesFlags = SidesFlags(1 << posi_z_index!());
@@ -1514,88 +1520,86 @@ impl SidesFlags {
 	}
 
 	#[inline(always)]
-	pub const fn new_none() -> Self { 
+	pub const fn new_none() -> Self {
 		Self(0)
 	}
 
-	// C-style integer-boolean return for branchlessness' sake. 
+	// C-style integer-boolean return for branchlessness' sake.
 	#[inline(always)]
-	pub const fn contains_side(&self, rhs: VoxelSide) -> u8 { 
+	pub const fn contains_side(&self, rhs: VoxelSide) -> u8 {
 		self.0 & (1 << rhs.to_id()) >> rhs.to_id()
 	}
 
 	#[inline(always)]
-	pub const fn contains_side_bool(&self, rhs: VoxelSide) -> bool { 
+	pub const fn contains_side_bool(&self, rhs: VoxelSide) -> bool {
 		self.0 & (1 << rhs.to_id()) != 0
 	}
 }
 
 impl From<VoxelSide> for SidesFlags {
-    fn from(value: VoxelSide) -> Self {
-        Self (
-			1 << value.to_id()
-		)
-    }
+	fn from(value: VoxelSide) -> Self {
+		Self(1 << value.to_id())
+	}
 }
 impl From<&[VoxelSide]> for SidesFlags {
-    fn from(value: &[VoxelSide]) -> Self {
+	fn from(value: &[VoxelSide]) -> Self {
 		let mut val = 0;
-		for side in value { 
+		for side in value {
 			val |= 1 << side.to_id();
 		}
-        Self(val)
-    }
+		Self(val)
+	}
 }
 impl BitOr<SidesFlags> for SidesFlags {
-    type Output = SidesFlags;
+	type Output = SidesFlags;
 
-    fn bitor(self, rhs: SidesFlags) -> Self::Output {
-        SidesFlags(self.0 | rhs.0)
-    }
+	fn bitor(self, rhs: SidesFlags) -> Self::Output {
+		SidesFlags(self.0 | rhs.0)
+	}
 }
 
 impl BitOr<VoxelSide> for SidesFlags {
-    type Output = SidesFlags;
+	type Output = SidesFlags;
 
-    fn bitor(self, rhs: VoxelSide) -> Self::Output {
-        SidesFlags(self.0 | (1 << rhs.to_id()))
-    }
+	fn bitor(self, rhs: VoxelSide) -> Self::Output {
+		SidesFlags(self.0 | (1 << rhs.to_id()))
+	}
 }
 impl BitOrAssign<SidesFlags> for SidesFlags {
-    fn bitor_assign(&mut self, rhs: SidesFlags) {
-       self.0 |= rhs.0
-    }
+	fn bitor_assign(&mut self, rhs: SidesFlags) {
+		self.0 |= rhs.0
+	}
 }
 impl BitOrAssign<VoxelSide> for SidesFlags {
-    fn bitor_assign(&mut self, rhs: VoxelSide) {
-       self.0 |= 1 << rhs.to_id()
-    }
+	fn bitor_assign(&mut self, rhs: VoxelSide) {
+		self.0 |= 1 << rhs.to_id()
+	}
 }
 
 impl BitAnd<SidesFlags> for SidesFlags {
-    type Output = SidesFlags;
+	type Output = SidesFlags;
 
-    fn bitand(self, rhs: SidesFlags) -> Self::Output {
-        SidesFlags(self.0 & rhs.0)
-    }
+	fn bitand(self, rhs: SidesFlags) -> Self::Output {
+		SidesFlags(self.0 & rhs.0)
+	}
 }
 
 impl BitAnd<VoxelSide> for SidesFlags {
-    type Output = SidesFlags;
+	type Output = SidesFlags;
 
-    fn bitand(self, rhs: VoxelSide) -> Self::Output {
-        SidesFlags(self.0 & (1 << rhs.to_id()))
-    }
+	fn bitand(self, rhs: VoxelSide) -> Self::Output {
+		SidesFlags(self.0 & (1 << rhs.to_id()))
+	}
 }
 impl BitAndAssign<SidesFlags> for SidesFlags {
-    fn bitand_assign(&mut self, rhs: SidesFlags) {
-       self.0 &= rhs.0
-    }
+	fn bitand_assign(&mut self, rhs: SidesFlags) {
+		self.0 &= rhs.0
+	}
 }
 impl BitAndAssign<VoxelSide> for SidesFlags {
-    fn bitand_assign(&mut self, rhs: VoxelSide) {
-       self.0 &= 1 << rhs.to_id()
-    }
+	fn bitand_assign(&mut self, rhs: VoxelSide) {
+		self.0 &= 1 << rhs.to_id()
+	}
 }
 
 #[test]

@@ -6,3 +6,7 @@ members = [
     "gestalt-core",
     "gestalt-proc-macros",
 ]
+
+[workspace.package]
+readme = "readme.md"
+version = "0.0.1"

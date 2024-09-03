@@ -1,16 +1,12 @@
 //! Voxel social-art-space "game" you can have some fun in.
-#![feature(drain_filter)]
+#![allow(incomplete_features)]
+#![feature(extract_if)]
 #![feature(string_remove_matches)]
 #![feature(generic_const_exprs)]
 #![feature(int_roundings)]
-#![feature(associated_type_bounds)]
 #![feature(inherent_associated_types)]
-#![feature(return_position_impl_trait_in_trait)]
 #![feature(array_try_from_fn)]
 #![allow(clippy::large_enum_variant)]
-
-#[macro_use]
-extern crate gestalt_proc_macros;
 
 #[macro_use]
 pub mod common;
@@ -42,10 +38,7 @@ use simplelog::{
 };
 
 use common::{
-	identity::NodeIdentity,
-	identity::{
-		do_keys_need_generating, does_private_key_need_passphrase, load_local_identity_keys,
-	},
+	identity::{do_keys_need_generating, gen_and_save_keys, load_keyfile, NodeIdentity},
 	message::*,
 	Version,
 };
@@ -289,33 +282,38 @@ fn main() {
 		warn!("Verbose logging CAN, OCCASIONALLY, LEAK PRIVATE INFORMATION. \n It is only recommended for debugging purposes. \n Please do not use it for general play.");
 	}
 
+	let key_dir = PathBuf::from("keys/");
+	let keyfile_name = "identity_key";
 	// Load our identity key pair. Right now this will be the same on both client and server - that will change later.
-	let keys = if do_keys_need_generating() {
+	// Using environment variables here might also be a good move.
+	let keys = if do_keys_need_generating(key_dir.clone(), keyfile_name) {
 		println!("No identity keys found, generating identity keys.");
 		println!("Optionally enter a passphrase.");
 		println!("Minimum length is 4 characters.");
 		println!("WARNING: If you forget your passphrase, this will be impossible to recover!");
 		println!("Leave this blank if you do not want to use a passphrase.");
 		print!("Enter your passphrase: ");
-		let _ = std::io::stdout().flush();
+		std::io::stdout().flush().unwrap();
 
 		let mut input = String::new();
 		std::io::stdin()
 			.read_line(&mut input)
 			.expect("Error reading from STDIN");
 
-		let passphrase = if input.chars().count() > 4 {
-			Some(input)
+		// If it's 1 char, that's a newline or a \0
+		let passphrase = if input.chars().count() > 1 {
+			Some(input.as_str())
 		} else {
 			None
 		};
 
-		generate_local_keys(passphrase).unwrap()
+		gen_and_save_keys(passphrase, key_dir.clone(), keyfile_name).unwrap()
 	} else {
-		let passphrase = if does_private_key_need_passphrase().unwrap() {
+		let key_file = load_keyfile(key_dir.clone(), keyfile_name).unwrap();
+		let passphrase = if key_file.needs_passphrase() {
 			println!("Your identity key is encrypted. Please enter your passphrase.");
 			print!("Passphrase: ");
-			let _ = std::io::stdout().flush();
+			std::io::stdout().flush().unwrap();
 
 			let mut input = String::new();
 			std::io::stdin()
@@ -325,7 +323,9 @@ fn main() {
 		} else {
 			None
 		};
-		load_local_identity_keys(passphrase).unwrap()
+		key_file
+			.try_read(passphrase.as_ref().map(|v| v.as_str()))
+			.unwrap()
 	};
 
 	info!("Identity keys loaded! Initializing engine...");
@@ -445,11 +445,11 @@ fn main() {
 								};
 								net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
 								info!("Sending all previous changes to the newly-joined user.");
-								// TODO: Reintroduce batching to net send channels specifically. 
+								// TODO: Reintroduce batching to net send channels specifically.
 								// or more of an inner-batching inside voxel change messages? Maybe.
 								//net_send_channel::send_multi_to(total_changes.clone(), &ident).unwrap();
-								for change in total_changes.iter() { 
-									net_send_channel::send_to(change.clone(), &ident).unwrap(); 
+								for change in total_changes.iter() {
+									net_send_channel::send_to(change.clone(), &ident).unwrap();
 								}
 							}
 						}
@@ -556,7 +556,8 @@ fn main() {
 		);*/
 	} else {
 		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
-		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> = NetSendChannel::new(voxel_event_sender);
+		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
+			NetSendChannel::new(voxel_event_sender);
 
 		let client_voxel_receiver_from_server =
 			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
@@ -567,12 +568,12 @@ fn main() {
 				let _ = voxel_event_receiver.recv().await;
 			}
 		}); /*
-		client::clientmain::run_client(
-			keys,
-			voxel_event_sender,
-			client_voxel_receiver_from_server,
-			None,
-			async_runtime,
-		);*/
+		 client::clientmain::run_client(
+			 keys,
+			 voxel_event_sender,
+			 client_voxel_receiver_from_server,
+			 None,
+			 async_runtime,
+		 );*/
 	}
 }

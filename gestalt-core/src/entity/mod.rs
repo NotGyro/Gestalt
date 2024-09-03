@@ -1,7 +1,10 @@
-use glam::{Quat, EulerRot};
+use glam::{EulerRot, Quat};
 pub use hecs::World as EcsWorld;
 
-use crate::{world::TickLength, common::{Angle, RadianAngle}};
+use crate::{
+	common::{Angle, RadianAngle},
+	world::TickLength,
+};
 pub type EntityCoord = f32;
 pub type EntityVec3 = glam::f32::Vec3;
 
@@ -32,10 +35,8 @@ pub struct LastPos {
 	pub pos: EntityVec3,
 }
 impl LastPos {
-	pub fn new(pos: EntityVec3) -> Self { 
-		Self { 
-			pos
-		}
+	pub fn new(pos: EntityVec3) -> Self {
+		Self { pos }
 	}
 }
 
@@ -48,12 +49,13 @@ impl EntityRot {
 		Self { rot }
 	}
 	pub fn new_from_euler<A: Angle>(yaw: A, pitch: A, roll: A) -> Self {
-		Self { 
+		Self {
 			rot: Quat::from_euler(
 				EulerRot::YXZ,
 				yaw.get_radians(),
 				pitch.get_radians(),
-				roll.get_radians())
+				roll.get_radians(),
+			),
 		}
 	}
 	#[inline(always)]
@@ -64,32 +66,32 @@ impl EntityRot {
 	pub fn get(&self) -> Quat {
 		self.rot
 	}
-	pub fn set_euler<A: Angle>(&mut self, yaw: A, pitch: A, roll: A) { 
+	pub fn set_euler<A: Angle>(&mut self, yaw: A, pitch: A, roll: A) {
 		self.rot = Quat::from_euler(
-				EulerRot::YXZ,
-				yaw.get_radians(),
-				pitch.get_radians(),
-				roll.get_radians()
-			);
+			EulerRot::YXZ,
+			yaw.get_radians(),
+			pitch.get_radians(),
+			roll.get_radians(),
+		);
 	}
 
 	/// Returns (yaw, pitch, roll)
-	pub fn get_euler(&self) -> (RadianAngle, RadianAngle, RadianAngle) { 
+	pub fn get_euler(&self) -> (RadianAngle, RadianAngle, RadianAngle) {
 		let euler = self.rot.to_euler(EulerRot::YXZ);
-		(RadianAngle::from_radians(euler.0),
-		RadianAngle::from_radians(euler.1),
-		RadianAngle::from_radians(euler.2))
+		(
+			RadianAngle::from_radians(euler.0),
+			RadianAngle::from_radians(euler.1),
+			RadianAngle::from_radians(euler.2),
+		)
 	}
 
-	pub fn turn<A: Angle>(&mut self, yaw: A, pitch: A, roll: A) { 
-		self.rot.mul_quat(
-			Quat::from_euler(
-				EulerRot::YXZ,
-				yaw.get_radians(),
-				pitch.get_radians(),
-				roll.get_radians()
-			)
-		);
+	pub fn turn<A: Angle>(&mut self, yaw: A, pitch: A, roll: A) {
+		self.rot.mul_quat(Quat::from_euler(
+			EulerRot::YXZ,
+			yaw.get_radians(),
+			pitch.get_radians(),
+			roll.get_radians(),
+		));
 	}
 }
 
@@ -114,28 +116,33 @@ impl EntityScale {
 	}
 }
 impl Default for EntityScale {
-    fn default() -> Self {
-        Self { scale: EntityVec3::new(1.0, 1.0, 1.0) }
-    }
+	fn default() -> Self {
+		Self {
+			scale: EntityVec3::new(1.0, 1.0, 1.0),
+		}
+	}
 }
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct EntityVelocity {
-	motion_per_second: EntityVec3
+	motion_per_second: EntityVec3,
 }
 impl EntityVelocity {
 	pub fn new(motion_per_second: EntityVec3) -> Self {
-		Self {
-			motion_per_second
-		}
+		Self { motion_per_second }
 	}
-	pub fn get_motion_per_second(&self) -> EntityVec3 { 
+	pub fn get_motion_per_second(&self) -> EntityVec3 {
 		self.motion_per_second
 	}
 	pub fn apply_tick(&self, to_move: &mut EntityPos, seconds_per_tick: TickLength) {
 		to_move.move_by(self.get_motion_per_second() * seconds_per_tick.get())
 	}
-	pub fn apply_multi_tick(&self, to_move: &mut EntityPos, seconds_per_tick: TickLength, num_ticks: u32) {
+	pub fn apply_multi_tick(
+		&self,
+		to_move: &mut EntityPos,
+		seconds_per_tick: TickLength,
+		num_ticks: u32,
+	) {
 		to_move.move_by(self.get_motion_per_second() * seconds_per_tick.get() * (num_ticks as f32))
 	}
 }

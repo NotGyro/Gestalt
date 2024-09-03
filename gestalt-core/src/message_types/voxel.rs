@@ -1,3 +1,4 @@
+use gestalt_proc_macros::netmsg;
 use serde::{Deserialize, Serialize};
 
 use crate::{common::voxelmath::VoxelPos, world::TileId};

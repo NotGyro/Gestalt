@@ -1,4 +1,5 @@
 use crate::common::identity::NodeIdentity;
+use gestalt_proc_macros::netmsg;
 use serde::{Deserialize, Serialize};
 
 pub mod voxel;
