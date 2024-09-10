@@ -19,6 +19,7 @@ use lazy_static::lazy_static;
 
 use log::{error, info, trace};
 use parking_lot::Mutex;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -26,7 +27,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
-use crate::common::{identity::NodeIdentity, Version};
+use crate::common::identity::NodeIdentity;
 use crate::message::{ReceiverChannel, SenderChannel};
 use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
 
@@ -59,7 +60,6 @@ use super::{MessageCounter, NetworkRole, SelfNetworkRole};
 pub struct ProtocolDef {
 	/// Name of the protocol, such as "gestalt-laminar"
 	pub protocol: String,
-	#[serde(with = "crate::common::version_string")]
 	pub version: Version,
 }
 

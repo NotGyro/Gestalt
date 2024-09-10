@@ -1,6 +1,7 @@
 //! Voxel social-art-space "game" you can have some fun in.
 #![allow(incomplete_features)]
 #![feature(extract_if)]
+#![feature(str_from_raw_parts)]
 #![feature(string_remove_matches)]
 #![feature(generic_const_exprs)]
 #![feature(int_roundings)]
@@ -11,6 +12,7 @@
 #[macro_use]
 pub mod common;
 pub use common::message;
+use semver::Version;
 
 #[macro_use]
 pub mod net;
@@ -39,8 +41,7 @@ use simplelog::{
 
 use common::{
 	identity::{do_keys_need_generating, gen_and_save_keys, load_keyfile, NodeIdentity},
-	message::*,
-	Version,
+	message::*
 };
 use std::collections::HashSet;
 use tokio::sync::mpsc;
@@ -61,7 +62,7 @@ use crate::{
 	},
 };
 
-pub const ENGINE_VERSION: Version = version!(0, 0, 1);
+pub const ENGINE_VERSION: Version = Version::new(0,0,1);
 
 // For command-line argument parsing
 enum OneOrTwo {

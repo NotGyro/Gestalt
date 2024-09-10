@@ -1,4 +1,5 @@
 use base64::Engine;
+use semver::Version;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::fs::OpenOptions;
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use snow::params::NoiseParams;
 
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
-use crate::common::{identity::NodeIdentity, Version};
+use crate::common::identity::NodeIdentity;
 use crate::message::{BroadcastReceiver, BroadcastSender, MessageReceiverAsync};
 use lazy_static::lazy_static;
 
@@ -19,7 +20,7 @@ use super::{MessageCounter, SessionId};
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
-pub const PROTOCOL_VERSION: Version = version!(1, 0, 0);
+pub const PROTOCOL_VERSION: Version = Version::new(0, 0, 1);
 pub const PROTOCOL_NAME: &str = "gestalt_noise_laminar_udp";
 
 pub const NOISE_PARAM_STR: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";

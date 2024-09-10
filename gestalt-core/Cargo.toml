@@ -28,6 +28,7 @@ once_cell = "1.17"
 parking_lot = "0.12.0"
 rand = "^0.8"
 rand_core = "0.6.4"
+semver = { version = "1.0.23", features = ["default", "std", "serde"]}
 sha2 = "0.10.1"
 string_cache = "0.8"
 thiserror = "1.0.30"

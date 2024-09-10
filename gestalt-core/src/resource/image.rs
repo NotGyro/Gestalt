@@ -5,21 +5,21 @@ use crate::common::identity::NodeIdentity;
 
 use super::{
 	provider::{RawResourceProvider, ResourceProvider},
-	ResourceError, ResourceId, ResourcePath, ResourcePoll, ResourceRetrievalError,
+	ResourceError, Caid, ResourceId, ResourcePoll, ResourceRetrievalError,
 };
 
-pub const ID_MISSING_TEXTURE: ResourceId = ResourceId {
+pub const ID_MISSING_TEXTURE: Caid = Caid {
 	version: 0,
 	length: 0,
 	hash: [1; 32],
 };
-pub const ID_PENDING_TEXTURE: ResourceId = ResourceId {
+pub const ID_PENDING_TEXTURE: Caid = Caid {
 	version: 0,
 	length: 0,
 	hash: [2; 32],
 };
 
-pub const ID_ERROR_TEXTURE: ResourceId = ResourceId {
+pub const ID_ERROR_TEXTURE: Caid = Caid {
 	version: 0,
 	length: 0,
 	hash: [3; 32],
@@ -58,7 +58,7 @@ impl ImageProvider {
 
 	async fn recv_wait_inner(
 		&mut self,
-	) -> Result<(ResourcePath, InternalImage), ResourceError<LoadImageError>> {
+	) -> Result<(ResourceId, InternalImage), ResourceError<LoadImageError>> {
 		match self.inner.recv_wait().await {
 			Ok((id, buf)) => match image::load_from_memory(buf.as_slice()) {
 				Ok(image) => Ok((id, image.into_rgba8())),
@@ -76,9 +76,9 @@ impl ResourceProvider<InternalImage> for ImageProvider {
 	/// If it returns an empty vec, that means all resources are pending.
 	fn request_batch(
 		&mut self,
-		resources: Vec<ResourcePath>,
+		resources: Vec<ResourceId>,
 		expected_source: NodeIdentity,
-	) -> Vec<Result<(ResourcePath, InternalImage), ResourceError<LoadImageError>>> {
+	) -> Vec<Result<(ResourceId, InternalImage), ResourceError<LoadImageError>>> {
 		self.inner
 			.request_batch(resources, expected_source)
 			.iter()
@@ -90,7 +90,7 @@ impl ResourceProvider<InternalImage> for ImageProvider {
 	}
 	/// Request that we download files, except that there isn't any immediate need to use them
 	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
-	fn preload_batch(&mut self, resources: Vec<ResourcePath>, expected_source: NodeIdentity) {
+	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) {
 		self.inner.preload_batch(resources, expected_source)
 	}
 
@@ -107,7 +107,7 @@ impl ResourceProvider<InternalImage> for ImageProvider {
 
 	fn recv_wait(
 		&mut self,
-	) -> impl Future<Output = Result<(ResourcePath, InternalImage), ResourceError<Self::ParseError>>> + '_
+	) -> impl Future<Output = Result<(ResourceId, InternalImage), ResourceError<Self::ParseError>>> + '_
 	{
 		self.recv_wait_inner()
 	}

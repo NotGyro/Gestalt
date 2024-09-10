@@ -40,9 +40,11 @@ pub type SignatureError = ed25519::signature::Error;
 
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-pub struct NodeIdentity([u8; PUBLIC_KEY_LENGTH]);
+pub struct PublicKey(pub [u8; PUBLIC_KEY_LENGTH]);
 
-impl NodeIdentity {
+pub type NodeIdentity = PublicKey;
+
+impl PublicKey {
 	pub fn get_bytes(&self) -> &[u8] {
 		&self.0
 	}
@@ -57,7 +59,7 @@ impl NodeIdentity {
 		if bytes.len() == PUBLIC_KEY_LENGTH {
 			let mut smaller_buf = [0u8; PUBLIC_KEY_LENGTH];
 			smaller_buf.copy_from_slice(&bytes[0..PUBLIC_KEY_LENGTH]);
-			Ok(NodeIdentity(smaller_buf))
+			Ok(PublicKey(smaller_buf))
 		} else {
 			Err(DecodeIdentityError::WrongLength(bytes.len()))
 		}
@@ -72,7 +74,11 @@ impl NodeIdentity {
 		converted_key.verify(message, &converted_signature)
 	}
 }
-
+impl From<[u8; PUBLIC_KEY_LENGTH]> for NodeIdentity {
+	fn from(value: [u8; PUBLIC_KEY_LENGTH]) -> Self {
+		PublicKey(value)
+	}
+}
 impl std::fmt::Debug for NodeIdentity {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "NodeIdentity({})", self.to_base64())
@@ -87,7 +93,7 @@ impl From<&NodeIdentity> for ed25519_dalek::VerifyingKey {
 
 impl From<&ed25519_dalek::VerifyingKey> for NodeIdentity {
 	fn from(value: &ed25519_dalek::VerifyingKey) -> Self {
-		NodeIdentity(value.to_bytes())
+		PublicKey(value.to_bytes())
 	}
 }
 
@@ -334,7 +340,7 @@ impl KeyFile {
 		}
 
 		let private = PrivateKey(priv_key_bytes);
-		let public = NodeIdentity(pub_key_bytes);
+		let public = NodeIdentity::from(pub_key_bytes);
 		Ok(IdentityKeyPair { public, private })
 	}
 }

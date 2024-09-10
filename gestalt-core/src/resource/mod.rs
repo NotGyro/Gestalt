@@ -1,12 +1,12 @@
-use crate::common::identity::NodeIdentity;
+use crate::common::identity::{NodeIdentity, PublicKey};
 use crate::common::{new_fast_hash_map, FastHashMap};
 use crate::message::RecvError;
 
 use base64::Engine;
 use ed25519::Signature;
-use gestalt_names::gestalt_atom::GestaltAtom;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::error::Error;
 use std::fmt::Debug;
 use std::{cmp::PartialEq, hash::Hash};
 
@@ -24,14 +24,14 @@ pub mod retrieval;
 
 pub const CURRENT_RESOURCE_ID_FORMAT: u8 = 1;
 
-/// Content-addressed identifier for a Gestalt resource.
+/// Content-addressed identifier (CAID) for a Gestalt resource.
 /// String representation starts with a version number for the
 /// ResourceId structure, then a `.` delimeter, then the size (number of bytes)
 /// in the resource, then the 32-byte Sha256-512 hash encoded in base-64.
 /// For example, `1.2048.J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA` would be a version 1 ResourceID.
 #[repr(C)]
 #[derive(Copy, Clone, PartialOrd, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ResourceId {
+pub struct Caid {
 	/// Which version of the ResourceId struct is this?
 	pub version: u8,
 	/// Length in bytes of the resource.
@@ -41,7 +41,7 @@ pub struct ResourceId {
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
-pub enum ParseResourceIdError {
+pub enum ParseCaidError {
 	#[error("tried to parse {0} into a ResourceId but it contained no separator.")]
 	NoSeparator(String),
 	#[error("tried to parse {0} into a ResourceId but was a greater-than-3 number of separators")]
@@ -70,11 +70,11 @@ pub enum VerifyResourceError {
 	#[error("Expected a length of {0} bytes for this resource but we got a length of {1}")]
 	WrongLength(u64, u64),
 }
-impl ResourceId {
+impl Caid {
 	/// Make a ResourceId. Use from_buf() if you have a buffer fully loaded into memory already.
 	/// ResourceId::new(), on the other hand, is ideal for if you have a
 	pub fn new(length: usize, hash: [u8; 32]) -> Self {
-		ResourceId {
+		Caid {
 			version: CURRENT_RESOURCE_ID_FORMAT,
 			length: length as u64,
 			hash,
@@ -87,7 +87,7 @@ impl ResourceId {
 		hasher.update(buf);
 		let buffer_hash = hasher.finalize();
 		// Done, here's a ResourceId
-		ResourceId {
+		Caid {
 			version: CURRENT_RESOURCE_ID_FORMAT,
 			length: buf.len() as u64,
 			hash: buffer_hash.into(),
@@ -111,35 +111,35 @@ impl ResourceId {
 		Ok(())
 	}
 
-	pub fn parse(value: &str) -> Result<Self, ParseResourceIdError> {
+	pub fn parse(value: &str) -> Result<Self, ParseCaidError> {
 		if !value.contains(SEP) {
-			return Err(ParseResourceIdError::NoSeparator(value.to_string()));
+			return Err(ParseCaidError::NoSeparator(value.to_string()));
 		}
 
 		let fields: Vec<&str> = value.split(SEP).collect();
 		if fields.len() != 3 {
-			return Err(ParseResourceIdError::TooManySeparators(value.to_string()));
+			return Err(ParseCaidError::TooManySeparators(value.to_string()));
 		}
 
 		let version = (*fields.get(0).unwrap())
 			.parse::<u8>()
-			.map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;
+			.map_err(|_| ParseCaidError::VersionNotNumber(value.to_string()))?;
 		if version != CURRENT_RESOURCE_ID_FORMAT {
-			return Err(ParseResourceIdError::UnrecognizedVersion(value.to_string(), version));
+			return Err(ParseCaidError::UnrecognizedVersion(value.to_string(), version));
 		}
 
 		let length = (*fields.get(1).unwrap())
 			.parse::<u64>()
-			.map_err(|_| ParseResourceIdError::VersionNotNumber(value.to_string()))?;
+			.map_err(|_| ParseCaidError::VersionNotNumber(value.to_string()))?;
 
 		let bytes = BASE_64.decode(fields.get(2).unwrap())?;
 		if bytes.len() != 32 {
-			return Err(ParseResourceIdError::BufferWrongSize(value.to_string(), bytes.len()));
+			return Err(ParseCaidError::BufferWrongSize(value.to_string(), bytes.len()));
 		}
 
 		let mut hash: [u8; 32] = [0; 32];
 		hash.copy_from_slice(&bytes[0..32]);
-		Ok(ResourceId {
+		Ok(Caid {
 			version,
 			length,
 			hash,
@@ -147,20 +147,20 @@ impl ResourceId {
 	}
 }
 
-impl std::fmt::Display for ResourceId {
+impl std::fmt::Display for Caid {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}{}{}{}{}", self.version, SEP, self.length, SEP, BASE_64.encode(&self.hash))
 	}
 }
 
-impl std::fmt::Debug for ResourceId {
+impl std::fmt::Debug for Caid {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "ResourceId:({})", self)
+		write!(f, "CAID:({})", self)
 	}
 }
 
 // For use with serde
-pub mod resourceid_base64_string {
+pub mod caid_base64_string {
 	use serde::{
 		de::{self, Visitor},
 		Deserializer, Serializer,
@@ -169,97 +169,103 @@ pub mod resourceid_base64_string {
 
 	use super::*;
 
-	pub fn serialize<S>(val: &ResourceId, serializer: S) -> Result<S::Ok, S::Error>
+	pub fn serialize<S>(val: &Caid, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: Serializer,
 	{
 		serializer.serialize_str(val.to_string().as_str())
 	}
 
-	struct ResourceIdStringVisitor;
+	struct CaidStringVisitor;
 
-	impl<'de> Visitor<'de> for ResourceIdStringVisitor {
-		type Value = ResourceId;
+	impl<'de> Visitor<'de> for CaidStringVisitor {
+		type Value = Caid;
 
 		fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
 			formatter
-				.write_str(&format!("a resource ID string following the form format_version{}size_in_bytes{}hash_of_resource ", SEP, SEP))
+				.write_str(&format!("a content-addressing ID string following the form format_version{}size_in_bytes{}hash_of_resource ", SEP, SEP))
 		}
 
 		fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
 		where
 			E: de::Error,
 		{
-			ResourceId::parse(v).map_err(E::custom)
+			Caid::parse(v).map_err(E::custom)
 		}
 	}
 
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<ResourceId, D::Error>
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<Caid, D::Error>
 	where
 		D: Deserializer<'de>,
 	{
-		deserializer.deserialize_string(ResourceIdStringVisitor {})
+		deserializer.deserialize_string(CaidStringVisitor {})
 	}
 }
 
-// This may need to be something cleverer / better optimized later.
-pub type ArchiveFileIndex = GestaltAtom;
-
-/// Reference to a specific file, which could be direct use of a Resource, or inside of a file.
-/// Written as archive_resource_id::path/to/file.ext
-/// For example, `1_2048_J1kVZSSu8LHZzw25mTnV5lhQ8Zqt9qU6V1twg5lq2e6NzoUA::sprites/imp.png`
-#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
-pub enum ResourcePath {
-	/// The entire content-addressed ResourceId refers to exactly the bytes we need
-	/// in order to use them for this purpose.
-	Whole(ResourceId),
-	/// This is using one file inside an archive.
-	Archived(ResourceId, ArchiveFileIndex),
-}
-
-impl ResourcePath {
-	fn get_id<'a>(&'a self) -> &'a ResourceId {
-		match self {
-			ResourcePath::Whole(id) => id,
-			ResourcePath::Archived(id, _) => id,
-		}
+// Todo! 
+#[repr(C)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ResourceLinkProvenance { 
+	LinkKey {
+		link_key: PublicKey,
+	}, 
+	/// A resource link whose authority has been transferred to a specific node (server or user)
+	NodeAuth {
+		original_link_key: PublicKey,
+		new_author: NodeIdentity,
+		/// New revision increment representing ownership change
+		as_of: u64,
+		/// Signs "[new_author, as_of]" bytes (packed)
+		sig_from_original: Signature,
+		/// Signs "[original_link_key, as_of]" bytes (packed)
+		sig_from_new: Signature,
 	}
 }
-
-impl Into<ResourcePath> for ResourceId {
-	fn into(self) -> ResourcePath {
-		ResourcePath::Whole(self)
-	}
+// Todo! 
+#[repr(C)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceLinkFull { 
+	pub link_key: ResourceLinkProvenance,
+	/// Revision number of the resource i.e. 1 is initial binding.
+	pub revision: u64,
+	// Todo: string-interner strings for this maybe!! 
+	pub alias: String,
+	/// Signs [link_key.current_public_key, revision, ] with identity corresponding to link_key.current_public_key
+	pub sig: Signature,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-/// Serializer-friendly form of the ResourcePath, for network traffic.
-pub struct ResourcePathFlat {
-	pub(in super::resource) id: ResourceId,
-	/// string_cache's Serde impls just serialize to/from strings, so this should be fine.
-	pub(in super::resource) file: ArchiveFileIndex,
+// Todo! 
+#[repr(C)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum LinkProvenanceShort { 
+	LinkKey(PublicKey),
+	NodeAuth(PublicKey),
+}
+// Todo! 
+#[repr(C)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct ResourceLinkShort {
+	pub auth: LinkProvenanceShort,
+	pub revision: u64,
+	// Todo: string-interner strings for this maybe!!
+	pub alias: String,
 }
 
-impl Into<ResourcePath> for ResourcePathFlat {
-	fn into(self) -> ResourcePath {
-		// Default is empty-string in string_cache's implementation.
-		if self.file == GestaltAtom::default() {
-			ResourcePath::Whole(self.id)
-		} else {
-			ResourcePath::Archived(self.id, self.file)
-		}
-	}
+
+#[repr(C)]
+#[derive(Clone, PartialOrd, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub enum LocalResource {
+	// TODO: interned strings instead of plain-old strings
+	User(String),
+	Internal(String),
 }
-impl Into<ResourcePathFlat> for ResourcePath {
-	fn into(self) -> ResourcePathFlat {
-		match self {
-			ResourcePath::Whole(id) => ResourcePathFlat {
-				id,
-				file: Default::default(),
-			},
-			ResourcePath::Archived(id, file) => ResourcePathFlat { id, file },
-		}
-	}
+#[repr(C)]
+#[derive(Clone, PartialOrd, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub enum ResourceId { 
+	#[serde(rename = "CAID")]
+	Caid(Caid),
+	Local(LocalResource),
+	Link(ResourceLinkShort)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
@@ -281,7 +287,7 @@ pub enum ResourceKind {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResourceInfo {
 	/// Which resource?
-	pub id: ResourceId,
+	pub id: Caid,
 	/// What did the "creator" user call this resource?
 	pub filename: String,
 	/// Which user claims to have "made" this resource? Who signed it, who is the authority on it?
@@ -327,11 +333,11 @@ pub enum ResourceRetrievalError {
 	#[error("Tried to access a resource {0:?}, which cannot be found (is not indexed) locally or on any connected server.")]
 	NotFound(ResourceId),
 	#[error("Timed out while attempting to fetch resource {0:?}.")]
-	Timeout(ResourceId),
+	Timeout(Caid),
 	#[error("Failed to verify resource {0:?} due to error {1:?}.")]
-	Verification(ResourceId, VerifyResourceError),
+	Verification(Caid, VerifyResourceError),
 	#[error("Message-passing error while trying to load resource {0:?}: {1}.")]
-	ChannelError(ResourceId, String),
+	ChannelError(Caid, String),
 }
 
 pub enum ResourceError<E>
@@ -340,7 +346,7 @@ where
 {
 	Channel(RecvError),
 	Retrieval(ResourceRetrievalError),
-	Parse(ResourcePath, E),
+	Parse(ResourceId, E),
 }
 
 impl<E> Clone for ResourceError<E>
@@ -358,7 +364,7 @@ where
 
 impl<E> Debug for ResourceError<E>
 where
-	E: Debug + Clone,
+	E: Error + Clone,
 {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -370,7 +376,7 @@ where
 			Self::Retrieval(e) => e.fmt(f),
 			Self::Parse(id, e) => f.write_fmt(format_args!(
 				"While attempting to parse / load resource ID {0:?},\
-				an error was encountered: {1:?}",
+				an error was encountered: {1}",
 				id, e
 			)),
 		}
@@ -397,7 +403,7 @@ where
 
 impl Eq for ResourceInfo {}
 
-pub const ID_ERRORED_RESOURCE: ResourceId = ResourceId {
+pub const ID_ERRORED_RESOURCE: Caid = Caid {
 	version: 0,
 	length: 0,
 	hash: [0; 32],
@@ -428,7 +434,7 @@ where
 	}
 }
 
-pub(self) fn resource_id_to_prefix(resource: &ResourceId) -> usize {
+pub(self) fn resource_id_to_prefix(resource: &Caid) -> usize {
 	#[cfg(target_endian = "little")]
 	{
 		resource.hash[31] as usize
@@ -441,7 +447,7 @@ pub(self) fn resource_id_to_prefix(resource: &ResourceId) -> usize {
 }
 // Intended to be used as a const (global)
 struct ResourceStorage<T: Send + Sized> {
-	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<ResourceId, T>>; 256]>,
+	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<Caid, T>>; 256]>,
 }
 
 impl<T> ResourceStorage<T>
@@ -455,31 +461,31 @@ where
 			}),
 		}
 	}
-	pub async fn get(&self, id: &ResourceId) -> Option<T> {
+	pub async fn get(&self, id: &Caid) -> Option<T> {
 		let guard = self.buckets[resource_id_to_prefix(id)].read().await;
 		guard.get(id).cloned()
 	}
-	pub fn get_blocking(&self, id: &ResourceId) -> Option<T> {
+	pub fn get_blocking(&self, id: &Caid) -> Option<T> {
 		let guard = self.buckets[resource_id_to_prefix(id)].blocking_read();
 		guard.get(id).cloned()
 	}
-	pub async fn insert(&self, id: ResourceId, value: T) -> Option<T> {
+	pub async fn insert(&self, id: Caid, value: T) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		guard.insert(id, value)
 	}
-	pub fn insert_blocking(&self, id: ResourceId, value: T) -> Option<T> {
+	pub fn insert_blocking(&self, id: Caid, value: T) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		guard.insert(id, value)
 	}
-	pub async fn remove(&self, id: &ResourceId) -> Option<T> {
+	pub async fn remove(&self, id: &Caid) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		guard.remove(&id)
 	}
-	pub fn remove_blocking(&self, id: &ResourceId) -> Option<T> {
+	pub fn remove_blocking(&self, id: &Caid) -> Option<T> {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		guard.remove(&id)
 	}
-	pub async fn update(&self, id: &ResourceId, new: T) {
+	pub async fn update(&self, id: &Caid, new: T) {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
 		let reference = guard.get_mut(id);
 		match reference {
@@ -487,7 +493,7 @@ where
 			None => _ = guard.insert(id.clone(), new),
 		}
 	}
-	pub fn update_blocking(&self, id: &ResourceId, new: T) {
+	pub fn update_blocking(&self, id: &Caid, new: T) {
 		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
 		let reference = guard.get_mut(id);
 		match reference {
@@ -501,7 +507,7 @@ pub enum ResourcePoll<T, E>
 where
 	E: Debug,
 {
-	Ready(ResourcePath, T),
+	Ready(ResourceId, T),
 	Err(ResourceError<E>),
 	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling.
 	None,
@@ -522,17 +528,17 @@ where
 
 static RESOURCE_METADATA: ResourceStorage<ResourceInfo> = ResourceStorage::new();
 
-pub fn update_global_resource_metadata(id: &ResourceId, info: ResourceInfo) {
+pub fn update_global_resource_metadata(id: &Caid, info: ResourceInfo) {
 	RESOURCE_METADATA.update_blocking(id, info);
 }
 
-pub fn get_resource_metadata(id: &ResourceId) -> Option<ResourceInfo> {
+pub fn get_resource_metadata(id: &Caid) -> Option<ResourceInfo> {
 	RESOURCE_METADATA.get_blocking(id)
 }
 
 #[derive(Clone)]
 pub enum ResourceIdOrMeta {
-	Id(ResourceId),
+	Id(Caid),
 	Meta(ResourceInfo),
 }
 impl ResourceIdOrMeta {
@@ -582,8 +588,8 @@ fn resource_id_generate() {
 		rng.fill(&mut buf2);
 	}
 
-	let rid1 = ResourceId::from_buf(&buf1);
-	let rid2 = ResourceId::from_buf(&buf2);
+	let rid1 = Caid::from_buf(&buf1);
+	let rid2 = Caid::from_buf(&buf2);
 
 	assert_eq!(rid1.length, 1024);
 	assert_eq!(rid2.length, 1024);
@@ -610,7 +616,7 @@ fn resource_id_to_string() {
 		rng.fill(&mut buf1);
 	}
 
-	let rid1 = ResourceId::from_buf(&buf1);
+	let rid1 = Caid::from_buf(&buf1);
 
 	let stringified = rid1.to_string();
 

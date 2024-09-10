@@ -13,7 +13,7 @@ use crate::{
 use super::{
 	channels::RESOURCE_FETCH,
 	retrieval::{ResourceFetch, ResourceFetchResponse},
-	ResourceError, ResourcePath, ResourcePoll, ResourceRetrievalError,
+	ResourceError, ResourceId, ResourcePoll, ResourceRetrievalError,
 };
 use std::{fmt::Debug, sync::Arc};
 
@@ -24,12 +24,12 @@ pub trait ResourceProvider<T> {
 	/// If it returns an empty vec, that means all resources are pending.
 	fn request_batch(
 		&mut self,
-		resources: Vec<ResourcePath>,
+		resources: Vec<ResourceId>,
 		expected_source: NodeIdentity,
-	) -> Vec<Result<(ResourcePath, T), ResourceError<Self::ParseError>>>;
+	) -> Vec<Result<(ResourceId, T), ResourceError<Self::ParseError>>>;
 	fn request_one(
 		&mut self,
-		resource: ResourcePath,
+		resource: ResourceId,
 		expected_source: NodeIdentity,
 	) -> Option<Result<T, ResourceError<Self::ParseError>>> {
 		self.request_batch(vec![resource], expected_source)
@@ -39,15 +39,15 @@ pub trait ResourceProvider<T> {
 
 	/// Request that we download files, except that there isn't any immediate need to use them
 	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
-	fn preload_batch(&mut self, resources: Vec<ResourcePath>, expected_source: NodeIdentity);
-	fn preload_one(&mut self, resource: ResourcePath, expected_source: NodeIdentity) {
+	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity);
+	fn preload_one(&mut self, resource: ResourceId, expected_source: NodeIdentity) {
 		self.preload_batch(vec![resource], expected_source)
 	}
 
 	fn recv_poll(&mut self) -> ResourcePoll<T, Self::ParseError>;
 	fn recv_wait(
 		&mut self,
-	) -> impl Future<Output = Result<(ResourcePath, T), ResourceError<Self::ParseError>>> + '_;
+	) -> impl Future<Output = Result<(ResourceId, T), ResourceError<Self::ParseError>>> + '_;
 
 	/// Poll until there are no remaining results.
 	fn recv_poll_all(&mut self) -> Vec<ResourcePoll<T, Self::ParseError>> {
@@ -92,19 +92,18 @@ impl RawResourceProvider {
 
 	fn request_inner(
 		&self,
-		resources: Vec<ResourcePath>,
+		resources: Vec<ResourceId>,
 		expected_source: NodeIdentity,
 		return_channel: Option<MpscSender<ResourceFetchResponse>>,
-	) -> Vec<Result<(ResourcePath, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
+	) -> Vec<Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
 		self.fetch_sender.blocking_send(ResourceFetch {
 			resources: resources
 				.iter()
 				.map(|value| match value {
-					ResourcePath::Whole(v) => v.clone(),
-					ResourcePath::Archived(_, _) => {
-						panic!("Loading from inside archives is not yet implemented!")
-					}
-				})
+						ResourceId::Caid(_) => todo!(),
+						ResourceId::Local(_) => todo!(),
+						ResourceId::Link(_) => todo!(),
+					})
 				.collect(),
 			expected_source,
 			return_channel,
@@ -114,12 +113,12 @@ impl RawResourceProvider {
 
 	async fn recv_wait_inner(
 		&mut self,
-	) -> Result<(ResourcePath, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>> {
+	) -> Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>> {
 		match self.return_receiver.recv_wait().await {
 			Ok(value) => {
 				match value.data {
 					// This will need to change when archives are implemented
-					Ok(v) => Ok((ResourcePath::Whole(value.id), v)),
+					Ok(v) => Ok((ResourceId::Caid(value.id), v)),
 					Err(e) => Err(ResourceError::Retrieval(e)),
 				}
 			}
@@ -134,20 +133,20 @@ impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
 	//God I hate this return type signature, I should probably simplify it somehow.
 	fn request_batch(
 		&mut self,
-		resources: Vec<ResourcePath>,
+		resources: Vec<ResourceId>,
 		expected_source: NodeIdentity,
-	) -> Vec<Result<(ResourcePath, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
+	) -> Vec<Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
 		self.request_inner(resources, expected_source, Some(self.return_template.clone()))
 	}
 
-	fn preload_batch(&mut self, resources: Vec<ResourcePath>, expected_source: NodeIdentity) {
+	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) {
 		self.request_inner(resources, expected_source, None);
 	}
 
 	fn recv_poll(&mut self) -> ResourcePoll<Arc<Vec<u8>>, Self::ParseError> {
 		match self.return_receiver.recv_poll() {
 			Ok(Some(v)) => match v.data {
-				Ok(value) => ResourcePoll::Ready(ResourcePath::Whole(v.id), value),
+				Ok(value) => ResourcePoll::Ready(ResourceId::Caid(v.id), value),
 				Err(e) => ResourcePoll::Err(ResourceError::Retrieval(e)),
 			},
 			Ok(None) => ResourcePoll::None,
@@ -158,7 +157,7 @@ impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
 	fn recv_wait(
 		&mut self,
 	) -> impl Future<
-		Output = Result<(ResourcePath, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>,
+		Output = Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>,
 	> + '_ {
 		self.recv_wait_inner()
 	}

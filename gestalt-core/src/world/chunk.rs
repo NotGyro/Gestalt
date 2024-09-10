@@ -1,8 +1,9 @@
 use std::ops::Range;
 
+use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use crate::common::{new_fast_hash_map, voxelmath::*, FastHashMap, Version};
+use crate::common::{new_fast_hash_map, voxelmath::*, FastHashMap};
 
 use super::{
 	voxelarray::{VoxelArrayError, VoxelArrayStatic},
@@ -10,7 +11,7 @@ use super::{
 	TileId, VoxelStorage, VoxelStorageBounded,
 };
 
-pub const NEWEST_CHUNK_FILE_VERSION: Version = version!(0, 0, 1);
+pub const NEWEST_CHUNK_FILE_VERSION: Version = Version::new(0, 0, 1);
 
 pub const CHUNK_EXP: usize = 5;
 pub const CHUNK_SIZE: usize = 2_usize.pow(CHUNK_EXP as u32);

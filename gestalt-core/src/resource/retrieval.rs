@@ -13,10 +13,10 @@ use crate::{
 		identity::{IdentityKeyPair, NodeIdentity},
 	},
 	message::{MessageReceiverAsync, MpscReceiver, MpscSender, QuitReceiver},
-	net::SelfNetworkRole,
+	net::SelfNetworkRole, resource::ResourceId,
 };
 
-use super::{resource_id_to_prefix, ResourceId, ResourceRetrievalError, RESOURCE_FETCH};
+use super::{resource_id_to_prefix, Caid, ResourceRetrievalError, RESOURCE_FETCH};
 
 static LOCK_SUFFIX: &'static str = ".lock";
 
@@ -32,7 +32,7 @@ pub enum ResourceSysError {
 
 #[derive(Debug)]
 pub struct ResourceFetch {
-	pub resources: Vec<ResourceId>,
+	pub resources: Vec<Caid>,
 	pub expected_source: NodeIdentity,
 	/// If this field contains a Some value, this is treated as a resource to be loaded
 	/// into memory, and then onto disk after that.
@@ -43,7 +43,7 @@ pub struct ResourceFetch {
 
 #[derive(Debug)]
 pub struct ResourceFetchResponse {
-	pub id: ResourceId,
+	pub id: Caid,
 	pub data: Result<Arc<Vec<u8>>, ResourceRetrievalError>,
 }
 
@@ -62,7 +62,7 @@ pub async fn launch_resource_system(
 }
 
 fn path_for_resource(
-	id: &ResourceId,
+	id: &Caid,
 	origin_identity: &NodeIdentity,
 	self_identity: &NodeIdentity,
 	directories: Arc<GestaltDirectories>,
@@ -79,7 +79,7 @@ fn path_for_resource(
 }
 
 async fn load_from_file(
-	mut resources: Vec<ResourceId>,
+	mut resources: Vec<Caid>,
 	expected_source: NodeIdentity,
 	self_identity: NodeIdentity,
 	directories: Arc<GestaltDirectories>,
@@ -106,7 +106,7 @@ async fn load_from_file(
 						chan.send(ResourceFetchResponse {
 							id: resource,
 							data: Err(ResourceRetrievalError::Disk(
-								resource.clone(),
+								ResourceId::Caid(resource.clone()),
 								format!("{0:?}", e),
 							)),
 						});

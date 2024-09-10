@@ -1,15 +1,15 @@
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::common::identity::NodeIdentity;
-use crate::common::Version;
-use crate::resource::ResourceId;
+use crate::resource::Caid;
 use string_cache::DefaultAtom as Atom;
 
 pub mod lua;
 
-pub const SCRIPT_PACKAGE_MANIFEST_VERSION: Version = version!(0, 0, 1);
+pub const SCRIPT_PACKAGE_MANIFEST_VERSION: Version = Version::new(0, 0, 1);
 
 /// A "Module" as a runtime object in Gestalt Engine parlance is the glue between the
 /// fast-changing likely-unique world of Worlds and Entities and Voxels and such and the
@@ -41,9 +41,9 @@ pub struct ModuleDef {
 	pub author: NodeIdentity,
 	// A ModuleDef is itself a resource. This does not stop us from autoupdating it if we know
 	// how to contact `author`, it just means we know where to find this ModuleDef.
-	pub this_manifest_id: ResourceId,
-	pub dependencies: Vec<ResourceId>,
-	pub namespace: HashMap<Atom, ResourceId>,
+	pub this_manifest_id: Caid,
+	pub dependencies: Vec<Caid>,
+	pub namespace: HashMap<Atom, Caid>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,7 +57,6 @@ pub enum SupportedLanguages {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageDescriptor {
 	pub name: String,
-	#[serde(with = "crate::common::version_string")]
 	pub version: Version,
 	pub language: SupportedLanguages,
 }
@@ -66,8 +65,7 @@ pub struct PackageDescriptor {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageManifest {
 	/// Version of the package manifest format we're using.
-	#[serde(with = "crate::common::version_string")]
 	pub manifest_format: Version,
 	pub package: PackageDescriptor,
-	pub dependencies: Vec<ResourceId>,
+	pub dependencies: Vec<Caid>,
 }
