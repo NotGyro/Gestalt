@@ -12,6 +12,7 @@
 #[macro_use]
 pub mod common;
 pub use common::message;
+use gestalt_proc_macros::ChannelSet;
 use semver::Version;
 
 #[macro_use]
@@ -63,6 +64,17 @@ use crate::{
 };
 
 pub const ENGINE_VERSION: Version = Version::new(0,0,1);
+
+static_channel_atom!(EvenSpecialerString, MpscChannel<u32>, u32);
+static_channel_atom!(SpecialStringGoesHere, BroadcastChannel<u32>, u32);
+
+#[derive(ChannelSet)]
+struct ChannelSetTest {
+	#[channel(EvenSpecialerString)]
+	chan1: MpscChannel<u32>,
+	#[channel(SpecialStringGoesHere)]
+	chan2: BroadcastReceiver<u32>,
+}
 
 // For command-line argument parsing
 enum OneOrTwo {

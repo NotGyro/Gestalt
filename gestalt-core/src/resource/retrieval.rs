@@ -13,10 +13,10 @@ use crate::{
 		identity::{IdentityKeyPair, NodeIdentity},
 	},
 	message::{MessageReceiverAsync, MpscReceiver, MpscSender, QuitReceiver},
-	net::SelfNetworkRole, resource::ResourceId,
+	net::SelfNetworkRole, resource::ResourceLocation,
 };
 
-use super::{resource_id_to_prefix, Caid, ResourceRetrievalError, RESOURCE_FETCH};
+use super::{resource_id_to_prefix, Caid, ResourceFilelike, ResourceRetrievalError, RESOURCE_FETCH};
 
 static LOCK_SUFFIX: &'static str = ".lock";
 
@@ -32,7 +32,7 @@ pub enum ResourceSysError {
 
 #[derive(Debug)]
 pub struct ResourceFetch {
-	pub resources: Vec<Caid>,
+	pub resources: Vec<ResourceLocation>,
 	pub expected_source: NodeIdentity,
 	/// If this field contains a Some value, this is treated as a resource to be loaded
 	/// into memory, and then onto disk after that.
@@ -43,7 +43,7 @@ pub struct ResourceFetch {
 
 #[derive(Debug)]
 pub struct ResourceFetchResponse {
-	pub id: Caid,
+	pub id: ResourceLocation,
 	pub data: Result<Arc<Vec<u8>>, ResourceRetrievalError>,
 }
 
@@ -62,86 +62,106 @@ pub async fn launch_resource_system(
 }
 
 fn path_for_resource(
-	id: &Caid,
-	origin_identity: &NodeIdentity,
-	self_identity: &NodeIdentity,
+	id: &ResourceLocation,
+	_origin_identity: &NodeIdentity,
+	_self_identity: &NodeIdentity,
 	directories: Arc<GestaltDirectories>,
-) -> PathBuf {
-	let parent_dir: PathBuf = {
-		if &origin_identity == &self_identity {
-			directories.resources_local.clone()
-		} else {
-			directories.resources_cache_buckets[resource_id_to_prefix(&id)].clone()
-		}
-	};
-	let path = parent_dir.join(id.to_string());
-	path
+) -> ResourceFilelike {
+	match id.file_name() {
+		ResourceFilelike::File(file_name) => {
+			let parent_dir = match id {
+				ResourceLocation::Caid(caid) => { 
+					&directories.resources_cache_buckets[resource_id_to_prefix(caid)]
+				},
+				ResourceLocation::Local(local_res) => match local_res {
+						super::LocalResource::User(user) => &directories.resources_user,
+						super::LocalResource::Internal(_) =>  unreachable!("id.file_name() on an internal resource should never return ResourceFilelike::File()"),
+					},
+				ResourceLocation::Link(_link) => todo!(),
+			};
+			ResourceFilelike::File(parent_dir.join(file_name))
+		},
+		ResourceFilelike::Internal(internal) => ResourceFilelike::Internal(internal),
+	}
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum FileLoadError {
+	#[error("Could not send a file on a channel for resource {0:?}")]
+	NoSendChannel(ResourceLocation),
 }
 
 async fn load_from_file(
-	mut resources: Vec<Caid>,
+	mut resources: Vec<ResourceLocation>,
 	expected_source: NodeIdentity,
 	self_identity: NodeIdentity,
 	directories: Arc<GestaltDirectories>,
 	channel: Option<MpscSender<ResourceFetchResponse>>,
-) {
+) -> Result<(), FileLoadError> {
 	let mut not_on_disk = Vec::new();
 	for resource in resources.drain(..) {
-		let path =
+		let maybe_file_path =
 			path_for_resource(&resource, &expected_source, &self_identity, directories.clone());
-		match tokio::fs::OpenOptions::new()
-			.read(true)
-			.open(path.clone())
-			.await
-		{
-			Ok(mut file) => {
-				// Is this a non-preload?
-				if let Some(ref chan) = channel {
-					let mut buffer = Vec::new();
-					if let Err(e) = file.read_to_end(&mut buffer).await {
-						error!(
-							"Error when attempting to read file {0:?} into memory: {1:?}",
-							path, e
-						);
-						chan.send(ResourceFetchResponse {
-							id: resource,
-							data: Err(ResourceRetrievalError::Disk(
-								ResourceId::Caid(resource.clone()),
-								format!("{0:?}", e),
-							)),
-						});
-					} else {
-						chan.send(ResourceFetchResponse {
-							id: resource,
-							data: Result::Ok(Arc::new(buffer)),
-						});
+		match maybe_file_path {
+			ResourceFilelike::File(path) => {
+					
+				match tokio::fs::OpenOptions::new()
+					.read(true)
+					.open(path.clone())
+					.await
+				{
+					Ok(mut file) => {
+						// Is this a non-preload?
+						if let Some(ref chan) = channel {
+							let mut buffer = Vec::new();
+							if let Err(e) = file.read_to_end(&mut buffer).await {
+								error!(
+									"Error when attempting to read file {0:?} into memory: {1:?}",
+									path, e
+								);
+								chan.send(ResourceFetchResponse {
+									id: resource.clone(),
+									data: Err(ResourceRetrievalError::Disk(
+										resource.clone(),
+										format!("{0:?}", e),
+									)),
+								}).await.map_err(|e| FileLoadError::NoSendChannel(resource.clone()))?;
+							} else {
+								chan.send(ResourceFetchResponse {
+									id: resource.clone(),
+									data: Result::Ok(Arc::new(buffer)),
+								}).await.map_err(|_e| FileLoadError::NoSendChannel(resource.clone()))?;
+							}
+						} else {
+							trace!(
+								"Attempted to pre-load resource {0:?} which \
+								is already present on disk - ignoring.",
+								&resource
+							);
+						}
 					}
-				} else {
-					trace!(
-						"Attempted to pre-load resource {0:?} which \
-                        is already present on disk - ignoring.",
-						&resource
+					Err(e) => match e.kind() {
+						std::io::ErrorKind::NotFound => {
+							not_on_disk.push(resource.clone());
+						}
+						_ => error!(
+							"Failed to load file {0:?} at location {1:?} due to error {2:?}.",
+							&resource, &path, e
+						),
+					},
+				}
+				// TODO! Network retrieval goes here.
+				if !not_on_disk.is_empty() {
+					todo!(
+						"File retrieval over the network is not yet implemented, cannot retrieve: {:?}",
+						&not_on_disk
 					);
 				}
-			}
-			Err(e) => match e.kind() {
-				std::io::ErrorKind::NotFound => {
-					not_on_disk.push(resource.clone());
-				}
-				_ => error!(
-					"Failed to load file {0:?} at location {1:?} due to error {2:?}.",
-					&resource, &path, e
-				),
 			},
-		}
-		// TODO! Network retrieval goes here.
-		if !not_on_disk.is_empty() {
-			todo!(
-				"File retrieval over the network is not yet implemented, cannot retrieve: {:?}",
-				&not_on_disk
-			);
+			ResourceFilelike::Internal(_) => todo!(),
 		}
 	}
+	Ok(())
 }
 
 /// Mainloop for the resource-loading system.

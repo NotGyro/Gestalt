@@ -249,7 +249,7 @@ pub mod net_recv_channel {
 	where
 		T: NetMsg,
 	{
-		INBOUND_NET_MESSAGES.add_domain(&T::net_msg_id());
+		INBOUND_NET_MESSAGES.init_domain(&T::net_msg_id());
 		INBOUND_NET_MESSAGES
 			.receiver_subscribe(&T::net_msg_id())
 			.map(|inner| NetMsgReceiver::new(inner))
@@ -257,7 +257,7 @@ pub mod net_recv_channel {
 }
 
 pub fn register_peer(peer: &NodeIdentity) {
-	PACKET_TO_SESSION.add_domain(peer);
+	PACKET_TO_SESSION.init_domain(peer);
 }
 pub fn drop_peer(peer: &NodeIdentity) {
 	PACKET_TO_SESSION.drop_domain(peer);

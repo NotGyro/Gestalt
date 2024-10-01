@@ -1172,7 +1172,7 @@ pub async fn approver_no_mismatch(
 #[cfg(test)]
 mod test {
 	use super::*;
-	use crate::message::{BroadcastChannel, ReceiverChannel, SenderChannel};
+	use crate::{message::{BroadcastChannel, SenderSubscribe}, ReceiverSubscribe};
 
 	#[tokio::test]
 	async fn handshake_test() {

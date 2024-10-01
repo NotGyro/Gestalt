@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use std::error::Error;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::{cmp::PartialEq, hash::Hash};
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
@@ -251,36 +252,41 @@ pub struct ResourceLinkShort {
 	pub alias: String,
 }
 
-
 #[repr(C)]
 #[derive(Clone, PartialOrd, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum LocalResource {
+	User(PathBuf),
 	// TODO: interned strings instead of plain-old strings
-	User(String),
 	Internal(String),
 }
+
 #[repr(C)]
 #[derive(Clone, PartialOrd, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
-pub enum ResourceId { 
+pub enum ResourceLocation { 
 	#[serde(rename = "CAID")]
 	Caid(Caid),
 	Local(LocalResource),
-	Link(ResourceLinkShort)
+	/// UNSTABLE API, DO NOT USE
+	Link(ResourceLinkShort),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
-pub enum ResourceKind {
-	/// A "Manifest" is any kind of declarative config structure as a resource.
-	/// TileDef, ArtDef, ModelDef, animations, and other such things go here.
-	Manifest,
-	/// Modules can run code and establish namespaces. As such, they act like
-	/// a manifest in that they can have dependencies, but they're special.
-	ModuleManifest,
-	/// Plain Old Data is exactly what it sounds like. We have a reference to a
-	/// file, the file gets loaded by the system as a buffer of bytes. For example,
-	/// images, models, sound clips, common voxel models exported in some voxel library,
-	/// that kind of thing.
-	PlainOldData,
+impl ResourceLocation {
+	/// Intended for internal / engine use - does not necessarily correspond to metadata / original filename.
+	pub(crate) fn file_name(&self) -> ResourceFilelike {
+		match self {
+			ResourceLocation::Caid(id) => ResourceFilelike::File(PathBuf::from(id.to_string())),
+			ResourceLocation::Local(loc) => match loc {
+				LocalResource::User(file) => ResourceFilelike::File(file.clone()),
+				LocalResource::Internal(internal) => ResourceFilelike::Internal(internal.clone()),
+			},
+			ResourceLocation::Link(_) => todo!(),
+		}
+	}
+}
+
+pub(crate) enum ResourceFilelike {
+	File(PathBuf),
+	Internal(String),
 }
 
 /// Used to keep track of a resource locally
@@ -292,8 +298,6 @@ pub struct ResourceInfo {
 	pub filename: String,
 	/// Which user claims to have "made" this resource? Who signed it, who is the authority on it?
 	pub creator: NodeIdentity,
-	/// What broad category of things does this resource fall into?
-	pub kind: ResourceKind,
 	/// Expected type. MIME Type for PlainOldData, @{ManifestType} for manifest types e.g. @Module
 	pub resource_type: String,
 	/// Name of creator user and friends who made this resource.
@@ -327,17 +331,17 @@ impl PartialEq for ResourceInfo {
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ResourceRetrievalError {
 	#[error("While trying to retrieve resource {0:?}, a network error was encountered: {1}")]
-	Network(ResourceId, String),
+	Network(ResourceLocation, String),
 	#[error("Error loading resource {0:?} from disk: {1}")]
-	Disk(ResourceId, String),
+	Disk(ResourceLocation, String),
 	#[error("Tried to access a resource {0:?}, which cannot be found (is not indexed) locally or on any connected server.")]
-	NotFound(ResourceId),
+	NotFound(ResourceLocation),
 	#[error("Timed out while attempting to fetch resource {0:?}.")]
 	Timeout(Caid),
 	#[error("Failed to verify resource {0:?} due to error {1:?}.")]
 	Verification(Caid, VerifyResourceError),
 	#[error("Message-passing error while trying to load resource {0:?}: {1}.")]
-	ChannelError(Caid, String),
+	ChannelError(ResourceLocation, String),
 }
 
 pub enum ResourceError<E>
@@ -346,7 +350,7 @@ where
 {
 	Channel(RecvError),
 	Retrieval(ResourceRetrievalError),
-	Parse(ResourceId, E),
+	Parse(ResourceLocation, E),
 }
 
 impl<E> Clone for ResourceError<E>
@@ -507,7 +511,7 @@ pub enum ResourcePoll<T, E>
 where
 	E: Debug,
 {
-	Ready(ResourceId, T),
+	Ready(ResourceLocation, T),
 	Err(ResourceError<E>),
 	/// End of stream, the channel is empty. If you are polling in a loop you can stop polling.
 	None,

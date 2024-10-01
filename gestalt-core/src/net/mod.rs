@@ -323,7 +323,7 @@ impl NetworkSystem {
 		info!("Registering {} NetMsgIds.", netmsg_table.len());
 		for (id, msg_type) in netmsg_table.iter() {
 			if self.our_role.should_we_ingest(&msg_type.sidedness) {
-				INBOUND_NET_MESSAGES.add_domain(id);
+				INBOUND_NET_MESSAGES.init_domain(id);
 			}
 		}
 
@@ -499,8 +499,8 @@ mod test {
 	use crate::message::BroadcastChannel;
 	use crate::message::MessageReceiverAsync;
 	use crate::message::MessageSender;
-	use crate::message::ReceiverChannel;
-	use crate::message::SenderChannel;
+	use crate::message::ReceiverSubscribe;
+	use crate::message::SenderSubscribe;
 	use crate::message_types::JoinDefaultEntry;
 	use crate::net::handshake::approver_no_mismatch;
 	use crate::net::net_channels::net_recv_channel;

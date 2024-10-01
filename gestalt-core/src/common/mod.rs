@@ -15,7 +15,6 @@ use std::{
 };
 
 use log::warn;
-use semver::Version;
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::Xxh3Builder;
 

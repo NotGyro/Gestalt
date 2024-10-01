@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -131,7 +132,7 @@ where
 	}
 }
 
-pub trait ChannelDomain: Send + Clone + PartialEq + Eq + PartialOrd + Hash + Debug {}
+pub trait ChannelDomain: Send + Clone + PartialEq + Eq + PartialOrd + Hash + Debug + Any {}
 impl<A, B> ChannelDomain for (A, B)
 where
 	A: ChannelDomain,
@@ -199,11 +200,17 @@ type ChannelMutex<T> = parking_lot::Mutex<T>;
 /// of channels, for example any mpsc channel, might let you make
 /// many senders but there would be only one receiver
 /// (so you can't subscribe additional receivers into existence).
-pub trait SenderChannel<T>
+pub trait SenderChannel<T> 
+where
+	T: Message,
+{ 
+	type Sender: MessageSender<T>;
+}
+
+pub trait SenderSubscribe<T> : SenderChannel<T>
 where
 	T: Message,
 {
-	type Sender: MessageSender<T>;
 	// The trait does not include the Receiver because an
 	// mpsc channel will only have one consumer - so, the
 	// receiver is not something we can subscribe to.
@@ -211,28 +218,29 @@ where
 	fn sender_subscribe(&self) -> Self::Sender;
 }
 
-/// Trait that lets you get a receiver to receive from a message-passing channel.
-/// This is separate from SenderChannel because some types
-/// of channels, for example any mpsc channel, might let you make
-/// many senders but there would be only one receiver
-/// (so you can't subscribe additional receivers into existence).
 pub trait ReceiverChannel<T>
 where
 	T: Message,
 {
 	type Receiver: MessageReceiver<T>;
-	// The trait does not include the Receiver because an
-	// mpsc channel will only have one consumer - so, the
-	// receiver is not something we can subscribe to.
-
+}
+/// Trait that lets you get a receiver to receive from a message-passing channel.
+/// This is separate from SenderChannel because some types
+/// of channels, for example any mpsc channel, might let you make
+/// many senders but there would be only one receiver
+/// (so you can't subscribe additional receivers into existence).
+pub trait ReceiverSubscribe<T> : ReceiverChannel<T>
+where
+	T: Message,
+{
 	fn receiver_subscribe(&self) -> Self::Receiver;
 }
 
-pub trait MpmcChannel<T: Message>: SenderChannel<T> + ReceiverChannel<T> {}
+pub trait MpmcChannel<T: Message>: SenderSubscribe<T> + ReceiverChannel<T> {}
 impl<T, U> MpmcChannel<T> for U
 where
 	T: Message,
-	U: SenderChannel<T> + ReceiverChannel<T>,
+	U: SenderSubscribe<T> + ReceiverChannel<T>,
 {
 }
 
@@ -308,21 +316,26 @@ where
 	}
 }
 
-impl<T> SenderChannel<T> for BroadcastChannel<T>
+impl<T> SenderChannel<T> for BroadcastChannel<T> where T: Message { 
+	type Sender = BroadcastSender<T>;
+}
+
+impl<T> SenderSubscribe<T> for BroadcastChannel<T>
 where
 	T: Message + Clone,
 {
-	type Sender = BroadcastSender<T>;
 	fn sender_subscribe(&self) -> BroadcastSender<T> {
 		self.sender.clone()
 	}
 }
-
-impl<T> ReceiverChannel<T> for BroadcastChannel<T>
+impl<T> ReceiverChannel<T> for BroadcastChannel<T> where T: Message + Clone,
+{
+	type Receiver = BroadcastReceiver<T>;
+}
+impl<T> ReceiverSubscribe<T> for BroadcastChannel<T>
 where
 	T: Message + Clone,
 {
-	type Receiver = BroadcastReceiver<T>;
 	fn receiver_subscribe(&self) -> BroadcastReceiver<T> {
 		let mut lock = self.retained_receiver.lock();
 		let mut retained_maybe = lock.take();
@@ -417,6 +430,15 @@ where
 	}
 }
 
+impl<T> SenderChannel<T> for MpscSender<T> where T: Message { 
+	type Sender = MpscSender<T>;
+}
+impl<T> SenderSubscribe<T> for MpscSender<T> where T: Message { 
+	fn sender_subscribe(&self) -> Self::Sender {
+		self.clone()
+	}
+}
+
 pub struct MpscChannel<T>
 where
 	T: Message,
@@ -481,12 +503,20 @@ where
 
 impl<T> SenderChannel<T> for MpscChannel<T>
 where
+	T: Message, {
+	type Sender = MpscSender<T>;
+}
+impl<T> SenderSubscribe<T> for MpscChannel<T>
+where
 	T: Message,
 {
-	type Sender = MpscSender<T>;
 	fn sender_subscribe(&self) -> MpscSender<T> {
 		self.sender.clone()
 	}
+}
+// This has been decoupled from subscribing, and so we can impl this here. 
+impl<T> ReceiverChannel<T> for MpscChannel<T> where T: Message {
+	type Receiver = MpscReceiver<T>;
 }
 
 //Note that sending directly on a channel rather than subscribing a sender will always be slower than getting a sender for bulk operations.
@@ -512,6 +542,46 @@ where
 	}
 }
 
+impl<T> From<MpscChannel<T>> for MpscSender<T> where T: Message {
+	fn from(value: MpscChannel<T>) -> Self {
+		value.sender_subscribe()
+	}
+}
+impl<T> From<BroadcastChannel<T>> for BroadcastSender<T> where T: Message + Clone {
+	fn from(value: BroadcastChannel<T>) -> Self {
+		value.sender_subscribe()
+	}
+}
+impl<T> From<BroadcastChannel<T>> for BroadcastReceiver<T> where T: Message + Clone {
+	fn from(value: BroadcastChannel<T>) -> Self {
+		value.receiver_subscribe()
+	}
+}
+
+impl<T> SenderChannel<T> for BroadcastSender<T> where T: Message + Clone {
+	type Sender = <BroadcastChannel<T> as SenderChannel<T>>::Sender;
+}
+impl<T> SenderSubscribe<T> for BroadcastSender<T> where T: Message + Clone + Debug {
+	fn sender_subscribe(&self) -> Self::Sender {
+		self.clone()
+	}
+}
+/* This is possible and might even be very useful but boy oh boy would it ever
+be terrible for security if I ever use channel subset cloning as a kind of access control.
+impl<T> ReceiverChannel<T> for BroadcastSender<T> where T: Message + Clone {
+	type Receiver = <BroadcastChannel<T> as ReceiverChannel<T>>::Receiver;
+}
+impl<T> ReceiverSubscribe<T> for BroadcastSender<T> where T: Message + Clone + Debug {
+	fn receiver_subscribe(&self) -> Self::Receiver {
+		BroadcastReceiver::new(self.subscribe())
+	}
+}
+impl<T> From<BroadcastSender<T>> for BroadcastReceiver<T> where T: Message + Clone {
+	fn from(value: BroadcastSender<T>) -> Self {
+		value.receiver_subscribe()
+	}
+}*/
+
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum DomainSubscribeErr<D>
 where
@@ -521,11 +591,115 @@ where
 	NoDomain(D),
 }
 
+// Janky hack to permit send_to_all_except() to work over the broadcast "all" sender.
+#[derive(Clone, Debug)]
+struct MessageIgnoreEndpoint<T,D> { 
+	pub inner_message: T,
+	pub ignore_domain: Option<D>,
+}
+impl<T,D> MessageIgnoreEndpoint<T,D> { 
+	/// WARNING: Skips ignoring `ignore_domain` so make sure your behavior really doesn't rely
+	/// on that, or that you've done this checking elsewhere.
+	fn inner(self) -> T { 
+		self.inner_message
+	}
+}
+
+impl<T,D> From<T> for MessageIgnoreEndpoint<T,D> {
+	fn from(value: T) -> Self {
+		MessageIgnoreEndpoint { 
+			inner_message: value,
+			ignore_domain: None,
+		}
+	}
+}
+
+pub struct AllAndOneSender<T, D, C>
+where
+	T: Message,
+	D: ChannelDomain,
+	C: MessageSender<T> {
+	pub domain: D,
+	pub(super) primary_channel: C,
+	pub(super) all_channel: BroadcastSender<MessageIgnoreEndpoint<T, D>>,
+}
+
+impl<T,D,C> MessageSender<T> for AllAndOneSender<T, D, C> 
+where
+	T: Message,
+	D: ChannelDomain,
+	C: MessageSender<T> {
+	fn send(&self, message: T) -> Result<(), SendError> {
+		AllAndOneSender::send(self, message)
+	}
+}
+
+impl<T, D, C>  AllAndOneSender<T, D, C> 
+where
+	T: Message,
+	D: ChannelDomain,
+	C: MessageSender<T> {
+	fn send(&self, message: T) -> Result<(), SendError> {
+		self.primary_channel.send(message.into())
+	}
+
+	fn send_to_all(&self, message: T) -> Result<usize, SendError> {
+		self.all_channel.send(message.into()).map_err(|e| e.into())
+	}
+
+	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<usize, SendError> {
+		self.all_channel.send(MessageIgnoreEndpoint { 
+			inner_message: message, 
+			ignore_domain: Some(exclude.clone())
+		}).map_err(|e| e.into())
+	}
+}
+
+pub struct AllAndOneReceiver<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: MessageReceiver<T> {
+	pub domain: D,
+	pub(super) last_was_primary: bool,
+	pub(super) primary_channel: C,
+	pub(super) all_channel: BroadcastReceiver<MessageIgnoreEndpoint<T, D>>,
+}
+
+impl<T, D, C> MessageReceiver<T> for AllAndOneReceiver<T, D, C> 
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: MessageReceiver<T> {
+	fn recv_poll(&mut self) -> Result<Option<T>, RecvError> {
+		// Loop check broadcast channel until it either provides a message we can use or is empty.
+		// If it is empty, or if our previous message was from broadcast, try primary_channel.
+		// The intent is to round-robin viable messages.
+		while self.last_was_primary {
+			match self.all_channel.recv_poll()? { 
+				Some(msg) => { 
+					// Only propagate this copy of the message if it's not excluding us. 
+					if msg.ignore_domain.as_ref() != Some(&self.domain) { 
+						// Only set last_was_primary to false and break out of the loop if we actually find something.
+						self.last_was_primary = false;
+						return Ok(Some(msg.inner_message));
+					}
+				}
+				None => {
+					// Empty receiver, break loop and check primary.
+					break;
+				}
+			}
+		}
+		self.last_was_primary = true;
+		self.primary_channel.recv_poll()
+	}
+}
+
 pub struct DomainMultiChannel<T, D, C>
 where
 	T: Message,
 	D: ChannelDomain,
-	C: SenderChannel<T> + ChannelInit,
 {
 	/// This is carried into any channels we will initialize
 	capacity: usize,
@@ -537,9 +711,9 @@ where
 
 impl<T, D, C> DomainMultiChannel<T, D, C>
 where
-	T: Message,
+	T: Message + Clone,
 	D: ChannelDomain,
-	C: SenderChannel<T> + ChannelInit,
+	C: SenderSubscribe<T> + ChannelInit,
 {
 	/// Construct a Domain Multichannel system.
 	pub fn new(capacity: usize) -> Self {
@@ -570,11 +744,17 @@ where
 	}*/
 
 	/// Adds a new domain if it isn't there yet, takes no action if one is already present.
-	pub fn add_domain(&self, domain: &D) {
+	pub fn init_domain(&self, domain: &D) {
 		self.channels
 			.lock()
 			.entry(domain.clone())
 			.or_insert(C::new(self.capacity));
+	}
+	/// Adds a channel generated externally to this domain-multi-channel
+	pub fn add_channel(&self, domain: D, channel: C) -> Option<C> { 
+		self.channels
+			.lock()
+			.insert(domain, channel)
 	}
 	pub fn drop_domain(&self, domain: &D) {
 		let lock = self.channels.lock();
@@ -590,7 +770,7 @@ impl<T, D, C> DomainMultiChannel<T, D, C>
 where
 	T: Message,
 	D: ChannelDomain,
-	C: SenderChannel<T> + ReceiverChannel<T> + ChannelInit,
+	C: ReceiverSubscribe<T> + ChannelInit,
 {
 	pub fn receiver_subscribe(&self, domain: &D) -> Result<C::Receiver, DomainSubscribeErr<D>> {
 		Ok(self
@@ -606,7 +786,7 @@ impl<T, D, C> DomainMessageSender<T, D> for DomainMultiChannel<T, D, C>
 where
 	T: Message + Clone,
 	D: ChannelDomain,
-	C: SenderChannel<T> + ChannelInit + MessageSender<T>,
+	C: SenderSubscribe<T> + ChannelInit + MessageSender<T>,
 {
 	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError> {
 		match self.channels.lock().get(domain) {
@@ -635,18 +815,211 @@ where
 	}
 }
 
+
 impl<T, D, R, C> MessageSender<T> for DomainMultiChannel<R, D, C>
 where
 	T: Into<R> + MessageWithDomain<D>,
 	D: ChannelDomain,
 	R: MessageWithDomain<D> + Clone,
-	C: SenderChannel<R> + ChannelInit + MessageSender<R>,
+	C: SenderSubscribe<R> + ChannelInit + MessageSender<R>,
 {
 	fn send(&self, message: T) -> Result<(), SendError> {
 		let message = message.into();
 		let domain = message.get_domain().clone();
 		self.send_to(message, &domain)
 			.map_err(|_e| SendError::NoReceivers)
+	}
+}
+
+pub struct DomainBroadcastChannel<T, D, C>
+where
+	T: Message,
+	D: ChannelDomain,
+{
+	inner: DomainMultiChannel<T, D, C>, 
+	broadcaster: BroadcastChannel<MessageIgnoreEndpoint<T, D>>,
+}
+
+impl<T, D, C> DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: SenderSubscribe<T> + ChannelInit,
+{
+	/// Construct a Domain Multichannel system.
+	pub fn new(capacity: usize) -> Self {
+		DomainBroadcastChannel { 
+			inner: DomainMultiChannel::new(capacity),
+			broadcaster: BroadcastChannel::new(capacity),
+		}
+	}
+
+	pub fn sender_subscribe(&self, domain: &D) -> Result<AllAndOneSender<T, D, C::Sender>, DomainSubscribeErr<D>> {
+		let inner_channel = self.inner.sender_subscribe(domain)?;
+		Ok(AllAndOneSender {
+			domain: domain.clone(),
+			primary_channel: inner_channel,
+			all_channel: self.broadcaster.sender_subscribe(),
+		})
+	}
+
+	pub fn sender_subscribe_all(&mut self) -> BroadcastSender<MessageIgnoreEndpoint<T, D>> {
+		self.broadcaster.sender_subscribe()
+	}
+
+	/// Adds a new domain if it isn't there yet, takes no action if one is already present.
+	pub fn init_domain(&self, domain: &D) {
+		self.inner.init_domain(domain);
+	}
+	/// Adds a channel generated externally to this domain-multi-channel
+	pub fn add_channel(&self, domain: D, channel: C) -> Option<C> { 
+		self.inner.add_channel(domain, channel)
+	}
+
+	pub fn drop_domain(&self, domain: &D) {
+		self.inner.drop_domain(domain);
+	}
+}
+
+impl<T, D, C> DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: ReceiverSubscribe<T> + ChannelInit,
+	<C as ReceiverChannel<T>>::Receiver: MessageReceiver<T>,
+{
+	pub fn receiver_subscribe(&self, domain: &D) -> Result<AllAndOneReceiver<T, D, C::Receiver>, DomainSubscribeErr<D>> {
+		let inner_receiver = self.inner.receiver_subscribe(domain)?; 
+		Ok(AllAndOneReceiver{ 
+			domain: domain.clone(), 
+			last_was_primary: false,
+			primary_channel: inner_receiver,
+			all_channel: self.broadcaster.receiver_subscribe()
+		})
+	}
+
+	pub fn receiver_subscribe_all(&self) -> BroadcastReceiver<MessageIgnoreEndpoint<T, D>> {
+		self.broadcaster.receiver_subscribe()
+	}
+}
+
+impl<T, D, C> DomainMessageSender<T, D> for DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: SenderSubscribe<T> + ChannelInit + MessageSender<T>,
+{
+	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError> {
+		self.inner.send_to(message, domain)
+	}
+
+	fn send_to_all(&self, message: T) -> Result<(), SendError> {
+		self.broadcaster.send(message).map_err(|e| e.into())
+	}
+
+	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError> {
+		self.broadcaster.send(MessageIgnoreEndpoint{ 
+			inner_message: message, 
+			ignore_domain: Some(exclude.clone()),
+		}).map_err(|e| e.into())
+	}
+}
+
+impl<T, D, C> SenderChannel<T> for DomainMultiChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: SenderChannel<T>,
+{
+	type Sender = C::Sender;
+}
+
+impl<T, D, C> ReceiverChannel<T> for DomainMultiChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: ReceiverChannel<T>,
+{
+	type Receiver = C::Receiver;
+}
+
+impl<T, D, C> SenderChannel<T> for DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: SenderChannel<T>,
+{
+	type Sender = AllAndOneSender<T, D, C::Sender>;
+}
+
+impl<T, D, C> ReceiverChannel<T> for DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: ReceiverChannel<T>,
+{
+	type Receiver = AllAndOneReceiver<T, D, C::Receiver>;
+}
+
+pub trait DomainSenderSubscribe<T, D> : SenderChannel<T>
+where
+	T: Message, D: ChannelDomain
+{
+	// The trait does not include the Receiver because an
+	// mpsc channel will only have one consumer - so, the
+	// receiver is not something we can subscribe to.
+
+	fn sender_subscribe_domain(&self, domain: &D) -> Result<Self::Sender, DomainSubscribeErr<D>>;
+}
+pub trait DomainReceiverSubscribe<T, D> : ReceiverChannel<T>
+where
+	T: Message, D: ChannelDomain
+{
+	// The trait does not include the Receiver because an
+	// mpsc channel will only have one consumer - so, the
+	// receiver is not something we can subscribe to.
+
+	fn receiver_subscribe_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>>;
+}
+impl<T, D, C> DomainSenderSubscribe<T,D> for DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: SenderSubscribe<T> + ChannelInit,
+{
+	fn sender_subscribe_domain(&self, domain: &D) -> Result<Self::Sender, DomainSubscribeErr<D>> {
+		DomainBroadcastChannel::sender_subscribe(self, domain)
+	}
+}
+impl<T, D, C> DomainReceiverSubscribe<T, D> for DomainBroadcastChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: ReceiverSubscribe<T> + ChannelInit,
+{
+	fn receiver_subscribe_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
+		DomainBroadcastChannel::receiver_subscribe(self, domain)
+	}
+}
+
+impl<T, D, C> DomainSenderSubscribe<T, D> for DomainMultiChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: SenderSubscribe<T> + ChannelInit,
+{
+	fn sender_subscribe_domain(&self, domain: &D) -> Result<Self::Sender, DomainSubscribeErr<D>> {
+		DomainMultiChannel::sender_subscribe(self, domain)
+	}
+}
+impl<T, D, C> DomainReceiverSubscribe<T, D> for DomainMultiChannel<T, D, C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: ReceiverSubscribe<T> + ChannelInit,
+{
+	fn receiver_subscribe_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
+		DomainMultiChannel::receiver_subscribe(self, domain)
 	}
 }
 
@@ -730,7 +1103,7 @@ pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 		tokio::select! {
 			reply_maybe = ready_receiver.recv_wait() => {
 				match reply_maybe {
-					Ok(v) => {
+					Ok(_) => {
 						trace!("Received {} quit ready notifications.", count_received);
 						count_received += 1;
 					}
@@ -748,6 +1121,191 @@ pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 	}
 
 	Ok(())
+}
+
+// Stream-of-consciousness notes in comments, apologies...
+// Requirements for ChannelSet:
+// * Good ergonomics (should be able to get a channel by name without too much boilerplate)
+// * No performance overhead compared to global channels for compiled-in channels. Should compile to
+// just accessing the channel directly / no-middle-man for static channels.
+// * Ergonomic "clone-into-subset" method
+// * Introspectable? would be neat for scripting for later. Not required now but build around 
+// the expectation
+//
+// I have some thoughts about this...
+// Unit-type-stuff is somewhat awkward and cumbersome, but static string comparison probably can't
+// evaluate at compiletime.
+// Preferred syntax would probably be channels.get_sender::<VoxelEvent>() or 
+// channels.get_sender("voxel_event") if that can compile down to nothing.
+// Former sounds good to me.
+// 
+// I initially wanted to avoid "two channels that send the same datatype are the same channel" I think
+// I still do... 
+
+/// Type system hax to treat a unit struct as a compile-time-valid statically-known channel name / identifier.
+/// This should be a zero-sized type
+pub trait StaticChannelAtom {
+	type Channel;
+	type Message : Message;
+	fn get_static_name() -> &'static str;
+	fn get_static_msg_ty() -> &'static str;
+}
+
+pub trait StaticDomainChannelAtom : StaticChannelAtom { 
+	type Domain : ChannelDomain;
+	fn get_static_domain_ty() -> &'static str;
+}
+
+macro_rules! static_channel_atom {
+	($name:ident, $chan:ty, $message:ty) => {
+		pub struct $name;
+		impl crate::common::message::StaticChannelAtom for $name {
+			type Channel = $chan;
+			type Message = $message;
+			fn get_static_name() -> &'static str { 
+				stringify!($name)
+			}
+			fn get_static_msg_ty() -> &'static str { 
+				stringify!($message)
+			}
+		}
+	};
+	($name:ident, $chan:ty, $message:ty, $domain:ty) => {
+		pub struct $name;
+		impl crate::common::message::StaticChannelAtom for $name {
+			type Channel = $chan;
+			type Message = $message;
+			fn get_static_name() -> &'static str { 
+				stringify!($name)
+			}
+			fn get_static_msg_ty() -> &'static str { 
+				stringify!($message)
+			}
+		}
+		impl crate::common::message::StaticDomainChannelAtom for $name {
+			type Domain = $domain;
+			fn get_static_domain_ty() -> &'static str { 
+				stringify!($domain)
+			}
+		}
+	};
+}
+
+static_channel_atom!(TestStaticChannel, BroadcastChannel<usize>, usize); 
+static_channel_atom!(CoolerChannel, DomainBroadcastChannel<usize, NodeIdentity, BroadcastChannel<usize>>, usize, NodeIdentity);
+
+pub trait HasChannel<C> where C: StaticChannelAtom {
+	fn get_channel(&self) -> &C::Channel;
+}
+pub trait HasSender<C> where C: StaticChannelAtom, C::Channel: SenderChannel<C::Message> {
+	fn get_sender(&self) -> &<C::Channel as SenderChannel<C::Message>>::Sender;
+}
+pub trait HasReceiver<C> where C: StaticChannelAtom, C::Channel: ReceiverChannel<C::Message> {
+	fn get_receiver(&self) -> &<C::Channel as ReceiverChannel<C::Message>>::Receiver;
+}
+
+pub trait StaticSenderSubscribe<C> where C: StaticChannelAtom, C::Channel: SenderChannel<C::Message> { 
+	fn sender_subscribe(&self) -> <<C as StaticChannelAtom>::Channel as SenderChannel<C::Message>>::Sender;
+}
+
+pub trait StaticReceiverSubscribe<C> where C: StaticChannelAtom, C::Channel: ReceiverChannel<C::Message> { 
+	fn receiver_subscribe(&self) -> <<C as StaticChannelAtom>::Channel as ReceiverChannel<C::Message>>::Receiver;
+}
+
+pub trait StaticDomainSenderSubscribe<C> where C: StaticDomainChannelAtom, C::Channel: SenderChannel<C::Message> { 
+	fn sender_subscribe(&self, domain: &C::Domain) -> Result<<<C as StaticChannelAtom>::Channel as SenderChannel<C::Message>>::Sender, DomainSubscribeErr<C::Domain>>;
+}
+
+pub trait StaticDomainReceiverSubscribe<C> where C: StaticDomainChannelAtom, C::Channel: ReceiverChannel<C::Message> { 
+	fn receiver_subscribe(&self, domain: &C::Domain) -> Result<<<C as StaticChannelAtom>::Channel as ReceiverChannel<C::Message>>::Receiver, DomainSubscribeErr<C::Domain>>;
+}
+
+// Such gnarly type signatures are allowed only when needed for advanced procmacro shenanigans.
+impl<T, C> StaticSenderSubscribe<C> for T where T: HasChannel<C>,
+	C: StaticChannelAtom,
+	C::Channel: SenderSubscribe<C::Message>, {
+	fn sender_subscribe(&self) -> <<C as StaticChannelAtom>::Channel as SenderChannel<<C as StaticChannelAtom>::Message>>::Sender {
+		self.get_channel().sender_subscribe()
+	}
+}
+impl<T, C> StaticReceiverSubscribe<C> for T where T: HasChannel<C>,
+	C: StaticChannelAtom,
+	C::Channel: ReceiverSubscribe<C::Message>, {
+	fn receiver_subscribe(&self) -> <<C as StaticChannelAtom>::Channel as ReceiverChannel<<C as StaticChannelAtom>::Message>>::Receiver {
+		self.get_channel().receiver_subscribe()
+	}
+}
+
+impl<T, C> StaticDomainSenderSubscribe<C> for T where T: HasChannel<C>,
+	C: StaticDomainChannelAtom,
+	C::Channel: DomainSenderSubscribe<C::Message, C::Domain>, {
+	fn sender_subscribe(&self, domain: &C::Domain) -> Result<<<C as StaticChannelAtom>::Channel as SenderChannel<<C as StaticChannelAtom>::Message>>::Sender, DomainSubscribeErr<<C as StaticDomainChannelAtom>::Domain>> {
+		self.get_channel().sender_subscribe_domain(domain)
+	}
+}
+impl<T, C> StaticDomainReceiverSubscribe<C> for T where T: HasChannel<C>,
+	C: StaticDomainChannelAtom,
+	C::Channel: DomainReceiverSubscribe<C::Message, C::Domain>, {
+	fn receiver_subscribe(&self, domain: &C::Domain) -> Result<<<C as StaticChannelAtom>::Channel as ReceiverChannel<<C as StaticChannelAtom>::Message>>::Receiver, DomainSubscribeErr<<C as StaticDomainChannelAtom>::Domain>> {
+		self.get_channel().receiver_subscribe_domain(domain)
+	}
+}
+
+/// T is the parent type - this is implemented on the smaller set, which can be narrowed down
+/// from the greater set.
+pub trait CloneSubset<T> {
+	/// Clones another channelset such that:
+	/// 1. Every channel that this type has, and the original channel set has,
+	/// gets cloned into this channel (via clone.().into())
+	/// 2. Channels that the upstream struct has but our channel set does not get ignored.
+	/// This is useful for restricting to a more-and-more fine-grained set of channels.
+	fn from_subset(parent: &T) -> Self;
+}
+
+pub trait ChannelSet {
+	type StaticBuilder;
+}
+
+/// T is the parent type - this is implemented on the smaller set, which can be narrowed down
+/// from the greater set.
+pub trait CloneComplexSubset<T> : ChannelSet + Sized {
+	/// Clones another channelset such that:
+	/// 1. Every channel that this type has, and the original channel set has,
+	/// gets cloned into this channel (via clone.().into())
+	/// 2. Channels that the upstream struct has but our channel set does not get ignored.
+	/// This is useful for restricting to a more-and-more fine-grained set of channels.
+	fn from_subset_builder(parent: &T, builder: SubsetBuilder<Self::StaticBuilder>) -> Self;
+}
+
+pub trait BuildSubset<C> where C: ChannelSet {
+	fn build_subset(&self, builder: SubsetBuilder<C::StaticBuilder>) -> C;
+}
+
+impl<P, C> BuildSubset<C> for P where C: CloneComplexSubset<P> + ChannelSet {
+	fn build_subset(&self, builder: SubsetBuilder<C::StaticBuilder>) -> C {
+		C::from_subset_builder(self, builder)
+	}
+}
+
+pub trait ToSubset<C> { 
+	fn to_subset(&self) -> C;
+}
+impl<P, C> ToSubset<C> for P where C: CloneSubset<P> { 
+	fn to_subset(&self) -> C { 
+		C::from_subset(self)
+	}
+}
+
+pub struct SubsetBuilder<T> where T: Sized { 
+	pub static_fields: T,
+}
+
+impl<T> SubsetBuilder<T> where T: Sized { 
+	fn new(static_fields: T) -> Self { 
+		Self {
+			static_fields
+		}
+	}
 }
 
 #[cfg(test)]
@@ -815,7 +1373,7 @@ pub mod test {
 				msg: String::from("Hello, world!"),
 			})
 			.unwrap();
-		let mut out_msg = receiver.recv_wait().await.unwrap();
+		let out_msg = receiver.recv_wait().await.unwrap();
 
 		assert_eq!(out_msg.msg, String::from("Hello, world!"));
 	}
@@ -825,8 +1383,8 @@ pub mod test {
 		let player_identity = IdentityKeyPair::generate_for_tests().public;
 		let some_other_player_identity = IdentityKeyPair::generate_for_tests().public;
 
-		TEST_DOMAIN_CHANNEL.add_domain(&player_identity);
-		TEST_DOMAIN_CHANNEL.add_domain(&some_other_player_identity);
+		TEST_DOMAIN_CHANNEL.init_domain(&player_identity);
+		TEST_DOMAIN_CHANNEL.init_domain(&some_other_player_identity);
 		let sender = TEST_DOMAIN_CHANNEL
 			.sender_subscribe(&player_identity)
 			.unwrap();
@@ -853,12 +1411,12 @@ pub mod test {
 			.unwrap();
 
 		{
-			let mut out_msg = receiver.recv_wait().await.unwrap();
+			let out_msg = receiver.recv_wait().await.unwrap();
 			assert_eq!(out_msg.msg, String::from("Hello, player1!"));
 		}
 
 		{
-			let mut out_msg = other_channel_receiver.recv_wait().await.unwrap();
+			let out_msg = other_channel_receiver.recv_wait().await.unwrap();
 			assert_eq!(out_msg.msg, String::from("Hello, player2!"));
 		}
 	}

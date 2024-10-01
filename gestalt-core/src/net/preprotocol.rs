@@ -28,7 +28,7 @@ use tokio::sync::mpsc;
 
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
 use crate::common::identity::NodeIdentity;
-use crate::message::{ReceiverChannel, SenderChannel};
+use crate::message::{ReceiverSubscribe, SenderSubscribe};
 use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -506,8 +506,8 @@ pub async fn launch_preprotocol_listener<R, A>(
 	mismatch_report_channel: R,
 	mismatch_approver_channel: A,
 ) where
-	R: SenderChannel<NodeIdentity, Sender = NewProtocolKeyReporter>,
-	A: ReceiverChannel<(NodeIdentity, bool), Receiver = NewProtocolKeyApprover>,
+	R: SenderSubscribe<NodeIdentity, Sender = NewProtocolKeyReporter>,
+	A: ReceiverSubscribe<(NodeIdentity, bool), Receiver = NewProtocolKeyApprover>,
 {
 	let ip = match our_address {
 		Some(value) => value,
@@ -702,7 +702,7 @@ pub mod test {
 	use super::*;
 	use crate::{
 		common::identity::IdentityKeyPair,
-		message::{BroadcastChannel, ReceiverChannel, SenderChannel},
+		message::{BroadcastChannel, ReceiverSubscribe, SenderSubscribe},
 		net::handshake::approver_no_mismatch,
 	};
 	use std::{net::Ipv6Addr, time::Duration};

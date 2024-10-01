@@ -2,18 +2,19 @@
 //! and an raw-bytes implementation of it for use as an `inner` in type-specific implementations.
 
 use futures::Future;
+use log::error;
 
 use crate::{
 	common::identity::NodeIdentity,
 	message::{
-		MessageReceiver, MessageReceiverAsync, MpscChannel, MpscReceiver, MpscSender, SenderChannel,
+		MessageReceiver, MessageReceiverAsync, MpscChannel, MpscReceiver, MpscSender, SenderSubscribe,
 	},
 };
 
 use super::{
 	channels::RESOURCE_FETCH,
 	retrieval::{ResourceFetch, ResourceFetchResponse},
-	ResourceError, ResourceId, ResourcePoll, ResourceRetrievalError,
+	ResourceError, ResourceLocation, ResourcePoll, ResourceRetrievalError,
 };
 use std::{fmt::Debug, sync::Arc};
 
@@ -24,12 +25,12 @@ pub trait ResourceProvider<T> {
 	/// If it returns an empty vec, that means all resources are pending.
 	fn request_batch(
 		&mut self,
-		resources: Vec<ResourceId>,
+		resources: Vec<ResourceLocation>,
 		expected_source: NodeIdentity,
-	) -> Vec<Result<(ResourceId, T), ResourceError<Self::ParseError>>>;
+	) -> Vec<Result<(ResourceLocation, T), ResourceError<Self::ParseError>>>;
 	fn request_one(
 		&mut self,
-		resource: ResourceId,
+		resource: ResourceLocation,
 		expected_source: NodeIdentity,
 	) -> Option<Result<T, ResourceError<Self::ParseError>>> {
 		self.request_batch(vec![resource], expected_source)
@@ -39,15 +40,15 @@ pub trait ResourceProvider<T> {
 
 	/// Request that we download files, except that there isn't any immediate need to use them
 	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
-	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity);
-	fn preload_one(&mut self, resource: ResourceId, expected_source: NodeIdentity) {
+	fn preload_batch(&mut self, resources: Vec<ResourceLocation>, expected_source: NodeIdentity);
+	fn preload_one(&mut self, resource: ResourceLocation, expected_source: NodeIdentity) {
 		self.preload_batch(vec![resource], expected_source)
 	}
 
 	fn recv_poll(&mut self) -> ResourcePoll<T, Self::ParseError>;
 	fn recv_wait(
 		&mut self,
-	) -> impl Future<Output = Result<(ResourceId, T), ResourceError<Self::ParseError>>> + '_;
+	) -> impl Future<Output = Result<(ResourceLocation, T), ResourceError<Self::ParseError>>> + '_;
 
 	/// Poll until there are no remaining results.
 	fn recv_poll_all(&mut self) -> Vec<ResourcePoll<T, Self::ParseError>> {
@@ -92,33 +93,36 @@ impl RawResourceProvider {
 
 	fn request_inner(
 		&self,
-		resources: Vec<ResourceId>,
+		resources: Vec<ResourceLocation>,
 		expected_source: NodeIdentity,
 		return_channel: Option<MpscSender<ResourceFetchResponse>>,
-	) -> Vec<Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
-		self.fetch_sender.blocking_send(ResourceFetch {
+	) -> Vec<Result<(ResourceLocation, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
+		let resl = self.fetch_sender.blocking_send(ResourceFetch {
 			resources: resources
 				.iter()
 				.map(|value| match value {
-						ResourceId::Caid(_) => todo!(),
-						ResourceId::Local(_) => todo!(),
-						ResourceId::Link(_) => todo!(),
+						ResourceLocation::Caid(_) => todo!(),
+						ResourceLocation::Local(_) => todo!(),
+						ResourceLocation::Link(_) => todo!(),
 					})
 				.collect(),
 			expected_source,
 			return_channel,
 		});
+		if let Err(e) = resl { 
+			error!("Unable to fulfil resource requests: Send erorr {e:?}");
+		}
 		vec![]
 	}
 
 	async fn recv_wait_inner(
 		&mut self,
-	) -> Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>> {
+	) -> Result<(ResourceLocation, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>> {
 		match self.return_receiver.recv_wait().await {
 			Ok(value) => {
 				match value.data {
 					// This will need to change when archives are implemented
-					Ok(v) => Ok((ResourceId::Caid(value.id), v)),
+					Ok(v) => Ok((value.id, v)),
 					Err(e) => Err(ResourceError::Retrieval(e)),
 				}
 			}
@@ -133,20 +137,20 @@ impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
 	//God I hate this return type signature, I should probably simplify it somehow.
 	fn request_batch(
 		&mut self,
-		resources: Vec<ResourceId>,
+		resources: Vec<ResourceLocation>,
 		expected_source: NodeIdentity,
-	) -> Vec<Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
+	) -> Vec<Result<(ResourceLocation, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
 		self.request_inner(resources, expected_source, Some(self.return_template.clone()))
 	}
 
-	fn preload_batch(&mut self, resources: Vec<ResourceId>, expected_source: NodeIdentity) {
+	fn preload_batch(&mut self, resources: Vec<ResourceLocation>, expected_source: NodeIdentity) {
 		self.request_inner(resources, expected_source, None);
 	}
 
 	fn recv_poll(&mut self) -> ResourcePoll<Arc<Vec<u8>>, Self::ParseError> {
 		match self.return_receiver.recv_poll() {
 			Ok(Some(v)) => match v.data {
-				Ok(value) => ResourcePoll::Ready(ResourceId::Caid(v.id), value),
+				Ok(value) => ResourcePoll::Ready(v.id, value),
 				Err(e) => ResourcePoll::Err(ResourceError::Retrieval(e)),
 			},
 			Ok(None) => ResourcePoll::None,
@@ -157,7 +161,7 @@ impl ResourceProvider<Arc<Vec<u8>>> for RawResourceProvider {
 	fn recv_wait(
 		&mut self,
 	) -> impl Future<
-		Output = Result<(ResourceId, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>,
+		Output = Result<(ResourceLocation, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>,
 	> + '_ {
 		self.recv_wait_inner()
 	}

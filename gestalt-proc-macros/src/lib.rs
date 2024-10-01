@@ -1,7 +1,11 @@
+use std::collections::{HashMap, HashSet};
+
 use proc_macro::TokenStream;
-use quote::quote;
+use proc_macro2::TokenTree;
+use quote::{quote, ToTokens, format_ident};
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Ident, LitInt, Token};
+use syn::{parse_macro_input, Attribute, DeriveInput, Field, Ident, LitInt, Type, Token};
+extern crate proc_macro2;
 
 struct NetMsgAttr {
 	id_lit: Option<LitInt>,
@@ -97,4 +101,273 @@ pub fn netmsg(attr: TokenStream, item: TokenStream) -> TokenStream {
 	}
 		})
 	.into()
+}
+
+#[proc_macro_derive(ChannelSet, attributes(channel, domain_receiver, domain_sender))]
+pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
+	const CHANNEL_STR: &'static str = "channel";
+	const DC_STR: &'static str = "domain_channel";
+	const DOMAIN_SUFFIX: &'static str = "_domain";
+	const STATIC_BUILDER_SUFFIX: &'static str = "Fields";
+
+	pub enum SubsetKind { 
+		Channel,
+		Sender,
+		Receiver,
+	}
+	impl SubsetKind { 
+		fn from_ty(ty: &Type) -> Self { 
+			let token_str = ty.to_token_stream()
+				.to_string()
+				.to_lowercase();
+			if token_str.contains("receiver") { 
+				Self::Receiver
+			}
+			else if token_str.contains("sender") {
+				Self::Sender
+			}
+			else {
+				Self::Channel
+			}
+		}
+	}
+	struct IdentifiedChannel {
+		pub field_name: Ident,
+		pub static_channel: Ident,
+		pub ty: syn::Type,
+		pub subset_kind: SubsetKind,
+	}
+	impl IdentifiedChannel { 
+		fn from_field(field: &Field, attr_tokens: &Vec<TokenTree>) -> Self {
+			let field_ident = field.ident.clone().unwrap();
+			let token_tree = attr_tokens.first().unwrap();
+			let subset_kind = SubsetKind::from_ty(&field.ty);
+			if let TokenTree::Ident(channel_ident) = token_tree { 
+				return IdentifiedChannel {
+					field_name: field_ident,
+					static_channel: channel_ident.clone(),
+					ty: field.ty.clone(),
+        			subset_kind,
+				};
+			}
+			else { 
+				panic!("Non-ident for channel field!");
+			}
+		}
+	}
+	struct IdentifiedDomainChannel { 
+		pub inner: IdentifiedChannel,
+		pub domain_suffixed: Ident,
+	}
+	impl IdentifiedDomainChannel { 
+		fn from_field(field: &Field, attr_tokens: &Vec<TokenTree>) -> Self {
+			let inner = IdentifiedChannel::from_field(field, attr_tokens);
+			assert!(attr_tokens.len() == 2);
+			let domain_ident = attr_tokens[1].to_string();
+			let domain_suffixed = format_ident!("{domain_ident}{DOMAIN_SUFFIX}");
+			Self {
+				inner,
+				domain_suffixed,
+			}
+		}
+	}
+	let parsed = parse_macro_input!(channel_set as DeriveInput);
+	
+	let struct_name = parsed.ident.clone();
+	if let syn::Data::Struct(struct_data) = parsed.data {
+	
+		let our_attributes = vec![CHANNEL_STR,
+			DC_STR,];
+
+		let mut identified_channels: Vec<IdentifiedChannel> = Vec::new();
+		let mut identified_domain_channels: Vec<IdentifiedDomainChannel> = Vec::new();
+		let mut domains_for_builder = HashMap::new();
+		let mut domains_for_channels = HashMap::new();
+		let mut non_channel_fields: Vec<Field> = Vec::new();
+		// Find fields with #[channel(T)] attributes 
+		for field in struct_data.fields.iter() {
+			let mut non_channel = true;
+			for attr in field.attrs.iter() {
+				let meta = attr.meta.require_list().unwrap();
+				// Check to see if this is *our* attribute and not something else.
+				let attribute_parsed = meta.path.segments.first().unwrap().ident.to_string();
+				if meta.path.segments.len() == 1 &&
+					our_attributes.contains(&attribute_parsed.as_str()) {
+					non_channel = false; 
+					// Extract channel type name from attr
+					let attr_tokens: Vec<TokenTree> = (&meta.tokens).clone().into_iter().collect();
+					// Should only ever register one field to one channel identifier
+					assert!(attr_tokens.len() == 1);
+					match attribute_parsed.as_str() { 
+						CHANNEL_STR => {
+							// Extract channel type name from attr
+							let attr_tokens: Vec<TokenTree> = (&meta.tokens).clone().into_iter().collect();
+							// Should only ever register one field to one channel identifier
+							assert!(attr_tokens.len() == 1);
+							let channel = IdentifiedChannel::from_field(field, &attr_tokens);
+							identified_channels.push(channel);
+						},
+						DC_STR => {
+							let attr_tokens: Vec<TokenTree> = (&meta.tokens).clone().into_iter().collect();
+							let channel: IdentifiedDomainChannel = IdentifiedDomainChannel::from_field(field, &attr_tokens);
+							domains_for_builder.insert(channel.domain_suffixed.clone(), channel.inner.static_channel.clone());
+							domains_for_channels.insert(channel.inner.static_channel.clone(), channel.domain_suffixed.clone());
+							identified_domain_channels.push(channel);
+						},
+						_ => {}, //Not one of ours, ignore.
+					}
+				}
+			}
+			//None of our attributes? Do this instead.
+			if non_channel {
+				non_channel_fields.push(field.clone())
+			}
+		}
+		// We know which fields are identified channels now. 
+		// Iterate through and impl HasChannel<>
+		let mut impls: proc_macro2::TokenStream = proc_macro2::TokenStream::new();
+		// Field lines for from_subset()
+		let mut fields_clone = proc_macro2::TokenStream::new();
+		// Also do our ridiculous where clause.
+		let mut where_args = proc_macro2::TokenStream::new();
+		// For subset builder stuff such as domains.
+		let mut subset_builder_fields = proc_macro2::TokenStream::new();
+		// Loop through, appending each HasChannel impl to our implementations.
+		for IdentifiedChannel{field_name, static_channel, ty, subset_kind} in identified_channels.iter() {
+			match subset_kind {
+				SubsetKind::Channel => {
+					impls.extend(quote!{
+						impl crate::common::message::HasChannel<#static_channel> for #struct_name { 
+							fn get_channel(&self) -> &#ty { 
+								&self.#field_name
+							}
+						}
+					});
+					where_args.extend(quote!{T: crate::common::message::HasChannel<#static_channel>,});
+					fields_clone.extend(quote!{#field_name: <T as crate::common::message::HasChannel<#static_channel>>::get_channel(parent).clone().into(), });
+				},
+				SubsetKind::Sender => {
+					impls.extend(quote!{
+						impl crate::common::message::HasSender<#static_channel> for #struct_name { 
+							fn get_sender(&self) -> &#ty { 
+								&self.#field_name
+							}
+						}
+					});
+					where_args.extend(quote!{T: crate::common::message::StaticSenderSubscribe<#static_channel>,});
+					fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticSenderSubscribe<#static_channel>>::sender_subscribe(parent).into(), });
+
+				}
+				SubsetKind::Receiver => {
+					impls.extend(quote!{
+						impl crate::common::message::HasReceiver<#static_channel> for #struct_name { 
+							fn get_receiver(&self) -> &#ty { 
+								&self.#field_name
+							}
+						}
+					});
+					where_args.extend(quote!{T: crate::common::message::StaticReceiverSubscribe<#static_channel>,});
+					fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticReceiverSubscribe<#static_channel>>::receiver_subscribe(parent).into(), });
+				}
+			}
+		}
+		let mut use_non_channel_fields = false; 
+		for field in non_channel_fields {
+			let type_string = field.ty.to_token_stream().to_string();
+			// Make sure we don't force people to muck around with PhantomData in builders.
+			if !type_string.contains("PhantomData") {
+				use_non_channel_fields = true;
+				subset_builder_fields.extend(quote!{#field});
+			}
+			else {
+				let field_ident = field.ident.unwrap().clone();
+				fields_clone.extend(quote!{#field_ident: std::marker::PhantomData});
+			}
+		}
+		if identified_domain_channels.is_empty() && !use_non_channel_fields { 
+			// Now actually implement our from_subset() behavior
+			// Fields_clone was built ahead-of-time because it is *irritating*
+			// to concatenate tokens inside another token stream. However, 
+			// it would make more sense - for comprehending this code, assume #fields_clone
+			// is being built inside the quote block here somehow. That's the only place it gets used.
+			impls.extend(quote!{
+				impl<T> crate::common::message::ChannelSet for #struct_name { 
+					type StaticBuilder = ();
+				}
+				impl<T> crate::common::message::CloneSubset<T> for #struct_name where #where_args { 
+					fn from_subset(parent: &T) -> Self {
+						#struct_name {
+							#fields_clone
+						}
+					}
+				}
+			});
+		}
+		else {
+			// We have to jump through some hoops here, in this case. 
+			for (domain, static_channel) in domains_for_builder { 
+				subset_builder_fields.extend(quote!{#domain: #static_channel::Domain,});
+			}
+			let builder_ident = format_ident!("{struct_name}{STATIC_BUILDER_SUFFIX}");
+			impls.extend(quote!{
+				pub struct #builder_ident {
+					#subset_builder_fields
+				}
+				impl crate::common::message::ChannelSet for #struct_name { 
+					type StaticBuilder = #builder_ident;
+				}
+			});
+			for IdentifiedDomainChannel{inner: IdentifiedChannel{field_name, static_channel, ty, subset_kind}, domain_suffixed} in identified_domain_channels.iter() {
+				match subset_kind {
+					SubsetKind::Channel => {
+						// This is the easy(ish) one
+						impls.extend(quote!{
+							impl crate::common::message::HasChannel<#static_channel> for #struct_name { 
+								fn get_channel(&self) -> &#ty { 
+									&self.#field_name
+								}
+							}
+						});
+						where_args.extend(quote!{T: crate::common::message::HasChannel<#static_channel>,});
+						fields_clone.extend(quote!{#field_name: <T as crate::common::message::HasChannel<#static_channel>>::get_channel(parent).clone().into(), });
+					},
+					SubsetKind::Sender => {
+						impls.extend(quote!{
+							impl crate::common::message::HasSender<#static_channel> for #struct_name { 
+								fn get_sender(&self) -> &#ty {
+									&self.#field_name
+								}
+							}
+						});
+						where_args.extend(quote!{T: crate::common::message::StaticDomainSenderSubscribe<#static_channel>,});
+						fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticDomainSenderSubscribe<#static_channel>>::sender_subscribe(parent, &builder.static_fields.#domain_suffixed).into(), });
+					}
+					SubsetKind::Receiver => {
+						impls.extend(quote!{
+							impl crate::common::message::HasReceiver<#static_channel> for #struct_name { 
+								fn get_receiver(&self) -> &#ty { 
+									&self.#field_name
+								}
+							}
+						});
+						where_args.extend(quote!{T: crate::common::message::StaticDomainReceiverSubscribe<#static_channel>,});
+						fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticDomainReceiverSubscribe<#static_channel>>::receiver_subscribe(parent, &builder.static_fields.#domain_suffixed).into(), });
+					}
+				}
+			}
+			impls.extend(quote!{
+				impl<T> crate::common::message::CloneComplexSubset<T> for #struct_name where #where_args {
+					fn from_subset_builder(parent: &T, builder: SubsetBuilder<Self::StaticBuilder>) -> Self {
+						#struct_name {
+							#fields_clone
+						}
+					}
+				}
+			});
+		}
+		impls.into()
+	}
+	else { 
+		panic!("Cannot use #[derive(ChannelSet)] on non-structs!")
+	}
 }
