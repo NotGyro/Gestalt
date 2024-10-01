@@ -291,7 +291,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 			// it would make more sense - for comprehending this code, assume #fields_clone
 			// is being built inside the quote block here somehow. That's the only place it gets used.
 			impls.extend(quote!{
-				impl<T> crate::common::message::ChannelSet for #struct_name { 
+				impl crate::common::message::ChannelSet for #struct_name { 
 					type StaticBuilder = ();
 				}
 				impl<T> crate::common::message::CloneSubset<T> for #struct_name where #where_args { 
