@@ -566,26 +566,11 @@ impl<T> SenderSubscribe<T> for BroadcastSender<T> where T: Message + Clone + Deb
 		self.clone()
 	}
 }
-/* This is possible and might even be very useful but boy oh boy would it ever
-be terrible for security if I ever use channel subset cloning as a kind of access control.
-impl<T> ReceiverChannel<T> for BroadcastSender<T> where T: Message + Clone {
-	type Receiver = <BroadcastChannel<T> as ReceiverChannel<T>>::Receiver;
-}
-impl<T> ReceiverSubscribe<T> for BroadcastSender<T> where T: Message + Clone + Debug {
-	fn receiver_subscribe(&self) -> Self::Receiver {
-		BroadcastReceiver::new(self.subscribe())
-	}
-}
-impl<T> From<BroadcastSender<T>> for BroadcastReceiver<T> where T: Message + Clone {
-	fn from(value: BroadcastSender<T>) -> Self {
-		value.receiver_subscribe()
-	}
-}*/
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum DomainSubscribeErr<D>
 where
-	D: ChannelDomain,
+	D: Debug,
 {
 	#[error("Cannot subscribe to a channel in domain {0:?} because that domain has not been registered.")]
 	NoDomain(D),
@@ -696,6 +681,7 @@ where
 	}
 }
 
+#[derive(Clone)]
 pub struct DomainMultiChannel<T, D, C>
 where
 	T: Message,
@@ -704,7 +690,7 @@ where
 	/// This is carried into any channels we will initialize
 	capacity: usize,
 
-	channels: ChannelMutex<std::collections::HashMap<D, C>>,
+	channels: Arc<ChannelMutex<std::collections::HashMap<D, C>>>,
 
 	_message_ty_phantom: PhantomData<T>,
 }
@@ -719,7 +705,7 @@ where
 	pub fn new(capacity: usize) -> Self {
 		DomainMultiChannel {
 			capacity,
-			channels: ChannelMutex::new(std::collections::HashMap::new()),
+			channels: Arc::new(ChannelMutex::new(std::collections::HashMap::new())),
 			_message_ty_phantom: Default::default(),
 		}
 	}
@@ -831,6 +817,7 @@ where
 	}
 }
 
+#[derive(Clone)]
 pub struct DomainBroadcastChannel<T, D, C>
 where
 	T: Message,
@@ -1040,6 +1027,7 @@ macro_rules! global_channel {
 		}
 	};
 }
+#[allow(unused_macros)]
 macro_rules! global_domain_channel {
 	($chanty:ident, $name:ident, $message:ty, $domain:ty, $capacity:expr) => {
 		lazy_static::lazy_static! {
@@ -1123,24 +1111,13 @@ pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 	Ok(())
 }
 
-// Stream-of-consciousness notes in comments, apologies...
-// Requirements for ChannelSet:
+// Intended constraints for ChannelSet:
 // * Good ergonomics (should be able to get a channel by name without too much boilerplate)
 // * No performance overhead compared to global channels for compiled-in channels. Should compile to
 // just accessing the channel directly / no-middle-man for static channels.
 // * Ergonomic "clone-into-subset" method
 // * Introspectable? would be neat for scripting for later. Not required now but build around 
 // the expectation
-//
-// I have some thoughts about this...
-// Unit-type-stuff is somewhat awkward and cumbersome, but static string comparison probably can't
-// evaluate at compiletime.
-// Preferred syntax would probably be channels.get_sender::<VoxelEvent>() or 
-// channels.get_sender("voxel_event") if that can compile down to nothing.
-// Former sounds good to me.
-// 
-// I initially wanted to avoid "two channels that send the same datatype are the same channel" I think
-// I still do... 
 
 /// Type system hax to treat a unit struct as a compile-time-valid statically-known channel name / identifier.
 /// This should be a zero-sized type
@@ -1190,9 +1167,6 @@ macro_rules! static_channel_atom {
 		}
 	};
 }
-
-static_channel_atom!(TestStaticChannel, BroadcastChannel<usize>, usize); 
-static_channel_atom!(CoolerChannel, DomainBroadcastChannel<usize, NodeIdentity, BroadcastChannel<usize>>, usize, NodeIdentity);
 
 pub trait HasChannel<C> where C: StaticChannelAtom {
 	fn get_channel(&self) -> &C::Channel;
@@ -1274,24 +1248,24 @@ pub trait CloneComplexSubset<T> : ChannelSet + Sized {
 	/// gets cloned into this channel (via clone.().into())
 	/// 2. Channels that the upstream struct has but our channel set does not get ignored.
 	/// This is useful for restricting to a more-and-more fine-grained set of channels.
-	fn from_subset_builder(parent: &T, builder: SubsetBuilder<Self::StaticBuilder>) -> Self;
+	fn from_subset_builder(parent: &T, builder: SubsetBuilder<Self::StaticBuilder>) -> Result<Self, DomainSubscribeErr<String>>;
 }
 
 pub trait BuildSubset<C> where C: ChannelSet {
-	fn build_subset(&self, builder: SubsetBuilder<C::StaticBuilder>) -> C;
+	fn build_subset(&self, builder: SubsetBuilder<C::StaticBuilder>) -> Result<C, DomainSubscribeErr<String>> where Self: Sized;
 }
 
 impl<P, C> BuildSubset<C> for P where C: CloneComplexSubset<P> + ChannelSet {
-	fn build_subset(&self, builder: SubsetBuilder<C::StaticBuilder>) -> C {
+	fn build_subset(&self, builder: SubsetBuilder<C::StaticBuilder>) -> Result<C, DomainSubscribeErr<String>> {
 		C::from_subset_builder(self, builder)
 	}
 }
 
-pub trait ToSubset<C> { 
+pub trait ToSubset<C> {
 	fn to_subset(&self) -> C;
 }
-impl<P, C> ToSubset<C> for P where C: CloneSubset<P> { 
-	fn to_subset(&self) -> C { 
+impl<P, C> ToSubset<C> for P where C: CloneSubset<P> {
+	fn to_subset(&self) -> C {
 		C::from_subset(self)
 	}
 }
@@ -1300,8 +1274,8 @@ pub struct SubsetBuilder<T> where T: Sized {
 	pub static_fields: T,
 }
 
-impl<T> SubsetBuilder<T> where T: Sized { 
-	fn new(static_fields: T) -> Self { 
+impl<T> SubsetBuilder<T> where T: Sized {
+	fn new(static_fields: T) -> Self {
 		Self {
 			static_fields
 		}
@@ -1312,7 +1286,7 @@ impl<T> SubsetBuilder<T> where T: Sized {
 pub mod test {
 	use gestalt_proc_macros::ChannelSet;
 
-use crate::common::identity::IdentityKeyPair;
+	use crate::common::identity::IdentityKeyPair;
 
 	use super::*;
 
@@ -1471,5 +1445,21 @@ use crate::common::identity::IdentityKeyPair;
 		top_level.chan2.send(testnum).unwrap();
 		let number = middle_level.bar.recv_wait().await.unwrap();
 		assert_eq!(testnum, number);
+	}
+	#[tokio::test(flavor = "multi_thread")]
+	async fn channel_set_domains() {
+		static_channel_atom!(DividedChannel, DomainBroadcastChannel<usize, NodeIdentity, BroadcastChannel<usize>>, usize, NodeIdentity);
+	
+		#[derive(ChannelSet)]
+		struct ChannelSetTestA {
+			#[channel(DividedChannel)]
+			pub chan1: <DividedChannel as StaticChannelAtom>::Channel,
+		}
+		#[derive(ChannelSet)]
+		struct ChannelSetTestB {
+			#[domain_channel(DividedChannel, "server")]
+			pub bar: AllAndOneReceiver<usize, NodeIdentity, BroadcastReceiver<usize>>,
+		}
+		
 	}
 }

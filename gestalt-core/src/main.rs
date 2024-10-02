@@ -11,7 +11,9 @@
 
 #[macro_use]
 pub mod common;
+pub mod main_channels;
 pub use common::message;
+pub use crate::main_channels::*;
 use gestalt_proc_macros::ChannelSet;
 use semver::Version;
 
@@ -56,7 +58,7 @@ use crate::{
 	},
 	net::{
 		default_protocol_store_dir,
-		net_channels::{net_recv_channel, net_send_channel, NetSendChannel},
+		net_channels::{net_recv_channel, net_send_channel, NetSessionSender},
 		preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server},
 		reliable_udp::LaminarConfig,
 		NetworkSystem, SelfNetworkRole,
@@ -222,9 +224,6 @@ pub async fn protocol_key_change_approver(
 		}
 	}
 }
-
-global_channel!(BroadcastChannel, PROTOCOL_KEY_REPORTER, NodeIdentity, 1024);
-global_channel!(BroadcastChannel, PROTOCOL_KEY_APPROVER, (NodeIdentity, bool), 1024);
 
 #[allow(unused_must_use)]
 fn main() {
@@ -507,7 +506,7 @@ fn main() {
 
 		std::thread::sleep(Duration::from_millis(50));
 
-		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
+		let voxel_event_sender: NetSessionSender<VoxelChangeRequest> =
 			net_send_channel::subscribe_sender(&server_identity).unwrap();
 
 		let mut client_join_receiver_from_server =
@@ -558,8 +557,8 @@ fn main() {
 		);*/
 	} else {
 		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
-		let voxel_event_sender: NetSendChannel<VoxelChangeRequest> =
-			NetSendChannel::new(voxel_event_sender);
+		let voxel_event_sender: NetSessionSender<VoxelChangeRequest> =
+			NetSessionSender::new(voxel_event_sender);
 
 		let client_voxel_receiver_from_server =
 			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();

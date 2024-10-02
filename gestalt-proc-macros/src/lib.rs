@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+#![feature(string_remove_matches)]
+
+use std::collections::HashMap;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenTree;
 use quote::{quote, ToTokens, format_ident};
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, Attribute, DeriveInput, Field, Ident, LitInt, Type, Token};
+use syn::{parse_macro_input, DeriveInput, Field, Ident, LitInt, Type, Token};
 extern crate proc_macro2;
 
 struct NetMsgAttr {
@@ -103,7 +105,7 @@ pub fn netmsg(attr: TokenStream, item: TokenStream) -> TokenStream {
 	.into()
 }
 
-#[proc_macro_derive(ChannelSet, attributes(channel, domain_receiver, domain_sender))]
+#[proc_macro_derive(ChannelSet, attributes(channel, domain_channel))]
 pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 	const CHANNEL_STR: &'static str = "channel";
 	const DC_STR: &'static str = "domain_channel";
@@ -162,8 +164,15 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 	impl IdentifiedDomainChannel { 
 		fn from_field(field: &Field, attr_tokens: &Vec<TokenTree>) -> Self {
 			let inner = IdentifiedChannel::from_field(field, attr_tokens);
-			assert!(attr_tokens.len() == 2);
-			let domain_ident = attr_tokens[1].to_string();
+			let domain_lit = attr_tokens[1..].iter().find_map(|tree| {
+				if let TokenTree::Literal(val) = tree { 
+					return Some(val);
+				}
+				None
+			}).expect("No domain identifier provided for domain channel!");
+			let mut domain_ident = domain_lit.to_string();
+			domain_ident.remove_matches("\"");
+			domain_ident.remove_matches("\'");
 			let domain_suffixed = format_ident!("{domain_ident}{DOMAIN_SUFFIX}");
 			Self {
 				inner,
@@ -173,9 +182,8 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 	}
 	let parsed = parse_macro_input!(channel_set as DeriveInput);
 	
-	let struct_name = parsed.ident.clone();
+	let struct_ident = parsed.ident.clone();
 	if let syn::Data::Struct(struct_data) = parsed.data {
-	
 		let our_attributes = vec![CHANNEL_STR,
 			DC_STR,];
 
@@ -197,9 +205,9 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 					// Extract channel type name from attr
 					let attr_tokens: Vec<TokenTree> = (&meta.tokens).clone().into_iter().collect();
 					// Should only ever register one field to one channel identifier
-					assert!(attr_tokens.len() == 1);
 					match attribute_parsed.as_str() { 
 						CHANNEL_STR => {
+							assert!(attr_tokens.len() == 1);
 							// Extract channel type name from attr
 							let attr_tokens: Vec<TokenTree> = (&meta.tokens).clone().into_iter().collect();
 							// Should only ever register one field to one channel identifier
@@ -237,7 +245,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 			match subset_kind {
 				SubsetKind::Channel => {
 					impls.extend(quote!{
-						impl crate::common::message::HasChannel<#static_channel> for #struct_name { 
+						impl crate::common::message::HasChannel<#static_channel> for #struct_ident { 
 							fn get_channel(&self) -> &#ty { 
 								&self.#field_name
 							}
@@ -248,7 +256,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 				},
 				SubsetKind::Sender => {
 					impls.extend(quote!{
-						impl crate::common::message::HasSender<#static_channel> for #struct_name { 
+						impl crate::common::message::HasSender<#static_channel> for #struct_ident { 
 							fn get_sender(&self) -> &#ty { 
 								&self.#field_name
 							}
@@ -260,7 +268,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 				}
 				SubsetKind::Receiver => {
 					impls.extend(quote!{
-						impl crate::common::message::HasReceiver<#static_channel> for #struct_name { 
+						impl crate::common::message::HasReceiver<#static_channel> for #struct_ident { 
 							fn get_receiver(&self) -> &#ty { 
 								&self.#field_name
 							}
@@ -291,12 +299,12 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 			// it would make more sense - for comprehending this code, assume #fields_clone
 			// is being built inside the quote block here somehow. That's the only place it gets used.
 			impls.extend(quote!{
-				impl crate::common::message::ChannelSet for #struct_name { 
+				impl crate::common::message::ChannelSet for #struct_ident { 
 					type StaticBuilder = ();
 				}
-				impl<T> crate::common::message::CloneSubset<T> for #struct_name where #where_args { 
+				impl<T> crate::common::message::CloneSubset<T> for #struct_ident where #where_args { 
 					fn from_subset(parent: &T) -> Self {
-						#struct_name {
+						#struct_ident {
 							#fields_clone
 						}
 					}
@@ -305,15 +313,15 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 		}
 		else {
 			// We have to jump through some hoops here, in this case. 
-			for (domain, static_channel) in domains_for_builder { 
-				subset_builder_fields.extend(quote!{#domain: #static_channel::Domain,});
+			for (domain, static_channel) in domains_for_builder {
+				subset_builder_fields.extend(quote!{#domain: <#static_channel as crate::common::message::StaticDomainChannelAtom>::Domain,});
 			}
-			let builder_ident = format_ident!("{struct_name}{STATIC_BUILDER_SUFFIX}");
+			let builder_ident = format_ident!("{struct_ident}{STATIC_BUILDER_SUFFIX}");
 			impls.extend(quote!{
 				pub struct #builder_ident {
 					#subset_builder_fields
 				}
-				impl crate::common::message::ChannelSet for #struct_name { 
+				impl crate::common::message::ChannelSet for #struct_ident { 
 					type StaticBuilder = #builder_ident;
 				}
 			});
@@ -322,7 +330,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 					SubsetKind::Channel => {
 						// This is the easy(ish) one
 						impls.extend(quote!{
-							impl crate::common::message::HasChannel<#static_channel> for #struct_name { 
+							impl crate::common::message::HasChannel<#static_channel> for #struct_ident { 
 								fn get_channel(&self) -> &#ty { 
 									&self.#field_name
 								}
@@ -333,34 +341,44 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 					},
 					SubsetKind::Sender => {
 						impls.extend(quote!{
-							impl crate::common::message::HasSender<#static_channel> for #struct_name { 
+							impl crate::common::message::HasSender<#static_channel> for #struct_ident { 
 								fn get_sender(&self) -> &#ty {
 									&self.#field_name
 								}
 							}
 						});
 						where_args.extend(quote!{T: crate::common::message::StaticDomainSenderSubscribe<#static_channel>,});
-						fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticDomainSenderSubscribe<#static_channel>>::sender_subscribe(parent, &builder.static_fields.#domain_suffixed).into(), });
+						fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticDomainSenderSubscribe<#static_channel>>::sender_subscribe(parent, &builder.static_fields.#domain_suffixed)
+							.map_err(|e| crate::common::message::DomainSubscribeErr::NoDomain(format!("{e:#?}")))?
+							.into(), });
 					}
 					SubsetKind::Receiver => {
 						impls.extend(quote!{
-							impl crate::common::message::HasReceiver<#static_channel> for #struct_name { 
+							impl crate::common::message::HasReceiver<#static_channel> for #struct_ident { 
 								fn get_receiver(&self) -> &#ty { 
 									&self.#field_name
 								}
 							}
 						});
 						where_args.extend(quote!{T: crate::common::message::StaticDomainReceiverSubscribe<#static_channel>,});
-						fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticDomainReceiverSubscribe<#static_channel>>::receiver_subscribe(parent, &builder.static_fields.#domain_suffixed).into(), });
+						fields_clone.extend(quote!{#field_name: <T as crate::common::message::StaticDomainReceiverSubscribe<#static_channel>>::receiver_subscribe(parent, &builder.static_fields.#domain_suffixed)
+							.map_err(|e| crate::common::message::DomainSubscribeErr::NoDomain(format!("{e:#?}")))?
+							.into(), });
 					}
 				}
 			}
 			impls.extend(quote!{
-				impl<T> crate::common::message::CloneComplexSubset<T> for #struct_name where #where_args {
-					fn from_subset_builder(parent: &T, builder: SubsetBuilder<Self::StaticBuilder>) -> Self {
-						#struct_name {
+				impl<T> crate::common::message::CloneComplexSubset<T> for #struct_ident where #where_args {
+					fn from_subset_builder(parent: &T, builder: crate::common::message::SubsetBuilder<#builder_ident>) -> Result<Self, crate::common::message::DomainSubscribeErr<String>> {
+						Ok(#struct_ident {
 							#fields_clone
-						}
+						})
+					}
+				}
+				// Helper method - less boilerplate for building a channel-set from subset.
+				impl From<#builder_ident> for crate::common::message::SubsetBuilder<#builder_ident> { 
+    				fn from(value: #builder_ident) -> Self { 
+						crate::common::message::SubsetBuilder::new(value)
 					}
 				}
 			});

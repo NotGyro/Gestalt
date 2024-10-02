@@ -506,7 +506,7 @@ mod test {
 	use crate::net::net_channels::net_recv_channel;
 	use crate::net::net_channels::net_recv_channel::NetMsgReceiver;
 
-	use super::net_channels::NetSendChannel;
+	use super::net_channels::NetSessionSender;
 	use super::preprotocol::launch_preprotocol_listener;
 	use super::preprotocol::preprotocol_connect_to_server;
 	use super::*;
@@ -649,7 +649,7 @@ mod test {
 		let test = TestNetMsg {
 			message: String::from("Boop!"),
 		};
-		let client_to_server_sender: NetSendChannel<TestNetMsg> =
+		let client_to_server_sender: NetSessionSender<TestNetMsg> =
 			net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
 		client_to_server_sender.send(test.clone()).unwrap();
 		info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
@@ -670,7 +670,7 @@ mod test {
 		let test_reply = TestNetMsg {
 			message: String::from("Beep!"),
 		};
-		let server_to_client_sender: NetSendChannel<TestNetMsg> =
+		let server_to_client_sender: NetSessionSender<TestNetMsg> =
 			net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
 		info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
 		server_to_client_sender.send(test_reply.clone()).unwrap();
