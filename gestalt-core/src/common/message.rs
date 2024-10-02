@@ -1310,7 +1310,9 @@ impl<T> SubsetBuilder<T> where T: Sized {
 
 #[cfg(test)]
 pub mod test {
-	use crate::common::identity::IdentityKeyPair;
+	use gestalt_proc_macros::ChannelSet;
+
+use crate::common::identity::IdentityKeyPair;
 
 	use super::*;
 
@@ -1419,5 +1421,55 @@ pub mod test {
 			let out_msg = other_channel_receiver.recv_wait().await.unwrap();
 			assert_eq!(out_msg.msg, String::from("Hello, player2!"));
 		}
+	}
+	#[tokio::test(flavor = "multi_thread")]
+	async fn channel_set_subset() { 
+		static_channel_atom!(EvenSpecialerString, MpscChannel<u32>, u32);
+		static_channel_atom!(SpecialStringGoesHere, BroadcastChannel<u32>, u32);
+	
+		#[derive(ChannelSet)]
+		struct ChannelSetTestA {
+			#[channel(EvenSpecialerString)]
+			pub chan1: MpscChannel<u32>,
+			#[channel(SpecialStringGoesHere)]
+			pub chan2: BroadcastChannel<u32>,
+		}
+		#[derive(ChannelSet)]
+		struct ChannelSetTestB {
+			#[channel(EvenSpecialerString)]
+			pub foo: MpscChannel<u32>,
+			#[channel(SpecialStringGoesHere)]
+			pub bar: BroadcastReceiver<u32>,
+		}
+		#[derive(ChannelSet)]
+		struct ChannelSetTestC {
+			#[channel(EvenSpecialerString)]
+			pub foo: MpscSender<u32>,
+		}
+
+		let foo_channel: MpscChannel<u32> = MpscChannel::new(12);
+		let bar_channel: BroadcastChannel<u32> = BroadcastChannel::new(20);
+
+		let top_level = ChannelSetTestA { 
+			chan1: foo_channel,
+			chan2: bar_channel,
+		};
+
+		let mut middle_level: ChannelSetTestB = top_level.to_subset();
+		let bottom_level: ChannelSetTestC = middle_level.to_subset();
+
+		let mut foo_receiver = top_level.chan1.take_receiver().unwrap();
+
+		let testnum = 42;
+		tokio::spawn(async move { 
+			bottom_level.foo.send(testnum).await.unwrap();
+		});
+		let number = foo_receiver.recv_wait().await.unwrap();
+		assert_eq!(testnum, number);
+
+		let testnum = 13;
+		top_level.chan2.send(testnum).unwrap();
+		let number = middle_level.bar.recv_wait().await.unwrap();
+		assert_eq!(testnum, number);
 	}
 }
