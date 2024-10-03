@@ -17,7 +17,7 @@ use crate::world::WorldId;
 use super::identity::NodeIdentity;
 use super::{new_fast_hash_map, FastHashMap};
 
-#[derive(thiserror::Error, Debug, Clone)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq)]
 pub enum RecvError {
 	#[error("Failed to send a message onto a message channel, because there are no remaining receivers associated with this sender.")]
 	NoSenders,
@@ -243,7 +243,7 @@ pub trait TakeReceiver<T> : ReceiverChannel<T>
 where
 	T: Message,
 {
-	fn take_receiver(&self) -> Option<Self::Receiver>;
+	fn take_receiver(&self) -> Result<Self::Receiver, DomainSubscribeErr<String>>;
 }
 
 pub trait MpmcChannel<T: Message>: SenderSubscribe<T> + ReceiverChannel<T> {}
@@ -382,7 +382,7 @@ where
 	}
 }
 
-pub type MpscSender<T> = tokio::sync::mpsc::Sender<T>;
+pub type MpscSenderInner<T> = tokio::sync::mpsc::Sender<T>;
 type UnderlyingMpscReceiver<T> = mpsc::Receiver<T>;
 
 pub struct MpscReceiver<T>
@@ -430,22 +430,32 @@ where
 		self.recv_wait_inner()
 	}
 }
+pub struct MpscSender<T> where T: Message {
+	pub(super) inner: MpscSenderInner<T>,
+}
+impl<T> Clone for MpscSender<T> where T: Message {
+	fn clone(&self) -> Self {
+		Self { inner: self.inner.clone() }
+	}
+}
 
 impl<T> MessageSender<T> for MpscSender<T>
 where
 	T: Message,
 {
 	fn send(&self, message: T) -> Result<(), SendError> {
-		self.try_send(message).map(|_| ()).map_err(|e| e.into())
+		self.inner.try_send(message).map(|_| ()).map_err(|e| e.into())
 	}
 }
-
+// TODO AFTER SHOPPING TRIP: THIS !! 
 impl<T> SenderChannel<T> for MpscSender<T> where T: Message { 
 	type Sender = MpscSender<T>;
 }
 impl<T> SenderSubscribe<T> for MpscSender<T> where T: Message { 
 	fn sender_subscribe(&self) -> Self::Sender {
-		self.clone()
+		Self {
+			inner: self.inner.clone(),
+		}
 	}
 }
 
@@ -468,7 +478,7 @@ where
 	pub fn new(capacity: usize) -> Self {
 		let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
 		MpscChannel {
-			sender,
+			sender: MpscSender { inner: sender },
 			retained_receiver: Arc::new(ChannelMutex::new(Some(receiver))),
 		}
 	}
@@ -503,7 +513,7 @@ where
 		let has_retained = lock.is_some();
 		drop(lock);
 
-		if has_retained || self.sender.is_closed() {
+		if has_retained || self.sender.inner.is_closed() {
 			0
 		} else {
 			1
@@ -530,8 +540,8 @@ impl<T> ReceiverChannel<T> for MpscChannel<T> where T: Message {
 }
 
 impl<T> TakeReceiver<T> for MpscChannel<T> where T: Message {
-	fn take_receiver(&self) -> Option<Self::Receiver> {
-		MpscChannel::take_receiver(self)
+	fn take_receiver(&self) -> Result<Self::Receiver, DomainSubscribeErr<String>> {
+		MpscChannel::take_receiver(self).ok_or(DomainSubscribeErr::TakeTakenReceiver(String::from("<NoDomain>")))
 	}
 }
 
@@ -542,10 +552,7 @@ where
 	R: Message,
 {
 	fn send(&self, message: T) -> Result<(), SendError> {
-		self.sender
-			.try_send(message.into())
-			.map_err(|e| e.into())
-			.map(|_val| ())
+		self.sender.send(message.into())
 	}
 }
 
@@ -613,15 +620,15 @@ where
 }
 
 // Janky hack to permit send_to_all_except() to work over the broadcast "all" sender.
-#[derive(Clone, Debug)]
-struct MessageIgnoreEndpoint<T,D> { 
+#[derive(Clone, Debug, PartialEq)]
+pub struct MessageIgnoreEndpoint<T,D> {
 	pub inner_message: T,
 	pub ignore_domain: Option<D>,
 }
 impl<T,D> MessageIgnoreEndpoint<T,D> { 
 	/// WARNING: Skips ignoring `ignore_domain` so make sure your behavior really doesn't rely
 	/// on that, or that you've done this checking elsewhere.
-	fn inner(self) -> T { 
+	pub fn inner(self) -> T { 
 		self.inner_message
 	}
 }
@@ -733,6 +740,41 @@ where
 	}
 }
 
+impl<T, D, C> MessageReceiverAsync<T> for AllAndOneReceiver<T, D, C> 
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: MessageReceiverAsync<T> {
+	fn recv_wait(&mut self) -> impl Future<Output = Result<T, RecvError>> + '_ {
+		let self_domain = self.domain.clone();
+		// See if we perhaps do not need to wait at all.
+		let initial_poll_result = self.recv_poll();
+		async move {
+			match initial_poll_result {
+				Ok(Some(value)) => Ok(value),
+				Err(e) => Err(e),
+				Ok(None) => {
+					loop {
+						tokio::select! {
+							resl = self.primary_channel.recv_wait() => {
+								return resl;
+							}
+							resl = self.all_channel.recv_wait() => {
+								if resl.as_ref().is_ok_and(|v| v.ignore_domain.as_ref() == Some(&self_domain)) {
+									continue;
+								}
+								else { 
+									return resl.map(|v| v.inner_message);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 #[derive(Clone)]
 pub struct DomainMultiChannel<T, D, C>
 where
@@ -753,15 +795,6 @@ where
 	D: ChannelDomain,
 	C: SenderSubscribe<T> + ChannelInit,
 {
-	/// Construct a Domain Multichannel system.
-	pub fn new(capacity: usize) -> Self {
-		DomainMultiChannel {
-			capacity,
-			channels: Arc::new(ChannelMutex::new(std::collections::HashMap::new())),
-			_message_ty_phantom: Default::default(),
-		}
-	}
-
 	pub fn sender_subscribe(&self, domain: &D) -> Result<C::Sender, DomainSubscribeErr<D>> {
 		Ok(self
 			.channels
@@ -837,7 +870,7 @@ where
 			.get_mut(domain)
 			.ok_or_else(|| DomainSubscribeErr::NoDomain(domain.clone()))?
 			.take_receiver()
-			.ok_or(DomainSubscribeErr::TakeTakenReceiver(domain.clone()))
+			.map_err(|_e| DomainSubscribeErr::TakeTakenReceiver(domain.clone()))
 	}
 }
 
@@ -874,7 +907,6 @@ where
 	}
 }
 
-
 impl<T, D, R, C> MessageSender<T> for DomainMultiChannel<R, D, C>
 where
 	T: Into<R> + MessageWithDomain<D>,
@@ -890,6 +922,20 @@ where
 	}
 }
 
+impl<T,D,C> ChannelInit for DomainMultiChannel<T,D,C>
+where
+	T: Message,
+	D: ChannelDomain
+{
+	/// Construct a Domain Multichannel system.
+	fn new(capacity: usize) -> Self {
+		DomainMultiChannel {
+			capacity,
+			channels: Arc::new(ChannelMutex::new(std::collections::HashMap::new())),
+			_message_ty_phantom: Default::default(),
+		}
+	}
+}
 #[derive(Clone)]
 pub struct DomainBroadcastChannel<T, D, C>
 where
@@ -1083,13 +1129,6 @@ where
 	}
 }
 
-pub trait DomainTakeReceiver<T, D> : ReceiverChannel<T>
-where
-	T: Message, D: ChannelDomain
-{
-	fn take_receiver_domain(&self, domain: &D) -> Option<Self::Receiver>;
-}
-
 impl<T, D, C> DomainSenderSubscribe<T, D> for DomainMultiChannel<T, D, C>
 where
 	T: Message + Clone,
@@ -1108,6 +1147,33 @@ where
 {
 	fn receiver_subscribe_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
 		DomainMultiChannel::receiver_subscribe(self, domain)
+	}
+}
+pub trait DomainTakeReceiver<T, D> : ReceiverChannel<T>
+where
+	T: Message, D: ChannelDomain
+{
+	fn take_receiver_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>>;
+}
+
+impl<T, D, C> DomainTakeReceiver<T, D> for DomainMultiChannel<T,D,C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: TakeReceiver<T>,
+{
+	fn take_receiver_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
+		self.take_receiver(domain)
+	}
+}
+impl<T, D, C> DomainTakeReceiver<T, D> for DomainBroadcastChannel<T,D,C>
+where
+	T: Message + Clone,
+	D: ChannelDomain,
+	C: TakeReceiver<T>,
+{
+	fn take_receiver_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
+		self.take_receiver(domain)
 	}
 }
 
@@ -1309,7 +1375,7 @@ pub trait StaticReceiverSubscribe<C> where C: StaticChannelAtom, C::Channel: Rec
 	fn receiver_subscribe(&self) -> <<C as StaticChannelAtom>::Channel as ReceiverChannel<C::Message>>::Receiver;
 }
 pub trait StaticTakeReceiver<C> where C: StaticChannelAtom, C::Channel: ReceiverChannel<C::Message> { 
-	fn take_receiver(&self) -> Option<<<C as StaticChannelAtom>::Channel as ReceiverChannel<C::Message>>::Receiver>;
+	fn take_receiver(&self) -> Result< <<C as StaticChannelAtom>::Channel as ReceiverChannel<C::Message>>::Receiver, DomainSubscribeErr<String> >;
 }
 
 pub trait StaticDomainSenderSubscribe<C> where C: StaticDomainChannelAtom, C::Channel: SenderChannel<C::Message> { 
@@ -1344,7 +1410,7 @@ impl<T, C> StaticReceiverSubscribe<C> for T where T: HasChannel<C>,
 impl<T, C> StaticTakeReceiver<C> for T where T: HasChannel<C>,
 	C: StaticChannelAtom,
 	C::Channel: TakeReceiver<C::Message>, {
-	fn take_receiver(&self) -> Option<<<C as StaticChannelAtom>::Channel as ReceiverChannel<<C as StaticChannelAtom>::Message>>::Receiver> {
+	fn take_receiver(&self) -> Result< <<C as StaticChannelAtom>::Channel as ReceiverChannel<C::Message>>::Receiver, DomainSubscribeErr<String> > {
 		self.get_channel().take_receiver()
 	}
 }
@@ -1366,7 +1432,7 @@ impl<T, C> StaticDomainTakeReceiver<C> for T where T: HasChannel<C>,
 	C: StaticDomainChannelAtom,
 	C::Channel: DomainTakeReceiver<C::Message, C::Domain> {
 	fn take_receiver(&self, domain: &C::Domain) -> Result<<<C as StaticChannelAtom>::Channel as ReceiverChannel<<C as StaticChannelAtom>::Message>>::Receiver, DomainSubscribeErr<<C as StaticDomainChannelAtom>::Domain>> {
-		self.get_channel().take_receiver_domain(domain).ok_or(DomainSubscribeErr::TakeTakenReceiver(domain.clone()))
+		self.get_channel().take_receiver_domain(domain)
 	}
 }
 
@@ -1562,9 +1628,7 @@ pub mod test {
 		let mut foo_receiver = top_level.chan1.take_receiver().unwrap();
 
 		let testnum = 42;
-		tokio::spawn(async move { 
-			bottom_level.foo.send(testnum).await.unwrap();
-		});
+		bottom_level.foo.send(testnum).unwrap();
 		let number = foo_receiver.recv_wait().await.unwrap();
 		assert_eq!(testnum, number);
 
@@ -1587,6 +1651,5 @@ pub mod test {
 			#[receiver(DividedChannel, domain = "server")]
 			pub bar: AllAndOneReceiver<usize, NodeIdentity, BroadcastReceiver<usize>>,
 		}
-		
 	}
 }

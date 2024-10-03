@@ -14,9 +14,8 @@
 pub mod common;
 pub mod main_channels;
 pub use common::message;
-use net::net_channels::NetSystemChannelsFields;
+use net::{NetMsg, PacketIntermediary};
 pub use crate::main_channels::*;
-use gestalt_proc_macros::ChannelSet;
 use semver::Version;
 
 #[macro_use]
@@ -49,10 +48,8 @@ use common::{
 	message::*
 };
 use std::collections::HashSet;
-use tokio::sync::mpsc;
 
 use crate::{
-	common::identity::generate_local_keys,
 	message::QuitReceiver,
 	message_types::{
 		voxel::{VoxelChangeAnnounce, VoxelChangeRequest},
@@ -60,7 +57,6 @@ use crate::{
 	},
 	net::{
 		default_protocol_store_dir,
-		net_channels::NetMsgSender,
 		preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server},
 		reliable_udp::LaminarConfig,
 		NetworkSystem, SelfNetworkRole,
@@ -228,7 +224,7 @@ pub async fn protocol_key_change_approver(
 }
 
 pub fn init_channels() -> MainChannelSet { 
-	let mut conf = ChannelCapacityConf::new(); 
+	let conf = ChannelCapacityConf::new(); 
 	MainChannelSet::new(&conf)
 }
 
@@ -372,8 +368,6 @@ fn main() {
 	}) = matches.get("--server")
 	{
 		info!("Launching as server - parsing address.");
-		let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
-
 		let udp_address = if let Some(raw_addr) = addr {
 			if raw_addr.contains(':') {
 				raw_addr.parse().unwrap()
@@ -385,17 +379,20 @@ fn main() {
 			SocketAddr::from((Ipv6Addr::LOCALHOST, 3223))
 		};
 
+
+		let preprotocol_channels = channels.net_channels.build_subset(SubsetBuilder::new(())).unwrap();
 		info!("Spawning preprotocol listener task.");
 		async_runtime.spawn(launch_preprotocol_listener(
 			keys,
 			None,
 			3223,
 			protocol_store_dir,
-			channels.net_channels.build_subset(SubsetBuilder::new(())).unwrap(),
+			preprotocol_channels,
 		));
 
 		info!("Spawning network system task.");
 		let keys_for_net = keys.clone();
+		let net_channels = channels.net_channels.build_subset(SubsetBuilder::new(())).unwrap();
 		let net_system_join_handle = async_runtime.spawn(async move {
 			let mut sys = NetworkSystem::new(
 				SelfNetworkRole::Server,
@@ -403,9 +400,7 @@ fn main() {
 				keys_for_net,
 				laminar_config,
 				Duration::from_millis(25),
-				channels.net_channels.build_subset(NetSystemChannelsFields {
-					recv_internal_connections: channels.net_channels.internal_connect.take_receiver().unwrap(),
-				}.into()).unwrap(),
+				net_channels
 			)
 			.await
 			.unwrap();
@@ -428,26 +423,28 @@ fn main() {
 
 		info!("Launching server mainloop.");
 		let mut total_changes: Vec<VoxelChangeAnnounce> = Vec::new();
+		let net_channels = channels.net_channels.clone();
 		async_runtime.block_on(async move {
 			let mut quit_receiver = QuitReceiver::new();
-			let mut server_voxel_receiver_from_client =
-				net_recv_channel::subscribe::<VoxelChangeRequest>().unwrap();
-			let mut server_join_receiver_from_client =
-				net_recv_channel::subscribe::<JoinDefaultEntry>().unwrap();
+			let mut voxel_from_client =
+				net_channels.net_msg_inbound.receiver_typed::<VoxelChangeAnnounce>().unwrap();
+			let mut joins_to_server =
+				net_channels.net_msg_inbound.receiver_typed::<JoinDefaultEntry>().unwrap();
+			let net_msg_broadcast = net_channels.net_msg_outbound.sender_subscribe_all();
 			loop {
 				tokio::select! {
-					voxel_events_maybe = server_voxel_receiver_from_client.recv_wait() => {
+					voxel_events_maybe = voxel_from_client.recv_wait() => {
 						if let Ok(voxel_events) = voxel_events_maybe {
 							for (ident, event) in voxel_events {
 								//world_space.set(event.pos, event.new_tile).unwrap();
 								info!("Received {:?} from {}", &event, ident.to_base64());
 								let announce: VoxelChangeAnnounce = event.into();
-								net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
+								net_msg_broadcast.send(MessageIgnoreEndpoint{inner_message: vec![announce.clone().construct_packet().unwrap()], ignore_domain: Some(ident.clone())}).unwrap();
 								total_changes.push(announce);
 							}
 						}
 					}
-					join_event_maybe = server_join_receiver_from_client.recv_wait() => {
+					join_event_maybe = joins_to_server.recv_wait() => {
 						if let Ok(events) = join_event_maybe {
 							for (ident, event) in events {
 								info!("User {} has joined with display name {}", ident.to_base64(), &event.display_name);
@@ -455,14 +452,16 @@ fn main() {
 									display_name: event.display_name,
 									identity: ident,
 								};
-								net_send_channel::send_to_all_except(announce.clone(), &ident).unwrap();
+								net_msg_broadcast.send(MessageIgnoreEndpoint{inner_message: vec![announce.clone().construct_packet().unwrap()], ignore_domain: Some(ident.clone())}).unwrap();
 								info!("Sending all previous changes to the newly-joined user.");
-								// TODO: Reintroduce batching to net send channels specifically.
-								// or more of an inner-batching inside voxel change messages? Maybe.
-								//net_send_channel::send_multi_to(total_changes.clone(), &ident).unwrap();
-								for change in total_changes.iter() {
-									net_send_channel::send_to(change.clone(), &ident).unwrap();
-								}
+
+								let sender_to_new_join = net_channels.net_msg_outbound.sender_subscribe_domain(&ident).unwrap();
+								sender_to_new_join.send(
+									total_changes
+										.iter()
+										.map(|ev| ev.construct_packet().unwrap())
+										.collect::<Vec<PacketIntermediary>>()
+								).unwrap();
 							}
 						}
 					}
@@ -487,47 +486,42 @@ fn main() {
 			SocketAddr::new(ip_addr, 3223)
 		};
 
-		let (connect_sender, connect_receiver) = mpsc::unbounded_channel();
 		let keys_for_net = keys.clone();
+		let net_channels = channels.net_channels.build_subset(SubsetBuilder::new(())).unwrap();
 		let net_system_join_handle = async_runtime.spawn(async move {
 			let mut sys = NetworkSystem::new(
 				SelfNetworkRole::Client,
 				address,
-				connect_receiver,
 				keys_for_net,
 				laminar_config,
 				Duration::from_millis(25),
+				net_channels
 			)
 			.await
 			.unwrap();
 			sys.run().await
 		});
-		let completed = async_runtime
+		async_runtime
 			.block_on(preprotocol_connect_to_server(
 				keys,
 				address,
 				Duration::new(5, 0),
 				protocol_store_dir,
-				PROTOCOL_KEY_REPORTER.sender_subscribe(),
-				PROTOCOL_KEY_APPROVER.receiver_subscribe(),
+				channels.net_channels.build_subset(SubsetBuilder::new(())).unwrap()
 			))
 			.unwrap();
-		let server_identity = completed.peer_identity.clone();
-		connect_sender.send(completed).unwrap();
+		let mut connect_receiver = channels.net_channels.peer_connected.receiver_subscribe();
+		let _completed = async_runtime.block_on( async { 
+			connect_receiver.recv_wait().await
+		}).unwrap();
 
 		std::thread::sleep(Duration::from_millis(50));
 
-		let voxel_event_sender: NetMsgSender<VoxelChangeRequest> =
-			net_send_channel::subscribe_sender(&server_identity).unwrap();
-
-		let mut client_join_receiver_from_server =
-			net_recv_channel::subscribe::<JoinAnnounce>().unwrap();
-		let client_voxel_receiver_from_server =
-			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
+		let mut peer_joins_notif = channels.net_channels.net_msg_inbound.receiver_typed::<JoinAnnounce>().unwrap();
 
 		async_runtime.spawn(async move {
 			loop {
-				match client_join_receiver_from_server.recv_wait().await {
+				match peer_joins_notif.recv_wait().await {
 					Ok(join_msgs) => {
 						for (
 							_server_ident,
@@ -567,19 +561,16 @@ fn main() {
 			async_runtime,
 		);*/
 	} else {
-		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
-		let voxel_event_sender: NetMsgSender<VoxelChangeRequest> =
-			NetMsgSender::new(voxel_event_sender);
-
-		let client_voxel_receiver_from_server =
-			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
+		let mut voxel_event_receiver = channels.net_channels.net_msg_inbound.receiver_typed::<VoxelChangeRequest>().unwrap();
 
 		async_runtime.spawn(async move {
 			loop {
 				//redirect to /dev/null
-				let _ = voxel_event_receiver.recv().await;
+				let _ = voxel_event_receiver.recv_wait().await;
 			}
 		}); /*
+		let client_voxel_receiver_from_server =
+			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();
 		 client::clientmain::run_client(
 			 keys,
 			 voxel_event_sender,

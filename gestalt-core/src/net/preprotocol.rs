@@ -28,7 +28,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
 use crate::common::identity::NodeIdentity;
 use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
-use crate::{BuildSubset, SubsetBuilder};
+use crate::{BuildSubset, MessageSender, SubsetBuilder};
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -412,7 +412,7 @@ pub async fn preprotocol_receiver_session(
 													};
 
 													info!("A connection to this server was successfully made by client {}", completed.peer_identity.to_base64());
-													internal_connect.blocking_send(completed).unwrap();
+													internal_connect.send(completed).unwrap();
 													// Done with this part, stop sending.
 													false
 												}
@@ -662,7 +662,7 @@ pub async fn preprotocol_connect_to_server(
 						completed_connection.peer_identity.to_base64()
 					);
 					stream.shutdown().await.unwrap();
-					internal_connect.send(completed_connection).await.unwrap();
+					internal_connect.send(completed_connection).unwrap();
 					Ok(())
 				}
 				Err(error) => {

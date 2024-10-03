@@ -9,19 +9,18 @@ use gestalt_proc_macros::netmsg;
 use laminar::ConnectionMessenger;
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
-use tokio::{time::MissedTickBehavior};
+use tokio::time::MissedTickBehavior;
 
 use crate::{
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
 		new_fast_hash_map, new_fast_hash_set, FastHashMap, FastHashSet,
 	},
-	message::{BroadcastReceiver},
 	net::{InboundNetMsg, NetMsgId, DISCONNECT_RESERVED}, BroadcastSender, ChannelDomain,
 };
 
 use super::{
-	generated, net_channels::{InboundNetMsgs, SessionChannels}, netmsg::{CiphertextEnvelope, CiphertextMessage, MessageSidedness}, reliable_udp::{LaminarConfig, LaminarConnectionManager, LaminarWrapperError}, MessageCounter, NetMsgDomain, OuterEnvelope, PacketIntermediary, SelfNetworkRole, SuccessfulConnect
+	generated, net_channels::{InboundNetMsgs, SessionChannels}, netmsg::{CiphertextEnvelope, CiphertextMessage, MessageSidedness}, reliable_udp::{LaminarConfig, LaminarConnectionManager, LaminarWrapperError}, MessageCounter, NetMsgDomain, OuterEnvelope, SelfNetworkRole, SuccessfulConnect
 };
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -149,8 +148,7 @@ impl Session {
 	/// Get a message-passing sender for the given NetMsgDomain, caching so we don't have to lock the mutex constantly.
 	fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut BroadcastSender<InboundNetMsgs> {
 		self.inbound_channels.entry(domain).or_insert_with(|| {
-			//add_domain(&INBOUND_NET_MESSAGES, &domain);
-			self.channels.net_msg_inbound.sender_subscribe(&domain).unwrap()
+			self.channels.to_engine.sender_subscribe(&domain).unwrap()
 		})
 	}
 
@@ -168,6 +166,7 @@ impl Session {
 		laminar_layer.connection_state.last_heard = time;
 
 		let mut valid_incoming_messages = new_fast_hash_set();
+		// Iterate over IDs, inserting ones that pass our filter.
 		for id in generated::get_netmsg_table().iter().filter_map(|v| {
 			let (id, info) = v;
 			if local_role.should_we_ingest(&info.sidedness) {
@@ -443,7 +442,7 @@ impl Session {
 		}
 
 		//Send to UDP socket.
-		match self.push_channel.send(processed_send) {
+		match self.channels.push_sender.send(processed_send) {
 			Ok(()) => {}
 			Err(e) => errors.push(e.into()),
 		}
@@ -483,21 +482,21 @@ impl Session {
 pub async fn handle_session(
 	mut session_manager: Session,
 	session_tick: Duration,
-	kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
+	kill_from_inside: tokio::sync::mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
 	mut kill_from_outside: tokio::sync::oneshot::Receiver<()>,
 ) {
 	let mut ticker = tokio::time::interval(session_tick);
 	ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 	info!("Handling session for peer {}...", session_manager.peer_identity.to_base64());
-
+	
 	let peer_address = session_manager.peer_address.clone();
 	loop {
 		tokio::select! {
 			// Inbound packets
 			// Per tokio documentation - "This method is cancel safe. If recv is used as the event in a tokio::select! statement and some other branch completes first, it is guaranteed that no messages were received on this channel."
-			inbound_packets_maybe = (&mut incoming_packets).recv() => {
+			inbound_packets_maybe = (&mut session_manager.channels.socket_to_session).recv_wait() => {
 				match inbound_packets_maybe {
-					Some(inbound_packets) => {
+					Ok(inbound_packets) => {
 						let ingest_results = session_manager.ingest_packets(inbound_packets, Instant::now());
 						if !ingest_results.is_empty() {
 							let mut built_string = String::default();
@@ -510,8 +509,8 @@ pub async fn handle_session(
 							break;
 						}
 					},
-					None => {
-						info!("Connection closed for {}, dropping session state.", session_manager.peer_identity.to_base64());
+					Err(e) => {
+						info!("Connection closed for {} due to {e:?}, dropping session state.", session_manager.peer_identity.to_base64());
 						kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
 						break;
 					}
@@ -521,7 +520,7 @@ pub async fn handle_session(
 					break;
 				}
 			},
-			send_packets_maybe = (&mut from_game).recv_wait() => {
+			send_packets_maybe = (&mut session_manager.channels.from_engine).recv_wait() => {
 				match send_packets_maybe {
 					Ok(send_packets) => {
 						session_manager.laminar.connection_state.record_send();

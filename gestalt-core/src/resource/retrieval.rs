@@ -13,10 +13,10 @@ use crate::{
 		identity::{IdentityKeyPair, NodeIdentity},
 	},
 	message::{MessageReceiverAsync, MpscReceiver, MpscSender, QuitReceiver},
-	net::SelfNetworkRole, resource::ResourceLocation,
+	net::SelfNetworkRole, resource::ResourceLocation, MessageSender,
 };
 
-use super::{resource_id_to_prefix, Caid, ResourceFilelike, ResourceRetrievalError, RESOURCE_FETCH};
+use super::{resource_id_to_prefix, Caid, ResourceFilelike, ResourceRetrievalError};
 
 static LOCK_SUFFIX: &'static str = ".lock";
 
@@ -34,11 +34,11 @@ pub enum ResourceSysError {
 pub struct ResourceFetch {
 	pub resources: Vec<ResourceLocation>,
 	pub expected_source: NodeIdentity,
-	/// If this field contains a Some value, this is treated as a resource to be loaded
-	/// into memory, and then onto disk after that.
-	/// If this field contains a None value, this is treated as a pre-load, and the resource
-	/// is only saved to disk and not retained in memory.
-	pub return_channel: Option<MpscSender<ResourceFetchResponse>>,
+	// If this field contains a Some value, this is treated as a resource to be loaded
+	// into memory, and then onto disk after that.
+	// If this field contains a None value, this is treated as a pre-load, and the resource
+	// is only saved to disk and not retained in memory.
+	//pub return_channel: Option<MpscSender<ResourceFetchResponse>>,
 }
 
 #[derive(Debug)]
@@ -54,9 +54,9 @@ pub async fn launch_resource_system(
 	directories: Arc<GestaltDirectories>,
 ) -> Result<(), ResourceSysError> {
 	// Claim ownership over resource-retrieval request channels for the engine internals.
-	let fetch_receiver = RESOURCE_FETCH
-		.take_receiver()
-		.ok_or(ResourceSysError::NoFetchReceiver)?;
+	let fetch_receiver = todo!(); //= RESOURCE_FETCH
+	//	.take_receiver()
+	//	.ok_or(ResourceSysError::NoFetchReceiver)?;
 	resource_system_main(role, self_identity, fetch_receiver, directories).await?;
 	Ok(())
 }
@@ -125,12 +125,12 @@ async fn load_from_file(
 										resource.clone(),
 										format!("{0:?}", e),
 									)),
-								}).await.map_err(|e| FileLoadError::NoSendChannel(resource.clone()))?;
+								}).map_err(|e| FileLoadError::NoSendChannel(resource.clone()))?;
 							} else {
 								chan.send(ResourceFetchResponse {
 									id: resource.clone(),
 									data: Result::Ok(Arc::new(buffer)),
-								}).await.map_err(|_e| FileLoadError::NoSendChannel(resource.clone()))?;
+								}).map_err(|_e| FileLoadError::NoSendChannel(resource.clone()))?;
 							}
 						} else {
 							trace!(
@@ -184,9 +184,10 @@ async fn resource_system_main(
 					// this function, but invoked inside load_from_file().
 					// Hopefully there will be a performance benefit from not having to touch
 					// the file twice.
-					load_from_file(resource_fetch_cmd.resources,
-						resource_fetch_cmd.expected_source, self_identity.public.clone(),
-						dir_clone, resource_fetch_cmd.return_channel).await
+					//load_from_file(resource_fetch_cmd.resources,
+					//	resource_fetch_cmd.expected_source, self_identity.public.clone(),
+					//	dir_clone, resource_fetch_cmd.return_channel).await
+					todo!()
 				});
 			}
 			quit_ready_indicator = quit_reciever.wait_for_quit() => {

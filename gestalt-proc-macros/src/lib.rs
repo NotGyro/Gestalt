@@ -1,6 +1,6 @@
 #![feature(string_remove_matches)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenTree;
@@ -110,8 +110,6 @@ const CHANNEL_STR: &'static str = "channel";
 const SENDER_STR: &'static str = "sender";
 const RECEIVER_STR: &'static str = "receiver";
 const TAKE_RECEIVER_STR: &'static str = "take_receiver";
-
-const CHANNEL_ATTRIBUTES: [&'static str; 4] = [CHANNEL_STR, SENDER_STR, RECEIVER_STR, TAKE_RECEIVER_STR];
 
 const NEW_CHANNEL_STR: &'static str = "new_channel";
 const MANUAL_INIT_STR: &'static str = "manual_init";
@@ -287,15 +285,15 @@ impl IdentifiedChannel {
 				}
 			},
 			SubsetKind::Sender => quote!{
-				impl crate::common::message::StaticSenderSubscribe<#static_channel> for #struct_ident where #static_channel: StaticChannelAtom, <#static_channel as StaticChannelAtom>::Channel: SenderChannel<<#static_channel as StaticChannelAtom>::Message>, <#static_channel as StaticChannelAtom>::Message: Clone, <<#static_channel as StaticChannelAtom>::Channel as crate::common::message::SenderChannel<<#static_channel as StaticChannelAtom>::Message>>::Sender: Clone { 
-					fn sender_subscribe(&self) -> <<#static_channel as StaticChannelAtom>::Channel as crate::common::message::SenderChannel<<#static_channel as StaticChannelAtom>::Message>>::Sender {
+				impl crate::common::message::StaticSenderSubscribe<#static_channel> for #struct_ident where #static_channel: crate::common::message::StaticChannelAtom, <#static_channel as crate::common::message::StaticChannelAtom>::Channel: SenderChannel<<#static_channel as crate::common::message::StaticChannelAtom>::Message>, <#static_channel as crate::common::message::StaticChannelAtom>::Message: Clone, <<#static_channel as crate::common::message::StaticChannelAtom>::Channel as crate::common::message::SenderChannel<<#static_channel as crate::common::message::StaticChannelAtom>::Message>>::Sender: Clone { 
+					fn sender_subscribe(&self) -> <<#static_channel as crate::common::message::StaticChannelAtom>::Channel as crate::common::message::SenderChannel<<#static_channel as crate::common::message::StaticChannelAtom>::Message>>::Sender {
 						self.#field_name.clone()
 					}
 				}
 			},
 			SubsetKind::Receiver => quote!{
 				impl crate::common::message::HasReceiver<#static_channel> for #struct_ident { 
-					fn get_receiver(&self) -> &<<#static_channel as StaticChannelAtom>::Channel as crate::common::message::ReceiverChannel<<#static_channel as StaticChannelAtom>::Message>>::Receiver {
+					fn get_receiver(&self) -> &<<#static_channel as crate::common::message::StaticChannelAtom>::Channel as crate::common::message::ReceiverChannel<<#static_channel as crate::common::message::StaticChannelAtom>::Message>>::Receiver {
 						&self.#field_name
 					}
 				}
@@ -348,7 +346,7 @@ impl IdentifiedChannel {
 			None => {
 				let static_channel = &self.header.static_channel;
 				self.header.domain.as_ref().map(|inner_value| {
-					quote!{pub #inner_value: <#static_channel as StaticDomainChannelAtom>::Domain,}
+					quote!{pub #inner_value: <#static_channel as crate::common::message::StaticDomainChannelAtom>::Domain,}
 				})
 			},
 		}
@@ -358,7 +356,7 @@ impl IdentifiedChannel {
 			let field_name = &self.field_name;
 			let static_channel = &self.header.static_channel;
 			Some(
-				quote!{#field_name: <<#static_channel as StaticChannelAtom>::Channel as ChannelInit>::new(builder.capacity_conf.get_or_default::<#static_channel>())}
+				quote!{#field_name: <<#static_channel as crate::common::message::StaticChannelAtom>::Channel as ChannelInit>::new(builder.capacity_conf.get_or_default::<#static_channel>()),}
 			)
 		} else {
 			None
@@ -395,8 +393,7 @@ impl IdentifiedChannel {
 					.into(),
 			},
 			(SubsetKind::TakeReceiver, None) => quote!{
-				#field_name: <T as crate::common::message::StaticTakeReceiver<#static_channel>>::take_receiver(parent)
-					.ok_or(|| crate::common::message::DomainSubscribeErr::TakeTakenReceiver(format!("No Domain")))?
+				#field_name: <T as crate::common::message::StaticTakeReceiver<#static_channel>>::take_receiver(parent)?
 					.into(),
 			},
 			(SubsetKind::TakeReceiver, Some(domain)) => quote!{
@@ -418,7 +415,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 	let struct_ident = parsed.ident.clone();
 
 	if let syn::Data::Struct(struct_data) = parsed.data {
-		let mut non_channel_fields: Vec<Field> = Vec::new();
+		let non_channel_fields: Vec<Field> = Vec::new();
 		// Field lines for from_subset()
 		let mut subset_field_entries = proc_macro2::TokenStream::new();
 		// remains false if every field can be initialized new or from static_fields

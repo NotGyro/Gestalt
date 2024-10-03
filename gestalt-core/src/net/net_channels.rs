@@ -3,10 +3,10 @@ use std::marker::PhantomData;
 use gestalt_proc_macros::ChannelSet;
 
 use crate::{
-	common::identity::NodeIdentity, message::{MessageSender, MpscSender, SendError}, AllAndOneReceiver, AllAndOneSender, BroadcastChannel, BroadcastReceiver, BroadcastSender, ChannelCapacityConf, ChannelInit, DomainBroadcastChannel, DomainMultiChannel, DomainSenderSubscribe, DomainSubscribeErr, MessageReceiver, MessageReceiverAsync, MpscChannel, MpscReceiver, NewDomainErr, SenderChannel, StaticChannelAtom
+	common::identity::NodeIdentity, message::{MessageSender, MpscSender, SendError}, AllAndOneReceiver, AllAndOneSender, BroadcastChannel, BroadcastReceiver, BroadcastSender, ChannelCapacityConf, ChannelInit, DomainBroadcastChannel, DomainMessageSender, DomainMultiChannel, DomainSenderSubscribe, DomainSubscribeErr, DomainTakeReceiver, MessageIgnoreEndpoint, MessageReceiver, MessageReceiverAsync, MpscChannel, MpscReceiver, NewDomainErr, ReceiverChannel, SenderChannel, StaticChannelAtom
 };
 
-use super::{netmsg::NetMsgRecvError, ConnectAnnounce, InboundNetMsg, NetMsg, NetMsgDomain, NetMsgId, OuterEnvelope, PacketIntermediary, SuccessfulConnect};
+use super::{netmsg::{CiphertextEnvelope, NetMsgRecvError}, ConnectAnnounce, FullSessionName, InboundNetMsg, NetMsg, NetMsgDomain, NetMsgId, OuterEnvelope, PacketIntermediary, SuccessfulConnect};
 
 pub type OutboundNetMsgs = Vec<PacketIntermediary>;
 pub(super) type NetInnerSender = AllAndOneSender<OutboundNetMsgs, NodeIdentity, MpscSender<OutboundNetMsgs>>;
@@ -23,6 +23,12 @@ impl NetMsgSender {
 	pub fn send_untyped(&self, packet: PacketIntermediary) -> Result<(), SendError> {
 		self.inner
 			.send(vec![packet])
+			.map(|_v| ())
+			.map_err(|_e| SendError::NoReceivers)
+	}
+	pub fn send_many_untyped(&self, packets: Vec<PacketIntermediary>) -> Result<(), SendError> {
+		self.inner
+			.send(packets)
 			.map(|_v| ())
 			.map_err(|_e| SendError::NoReceivers)
 	}
@@ -97,9 +103,14 @@ impl NetMsgSender {
 	}
 }
 
-impl<T> MessageSender<T> for NetMsgSender where T: NetMsg + std::fmt::Debug {
-	fn send(&self, message: T) -> Result<(), SendError> {
-		self.send_one(message)
+impl MessageSender<PacketIntermediary> for NetMsgSender {
+	fn send(&self, message: PacketIntermediary) -> Result<(), SendError> {
+		self.send_untyped(message)
+	}
+}
+impl MessageSender<Vec<PacketIntermediary>> for NetMsgSender {
+	fn send(&self, message: Vec<PacketIntermediary>) -> Result<(), SendError> {
+		self.send_many_untyped(message)
 	}
 }
 
@@ -128,6 +139,11 @@ impl NetSendChannel {
 
 		return Ok(AllAndOneReceiver::new(recv, self.inner.receiver_subscribe_all(), peer));
 	}
+	pub fn init_peer(&self, peer: NodeIdentity) {
+		let new_channel = MpscChannel::new(self.inner.get_capacity());
+		// Get-or-init pattern i.e. if this already existed it's fine.
+		let _ = self.inner.add_channel(peer.clone(), new_channel);
+	}
 
 	pub fn drop_peer(&self, peer: &NodeIdentity) {
 		self.inner.drop_domain(peer);
@@ -136,15 +152,43 @@ impl NetSendChannel {
 	pub fn get_capacity(&self) -> usize { 
 		self.inner.get_capacity()
 	}
+
+	pub fn sender_subscribe_all(&self) -> BroadcastSender<MessageIgnoreEndpoint<OutboundNetMsgs, NodeIdentity>> {
+		self.inner.sender_subscribe_all()
+	}
 }
 
-impl<T> SenderChannel<T> for NetSendChannel where T: NetMsg + std::fmt::Debug {
+impl ReceiverChannel<OutboundNetMsgs> for NetSendChannel {
+	type Receiver = OutboundNetMsgReceiver;
+}
+
+impl SenderChannel<PacketIntermediary> for NetSendChannel {
 	type Sender = NetMsgSender;
 }
 
-impl<T> DomainSenderSubscribe<T, NodeIdentity> for NetSendChannel where T: NetMsg + std::fmt::Debug {
+impl DomainSenderSubscribe<PacketIntermediary, NodeIdentity> for NetSendChannel {
 	fn sender_subscribe_domain(&self, domain: &NodeIdentity) -> Result<Self::Sender, crate::DomainSubscribeErr<NodeIdentity>> {
 		Ok(NetMsgSender::new(self.inner.sender_subscribe(domain)?))
+	}
+}
+
+impl DomainTakeReceiver<OutboundNetMsgs, NodeIdentity> for NetSendChannel {
+	fn take_receiver_domain(&self, domain: &NodeIdentity) -> Result<Self::Receiver, DomainSubscribeErr<NodeIdentity>> {
+		self.inner.take_receiver_domain(domain)
+	}
+}
+
+impl DomainMessageSender<OutboundNetMsgs, NodeIdentity> for NetSendChannel {
+	fn send_to(&self, message: OutboundNetMsgs, domain: &NodeIdentity) -> Result<(), SendError> {
+		self.inner.send_to(message, domain)
+	}
+
+	fn send_to_all(&self, message: OutboundNetMsgs) -> Result<(), SendError> {
+		self.inner.send_to_all(message)
+	}
+
+	fn send_to_all_except(&self, message: OutboundNetMsgs, exclude: &NodeIdentity) -> Result<(), SendError> {
+		self.inner.send_to_all_except(message, exclude)
 	}
 }
 
@@ -247,7 +291,7 @@ pub struct EngineNetChannels {
 	#[channel(NetMsgInbound)]
 	pub net_msg_inbound: <NetMsgInbound as StaticChannelAtom>::Channel,
 	#[channel(ConnectInternal)]
-	pub internal_connect: <ConnectInternal as StaticChannelAtom>::Channel,
+	pub connect_internal: <ConnectInternal as StaticChannelAtom>::Channel,
 	#[channel(ConnectionReady)]
 	pub peer_connected: <ConnectionReady as StaticChannelAtom>::Channel,
 	#[channel(ProtocolKeyMismatchReporter)]
@@ -261,7 +305,7 @@ impl EngineNetChannels {
 		Self {
 			net_msg_outbound: NetSendChannel::new(conf.get_or_default::<NetMsgOutbound>()),
 			net_msg_inbound: InboundNetChannel::new(conf.get_or_default::<NetMsgInbound>()),
-			internal_connect: MpscChannel::new(conf.get_or_default::<ConnectInternal>()),
+			connect_internal: MpscChannel::new(conf.get_or_default::<ConnectInternal>()),
 			peer_connected: BroadcastChannel::new(conf.get_or_default::<ConnectionReady>()),
 			key_mismatch_reporter: BroadcastChannel::new(conf.get_or_default::<ProtocolKeyMismatchReporter>()),
 			key_mismatch_approver: BroadcastChannel::new(conf.get_or_default::<ProtocolKeyMismatchApprover>()),
@@ -269,10 +313,14 @@ impl EngineNetChannels {
 	}
 }
 
+pub type PacketsForSession = Vec<CiphertextEnvelope>;
+static_channel_atom!(SocketToSession, DomainMultiChannel<PacketsForSession, FullSessionName, MpscChannel<PacketsForSession>>, PacketsForSession, FullSessionName, 4096);
+
 /// Net-system-sided channels, intended to subset EngineNetChannels. 
 #[derive(ChannelSet)]
 pub struct NetSystemChannels {
-	//pub raw_to_session:
+	#[channel(SocketToSession, new_channel)]
+	pub raw_to_session: <SocketToSession as StaticChannelAtom>::Channel,
 	/// Game-to-network. Outbound i.e. outbound from game
 	#[channel(NetMsgOutbound)]
 	pub net_msg_outbound: <NetMsgOutbound as StaticChannelAtom>::Channel,
@@ -280,23 +328,26 @@ pub struct NetSystemChannels {
 	#[channel(NetMsgInbound)]
 	pub net_msg_inbound: <NetMsgInbound as StaticChannelAtom>::Channel,
 	/// Successful connections after protocol negotiation & handshake.
-	pub recv_internal_connections: MpscReceiver<SuccessfulConnect>,
+	#[take_receiver(ConnectInternal)]
+	pub connect_internal: MpscReceiver<SuccessfulConnect>,
 	#[channel(ConnectionReady)]
 	pub announce_connection: BroadcastChannel<ConnectAnnounce>,
 	/// Net-system-internal, used to push OuterEnvelopes from session to socket.
 	#[channel(PacketPush, new_channel)]
-	pub from_session: <PacketPush as StaticChannelAtom>::Channel,
+	pub session_to_socket: <PacketPush as StaticChannelAtom>::Channel,
 }
 
 /// Channels used by one session object, intended to subset NetSystemChannels.
 #[derive(ChannelSet)]
 pub struct SessionChannels {
 	/// Sent by game, received by session.
-	/// Can't be auto-subset'd because MpscChannels are particular
-	pub net_msg_outbound: OutboundNetMsgReceiver,
+	#[take_receiver(SocketToSession, domain: "session")]
+	pub socket_to_session: MpscReceiver<PacketsForSession>,
 	/// Network-to-game. Inbound i.e. inbound from net.
 	#[channel(NetMsgInbound)]
-	pub to_engine_sender: <NetMsgInbound as StaticChannelAtom>::Channel,
+	pub to_engine: InboundNetChannel,
+	#[take_receiver(NetMsgOutbound, domain: "peer_identity")]
+	pub from_engine: OutboundNetMsgReceiver,
 	/// ConnectionReady is sent as soon as our session object has decided that it's safe
 	/// to tell the rest of the engine that this connection has occurred.
 	#[sender(ConnectionReady)]

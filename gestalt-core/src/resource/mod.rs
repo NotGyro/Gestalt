@@ -13,8 +13,6 @@ use std::{cmp::PartialEq, hash::Hash};
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
-use self::channels::RESOURCE_FETCH;
-
 //use string_cache::DefaultAtom as Atom;
 
 pub mod channels;

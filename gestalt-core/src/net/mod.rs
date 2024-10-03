@@ -11,6 +11,7 @@ use log::info;
 use log::trace;
 use log::warn;
 use net_channels::NetSystemChannels;
+use net_channels::OutboundRawPackets;
 use net_channels::SessionChannelsFields;
 use std::collections::HashMap;
 
@@ -24,6 +25,10 @@ use crate::common::identity::NodeIdentity;
 use crate::message::MessageSender;
 use crate::message::QuitReceiver;
 use crate::BuildSubset;
+use crate::DomainMessageSender;
+use crate::MessageReceiver;
+use crate::MessageReceiverAsync;
+use crate::MpscReceiver;
 use crate::SubsetBuilder;
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
@@ -131,6 +136,8 @@ pub struct NetworkSystem {
 	recv_buf: Vec<u8>,
 	send_buf: Vec<u8>,
 	channels: NetSystemChannels,
+	/// Taken from channels.session_to_socket for convenience.
+	push_receiver: MpscReceiver<OutboundRawPackets>,
 	/// One receiver for each session. Messages come into this UDP handler from sessions, and we have to send them.
 	/// Remember, "Multiple producer single receiver." This is the single receiver.
 	/// Per-session channels for routing incoming UDP packets to sessions.
@@ -174,6 +181,7 @@ impl NetworkSystem {
 			anticipated_clients: HashMap::default(),
 			recv_buf: vec![0u8; MAX_MESSAGE_SIZE],
 			send_buf: vec![0u8; MAX_MESSAGE_SIZE],
+			push_receiver: channels.session_to_socket.take_receiver().unwrap(),
 			channels,
 			inbound_channels: HashMap::default(),
 			kill_from_inside_session_sender,
@@ -193,11 +201,17 @@ impl NetworkSystem {
 			&actual_address.peer_address,
 			&connection.transport_counter
 		);
-
+		let peer_role = connection.peer_role.clone();
+		self.channels.net_msg_outbound.init_peer(connection.peer_identity.clone());
 		//Communication with the rest of the engine.
-		let resl_peer = self.channels.net_msg_outbound.register_peer(connection.peer_identity.clone());
-		match resl_peer {
-			Ok(receiver) => {
+		let resl_channels = self.channels.build_subset(SessionChannelsFields{
+			// session ID
+			session_domain: actual_address.clone(),
+			// Peer identity
+    		peer_identity_domain: connection.peer_identity.clone(),
+		}.into());
+		match resl_channels {
+			Ok(channels) => {
 				let peer_identity = connection.peer_identity.clone();
 				trace!("Sender channel successfully registered for {}", peer_identity.to_base64());
 				// Construct the session
@@ -208,9 +222,7 @@ impl NetworkSystem {
 					connection,
 					self.laminar_config.clone(),
 					Instant::now(),
-					self.channels.build_subset(SubsetBuilder::new(SessionChannelsFields{
-						net_msg_outbound: receiver,
-					})).unwrap()
+					channels,
 				);
 
 				// Make a channel
@@ -240,8 +252,6 @@ impl NetworkSystem {
 
 					handle_session(
 						session,
-						from_net_receiver,
-						receiver,
 						session_tick_interval,
 						killer_clone,
 						kill_from_outside_receiver,
@@ -251,7 +261,10 @@ impl NetworkSystem {
 
 				self.join_handles.push(jh);
 				// Let the rest of the engine know we're connected now.
-				CONNECTED.send(peer_identity).unwrap();
+				self.channels.announce_connection.send(ConnectAnnounce {
+					peer_identity,
+					peer_role,
+				}).unwrap();
 			}
 			Err(e) => {
 				error!("Error initializing new session: {:?}", e);
@@ -265,13 +278,12 @@ impl NetworkSystem {
 	}
 	pub async fn shutdown(&mut self) {
 		// Notify sessions we're done.
-		for (peer_address, _) in self.inbound_channels.iter() {
-			let peer_ident = self.session_to_identity.get(&peer_address).unwrap();
-			net_send_channel::send_to(DisconnectMsg {}, &peer_ident).unwrap();
-		}
+		self.channels.net_msg_outbound.send_to_all(vec![DisconnectMsg{}.construct_packet().unwrap()]).unwrap();
+		// ... actually maybe we should have some kind of direct handle to the session here?
+		// but it *should* live in another thread, even if not a tokio greenthread.
 		tokio::time::sleep(Duration::from_millis(10)).await;
 		// Clear out remaining messages.
-		while let Ok(messages) = (&mut self.push_receiver).try_recv() {
+		while let Ok(Some(messages)) = (&mut self.push_receiver).recv_poll() {
 			for message in messages {
 				match message.encode(&mut self.send_buf) {
                     Ok(len_written) => {
@@ -307,10 +319,10 @@ impl NetworkSystem {
 			// We're a client (i.e. not listening) and have no connections yet,
 			// make sure we are connected so we don't try to receive from nobody.
 			(SelfNetworkRole::Client, 0) => {
-				let connection = match self.new_connections.recv().await {
-					Some(conn) => conn,
-					None => {
-						error!("Channel for new connections closed.");
+				let connection = match self.channels.connect_internal.recv_wait().await {
+					Ok(conn) => conn,
+					Err(e) => {
+						error!("Channel for new connections closed: {e}");
 						return Err(NetworkError::NoNewConnectionsChannel);
 					}
 				};
@@ -344,7 +356,8 @@ impl NetworkSystem {
 		info!("Registering {} NetMsgIds.", netmsg_table.len());
 		for (id, msg_type) in netmsg_table.iter() {
 			if self.our_role.should_we_ingest(&msg_type.sidedness) {
-				INBOUND_NET_MESSAGES.init_domain(id);
+				// Get-or-init pattern: ignore already-existing.
+				let _ = self.channels.net_msg_inbound.init_domain(*id);
 			}
 		}
 
@@ -363,11 +376,11 @@ impl NetworkSystem {
 
 		loop {
 			tokio::select! {
-				new_connection_maybe = (&mut self.new_connections).recv() => {
+				new_connection_maybe = (&mut self.channels.connect_internal).recv_wait() => {
 					let connection = match new_connection_maybe {
-						Some(conn) => conn,
-						None => {
-							error!("Channel for new connections closed.");
+						Ok(conn) => conn,
+						Err(e) => {
+							error!("Channel for new connections closed: {e}");
 							break; // Return to loop head i.e. try a new tokio::select.
 						},
 					};
@@ -378,7 +391,7 @@ impl NetworkSystem {
 
 					if self.our_role == SelfNetworkRole::Server {
 						trace!("Adding anticipated client entry for session {:?}", &BASE_64.encode(connection.session_id));
-						net_channels::register_peer(&connection.peer_identity);
+						self.channels.net_msg_outbound.init_peer(connection.peer_identity.clone());
 						self.anticipated_clients.insert( PartialSessionName{
 							session_id: connection.session_id.clone(),
 							peer_address: connection.peer_address.ip(),
@@ -467,7 +480,7 @@ impl NetworkSystem {
 						}
 					}
 				}
-				send_maybe = (&mut self.push_receiver).recv() => {
+				send_maybe = (&mut self.push_receiver).recv_wait() => {
 					let to_send = send_maybe.unwrap();
 					for message in to_send {
 						match message.encode(&mut self.send_buf) {
@@ -497,7 +510,7 @@ impl NetworkSystem {
 						self.inbound_channels.remove(&session_kill);
 						self.session_kill_from_outside.remove(&session_kill);
 						let _ = self.session_to_identity.remove(&session_kill);
-						net_channels::drop_peer(&ident);
+						self.channels.net_msg_outbound.drop_peer(&ident);
 					}
 				}
 				quit_ready_indicator = quit_reciever.wait_for_quit() => {
@@ -517,21 +530,21 @@ mod test {
 	use std::net::Ipv6Addr;
 
 	use crate::message::quit_game;
-	use crate::message::BroadcastChannel;
 	use crate::message::MessageReceiverAsync;
 	use crate::message::MessageSender;
 	use crate::message::ReceiverSubscribe;
 	use crate::message::SenderSubscribe;
 	use crate::message_types::JoinDefaultEntry;
 	use crate::net::handshake::approver_no_mismatch;
-
-	use super::net_channels::NetMsgSender;
+	use crate::ChannelCapacityConf;
+	use crate::DomainSenderSubscribe;
 	use super::preprotocol::launch_preprotocol_listener;
 	use super::preprotocol::preprotocol_connect_to_server;
 	use super::*;
 	use gestalt_proc_macros::netmsg;
 	use lazy_static::lazy_static;
 	use log::LevelFilter;
+	use net_channels::EngineNetChannels;
 	use serde::Deserialize;
 	use serde::Serialize;
 	use simplelog::TermLogger;
@@ -568,21 +581,17 @@ mod test {
 			simplelog::ColorChoice::Auto,
 		);
 
+		let server_channel_set = EngineNetChannels::new(&ChannelCapacityConf::new());
+		let client_channel_set = EngineNetChannels::new(&ChannelCapacityConf::new());
+
 		let protocol_dir = tempfile::tempdir().unwrap();
 
 		let server_key_pair = IdentityKeyPair::generate_for_tests();
 		let client_key_pair = IdentityKeyPair::generate_for_tests();
-		let (serv_completed_sender, serv_completed_receiver) = mpsc::unbounded_channel();
-		let (client_completed_sender, client_completed_receiver) = mpsc::unbounded_channel();
-
-		// Mismatch approver stuff.
-		let mismatch_report_channel: BroadcastChannel<NodeIdentity> = BroadcastChannel::new(1024);
-		let mismatch_approve_channel: BroadcastChannel<(NodeIdentity, bool)> =
-			BroadcastChannel::new(1024);
-		let mismatch_report_receiver = mismatch_report_channel.receiver_subscribe();
-		let mismatch_approve_sender = mismatch_approve_channel.sender_subscribe();
+		
 		// Spawn our little "explode if the key isn't new" system.
-		tokio::spawn(approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender));
+		tokio::spawn(approver_no_mismatch(server_channel_set.key_mismatch_reporter.receiver_subscribe(), server_channel_set.key_mismatch_approver.sender_subscribe()));
+		tokio::spawn(approver_no_mismatch(client_channel_set.key_mismatch_reporter.receiver_subscribe(), client_channel_set.key_mismatch_approver.sender_subscribe()));
 
 		// Port/binding stuff.
 		let port = find_available_udp_port(54134..54534).await.unwrap();
@@ -596,18 +605,17 @@ mod test {
 			.unwrap();
 		println!("Counted {} registered NetMsg types.", test_table.len());
 
-		let mut connected_notifier = CONNECTED.receiver_subscribe();
-
 		//Actually start doing the test here:
 		//Launch server
+		let subset = server_channel_set.build_subset(SubsetBuilder::new(())).unwrap();
 		let join_handle_s = tokio::spawn(async move {
 			let mut sys = NetworkSystem::new(
 				SelfNetworkRole::Server,
 				server_socket_addr,
-				serv_completed_receiver,
 				server_key_pair.clone(),
 				LaminarConfig::default(),
 				Duration::from_millis(50),
+				subset,
 			)
 			.await
 			.unwrap();
@@ -617,60 +625,54 @@ mod test {
 		let _join_handle_handshake_listener = tokio::spawn(launch_preprotocol_listener(
 			server_key_pair.clone(),
 			Some(server_socket_addr),
-			serv_completed_sender,
 			port,
 			PathBuf::from(protocol_dir.path()),
-			mismatch_report_channel.clone(),
-			mismatch_approve_channel.clone(),
+			server_channel_set.build_subset(SubsetBuilder::new(())).unwrap()
 		));
 
 		//Launch client
+		let netsys_channels = client_channel_set.build_subset(SubsetBuilder::new(())).unwrap();
 		let join_handle_c = tokio::spawn(async move {
 			let mut sys = NetworkSystem::new(
 				SelfNetworkRole::Client,
 				server_socket_addr,
-				client_completed_receiver,
 				client_key_pair.clone(),
 				LaminarConfig::default(),
 				Duration::from_millis(50),
+				netsys_channels
 			)
 			.await
 			.unwrap();
 			sys.run().await
 		});
-		let client_completed_connection = preprotocol_connect_to_server(
+		let mut connected_to_client = client_channel_set.peer_connected.receiver_subscribe();
+		preprotocol_connect_to_server(
 			client_key_pair.clone(),
 			server_socket_addr,
 			Duration::new(5, 0),
 			PathBuf::from(protocol_dir.path()),
-			mismatch_report_channel.sender_subscribe(),
-			mismatch_approve_channel.receiver_subscribe(),
+			client_channel_set.build_subset(SubsetBuilder::new(())).unwrap()
 		)
 		.await
 		.unwrap();
-		client_completed_sender
-			.send(client_completed_connection)
-			.unwrap();
+		
+		let connected_peer = connected_to_client.recv_wait().await.unwrap();
+		assert!(connected_peer.peer_identity == server_key_pair.public);
 
-		let connected_peer = connected_notifier.recv_wait().await.unwrap();
-		assert!(connected_peer == server_key_pair.public);
-
-		net_send_channel::send_to(
+		let client_net_send = client_channel_set.net_msg_outbound.sender_subscribe_domain(&connected_peer.peer_identity).unwrap();
+		client_net_send.send(
 			JoinDefaultEntry {
 				display_name: "test".to_string(),
-			},
-			&server_key_pair.public,
-		)
-		.unwrap();
+			}.construct_packet().unwrap()
+		).unwrap();
 
-		let mut test_receiver: NetMsgReceiver<TestNetMsg> = net_recv_channel::subscribe().unwrap();
+		let mut test_receiver = client_channel_set.net_msg_inbound.receiver_typed::<TestNetMsg>().unwrap();
 
 		let test = TestNetMsg {
 			message: String::from("Boop!"),
 		};
-		let client_to_server_sender: NetMsgSender<TestNetMsg> =
-			net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
-		client_to_server_sender.send(test.clone()).unwrap();
+
+		client_net_send.send(test.construct_packet().unwrap()).unwrap();
 		info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
 
 		{
@@ -689,10 +691,9 @@ mod test {
 		let test_reply = TestNetMsg {
 			message: String::from("Beep!"),
 		};
-		let server_to_client_sender: NetMsgSender<TestNetMsg> =
-			net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
+		let server_to_client_sender = server_channel_set.net_msg_outbound.sender_subscribe_domain(&client_key_pair.public).unwrap();
 		info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
-		server_to_client_sender.send(test_reply.clone()).unwrap();
+		server_to_client_sender.send(test_reply.construct_packet().unwrap()).unwrap();
 
 		{
 			let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait())

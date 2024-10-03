@@ -8,11 +8,10 @@ use crate::{
 	common::identity::NodeIdentity,
 	message::{
 		MessageReceiver, MessageReceiverAsync, MpscChannel, MpscReceiver, MpscSender, SenderSubscribe,
-	},
+	}, MessageSender,
 };
 
 use super::{
-	channels::RESOURCE_FETCH,
 	retrieval::{ResourceFetch, ResourceFetchResponse},
 	ResourceError, ResourceLocation, ResourcePoll, ResourceRetrievalError,
 };
@@ -85,7 +84,7 @@ impl RawResourceProvider {
 	pub fn new(return_channel_capacity: usize) -> Self {
 		let return_channel = MpscChannel::new(return_channel_capacity);
 		Self {
-			fetch_sender: RESOURCE_FETCH.sender_subscribe(),
+			fetch_sender: todo!(), //RESOURCE_FETCH.sender_subscribe(),
 			return_receiver: return_channel.take_receiver().unwrap(),
 			return_template: return_channel.sender_subscribe(),
 		}
@@ -97,7 +96,7 @@ impl RawResourceProvider {
 		expected_source: NodeIdentity,
 		return_channel: Option<MpscSender<ResourceFetchResponse>>,
 	) -> Vec<Result<(ResourceLocation, Arc<Vec<u8>>), ResourceError<ResourceRetrievalError>>> {
-		let resl = self.fetch_sender.blocking_send(ResourceFetch {
+		let resl = self.fetch_sender.send(ResourceFetch {
 			resources: resources
 				.iter()
 				.map(|value| match value {
@@ -107,9 +106,9 @@ impl RawResourceProvider {
 					})
 				.collect(),
 			expected_source,
-			return_channel,
+			//return_channel,
 		});
-		if let Err(e) = resl { 
+		if let Err(e) = resl {
 			error!("Unable to fulfil resource requests: Send erorr {e:?}");
 		}
 		vec![]
