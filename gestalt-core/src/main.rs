@@ -13,8 +13,9 @@
 #[macro_use]
 pub mod common;
 pub mod main_channels;
+use clap::Parser;
 pub use common::message;
-use net::{NetMsg, PacketIntermediary};
+use net::{generated::get_netmsg_table, NetMsg, PacketIntermediary};
 pub use crate::main_channels::*;
 use semver::Version;
 
@@ -47,7 +48,6 @@ use common::{
 	identity::{do_keys_need_generating, gen_and_save_keys, load_keyfile, NodeIdentity},
 	message::*
 };
-use std::collections::HashSet;
 
 use crate::{
 	message::QuitReceiver,
@@ -64,143 +64,6 @@ use crate::{
 };
 
 pub const ENGINE_VERSION: Version = Version::new(0,0,1);
-
-// For command-line argument parsing
-enum OneOrTwo {
-	One(String),
-	Two(String, String),
-}
-fn split_on_unquoted_equals(input: &str) -> OneOrTwo {
-	if input.contains(' ') {
-		//If it contains spaces, it wasn't split up already by the OS or Rust's std::env,
-		//which means it's in quotes.
-		return OneOrTwo::One(input.to_string());
-	}
-	let in_quotes = false;
-	let mut previous_was_escape = false;
-	let mut position_to_split = 0;
-	for (position, char) in input.chars().enumerate() {
-		if char == '\\' && !previous_was_escape {
-			previous_was_escape = true;
-		} else if (char == '=') && !previous_was_escape && !in_quotes {
-			// We found one!
-			position_to_split = position;
-			break;
-		} else {
-			previous_was_escape = false;
-		}
-		// OS or Rust's std::env does quote escapes, so if there's a quote here implicitly it has already been escaped.
-		// else if (char == '\"') && !previous_was_escape {
-		//    in_quotes = !in_quotes;
-		//    previous_was_escape = false;
-		//}
-	}
-	if position_to_split != 0 {
-		let (left, right) = input.split_at(position_to_split);
-		OneOrTwo::Two(left.to_string(), right.to_string())
-	} else {
-		OneOrTwo::One(input.to_string())
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct Argument {
-	pub aliases: HashSet<String>,
-	pub takes_parameter: bool,
-}
-#[derive(Clone, Debug)]
-pub struct ArgumentMatch {
-	pub aliases: HashSet<String>,
-	pub parameter: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ArgumentMatches {
-	pub matches: Vec<ArgumentMatch>,
-}
-impl ArgumentMatches {
-	pub fn get(&self, alias: &str) -> Option<ArgumentMatch> {
-		let alias = alias.to_ascii_lowercase();
-		for matching_arg in self.matches.iter() {
-			if matching_arg.aliases.contains(&alias) {
-				return Some(matching_arg.clone());
-			}
-		}
-		None
-	}
-}
-
-pub struct ProgramArgs {
-	arguments: Vec<Argument>,
-}
-
-impl ProgramArgs {
-	pub fn new() -> Self {
-		ProgramArgs {
-			arguments: Vec::default(),
-		}
-	}
-	pub fn add_arg(&mut self, aliases: Vec<&str>, takes_parameter: bool) {
-		let mut converted_aliases: Vec<String> = aliases
-			.iter()
-			.map(|alias| alias.to_ascii_lowercase())
-			.collect();
-		let mut alias_set = HashSet::default();
-		for alias in converted_aliases.drain(0..) {
-			alias_set.insert(alias);
-		}
-		self.arguments.push(Argument {
-			aliases: alias_set,
-			takes_parameter,
-		})
-	}
-	pub fn get_matches(&self, args: Vec<String>) -> ArgumentMatches {
-		let mut match_list = Vec::new();
-		for (index, arg_in) in args.iter().enumerate() {
-			let arg_in = arg_in.to_ascii_lowercase();
-			for arg_def in self.arguments.iter() {
-				for alias in arg_def.aliases.iter() {
-					if arg_in.starts_with(alias) {
-						//We have a match! Let's see what to do with it.
-						if arg_def.takes_parameter {
-							match split_on_unquoted_equals(&arg_in) {
-								OneOrTwo::One(_just_the_arg) => {
-									//Look ahead
-									if index + 1 < args.len() {
-										if let Some(param) = args.get(index + 1) {
-											match_list.push(ArgumentMatch {
-												aliases: arg_def.aliases.clone(),
-												parameter: Some(param.to_string()),
-											})
-										}
-									}
-								}
-								OneOrTwo::Two(_arg, param) => match_list.push(ArgumentMatch {
-									aliases: arg_def.aliases.clone(),
-									parameter: Some(param),
-								}),
-							}
-						} else {
-							match_list.push(ArgumentMatch {
-								aliases: arg_def.aliases.clone(),
-								parameter: None,
-							})
-						}
-					}
-				}
-			}
-		}
-		ArgumentMatches {
-			matches: match_list,
-		}
-	}
-}
-
-impl Default for ProgramArgs {
-	fn default() -> Self {
-		Self::new()
-	}
-}
 
 pub async fn protocol_key_change_approver(
 	mut receiver: BroadcastReceiver<NodeIdentity>,
@@ -228,31 +91,31 @@ pub fn init_channels() -> MainChannelSet {
 	MainChannelSet::new(&conf)
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    server: bool,
+    #[arg(short, long)]
+	join: bool,
+    #[arg(short, long)]
+	addr: Option<String>,
+    #[arg(short, long)]
+	verbose: bool,
+}
+
 #[allow(unused_must_use)]
 fn main() {
 	// Announce the engine launching, for our command-line friends.
 	println!("Launching Gestalt Engine v{}", ENGINE_VERSION);
-	// Parse command-line arguments
-	let mut arg_list: Vec<String> = Vec::new();
-	for argument in std::env::args() {
-		// Skip initial "here is your directory" argument
-		if !(argument.contains("gestalt_core.exe") || argument.contains("gestalt.exe")) {
-			arg_list.push(argument);
-		}
-	}
-	let mut program_args = ProgramArgs::new();
-	program_args.add_arg(vec!["--join", "-j"], true);
-	program_args.add_arg(vec!["--server", "-s"], true);
-	program_args.add_arg(vec!["--verbose", "-v"], false);
-	program_args.add_arg(vec!["--nosave", "-n"], false);
 
-	let matches = program_args.get_matches(arg_list);
+	let program_args = Args::parse();
 
 	//Initialize our logger.
 	let mut log_config_builder = ConfigBuilder::default();
 
 	let level_filter = {
-		if let Some(_) = matches.get("--verbose") {
+		if program_args.verbose {
 			// Verbosely log Gestalt messages but try not to verbosely log renderer messages because they can get ridiculous.
 			log_config_builder.add_filter_ignore_str("wgpu");
 			log_config_builder.add_filter_ignore_str("rend3");
@@ -288,6 +151,9 @@ fn main() {
 
 	info!("Initializing main channel set...");
 	let channels = init_channels();
+	for (net_msg_id, _) in get_netmsg_table() { 
+		channels.net_channels.net_msg_inbound.init_domain(*net_msg_id);
+	}
 	info!("Main channel set ready.");
 
 	let key_dir = PathBuf::from("keys/");
@@ -300,13 +166,27 @@ fn main() {
 		println!("Minimum length is 4 characters.");
 		println!("WARNING: If you forget your passphrase, this will be impossible to recover!");
 		println!("Leave this blank if you do not want to use a passphrase.");
-		print!("Enter your passphrase: ");
-		std::io::stdout().flush().unwrap();
-
 		let mut input = String::new();
-		std::io::stdin()
-			.read_line(&mut input)
-			.expect("Error reading from STDIN");
+		loop { 
+			print!("Enter your passphrase: ");
+			std::io::stdout().flush().unwrap();
+
+			std::io::stdin()
+				.read_line(&mut input)
+				.expect("Error reading from STDIN");
+			print!("Confirm your passphrase: ");
+			std::io::stdout().flush().unwrap();
+			let mut confirm = String::new();
+			std::io::stdin()
+				.read_line(&mut confirm)
+				.expect("Error reading from STDIN");
+			if confirm == input { 
+				break;
+			} else {
+				println!("Passphrases do not match! Please try again.");
+				input = String::new();
+			}
+		}
 
 		// If it's 1 char, that's a newline or a \0
 		let passphrase = if input.chars().count() > 1 {
@@ -362,13 +242,9 @@ fn main() {
 
 	let protocol_store_dir = default_protocol_store_dir();
 
-	if let Some(ArgumentMatch {
-		aliases: _,
-		parameter: addr,
-	}) = matches.get("--server")
-	{
+	if program_args.server {
 		info!("Launching as server - parsing address.");
-		let udp_address = if let Some(raw_addr) = addr {
+		let udp_address = if let Some(raw_addr) = program_args.addr {
 			if raw_addr.contains(':') {
 				raw_addr.parse().unwrap()
 			} else {
@@ -474,11 +350,14 @@ fn main() {
 		});
 		message::quit_game(Duration::from_secs(10));
 		async_runtime.block_on(net_system_join_handle);
-	} else if let Some(ArgumentMatch {
-		aliases: _,
-		parameter: Some(raw_addr),
-	}) = matches.get("--join")
-	{
+	} else if let Some(raw_addr) = {
+		if program_args.join {
+			program_args.addr
+		} else {
+			None
+		}
+	} {
+		info!("Launching as client");
 		let address: SocketAddr = if raw_addr.contains(':') {
 			raw_addr.parse().unwrap()
 		} else {
@@ -561,6 +440,7 @@ fn main() {
 			async_runtime,
 		);*/
 	} else {
+		info!("Launching as stand-alone.");
 		let mut voxel_event_receiver = channels.net_channels.net_msg_inbound.receiver_typed::<VoxelChangeRequest>().unwrap();
 
 		async_runtime.spawn(async move {

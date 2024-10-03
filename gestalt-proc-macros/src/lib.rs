@@ -415,7 +415,6 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 	let struct_ident = parsed.ident.clone();
 
 	if let syn::Data::Struct(struct_data) = parsed.data {
-		let non_channel_fields: Vec<Field> = Vec::new();
 		// Field lines for from_subset()
 		let mut subset_field_entries = proc_macro2::TokenStream::new();
 		// remains false if every field can be initialized new or from static_fields
