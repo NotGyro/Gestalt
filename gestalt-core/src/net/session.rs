@@ -4,28 +4,24 @@ use std::{
 	time::{Duration, Instant},
 };
 
+use crate::{common::message::{MessageReceiverAsync, MessageSender}, MpscSender, SendError};
 use gestalt_proc_macros::netmsg;
 use laminar::ConnectionMessenger;
 use log::{error, info, trace};
 use serde::{Deserialize, Serialize};
-use tokio::{sync::mpsc, time::MissedTickBehavior};
+use tokio::{time::MissedTickBehavior};
 
 use crate::{
 	common::{
 		identity::{IdentityKeyPair, NodeIdentity},
 		new_fast_hash_map, new_fast_hash_set, FastHashMap, FastHashSet,
 	},
-	message::{BroadcastReceiver, MessageReceiverAsync},
-	net::{InboundNetMsg, NetMsgId, DISCONNECT_RESERVED},
+	message::{BroadcastReceiver},
+	net::{InboundNetMsg, NetMsgId, DISCONNECT_RESERVED}, BroadcastSender, ChannelDomain,
 };
 
 use super::{
-	generated,
-	net_channels::{InboundMsgSender, INBOUND_NET_MESSAGES},
-	netmsg::{CiphertextEnvelope, CiphertextMessage, MessageSidedness},
-	reliable_udp::{LaminarConfig, LaminarConnectionManager, LaminarWrapperError},
-	MessageCounter, NetMsgDomain, OuterEnvelope, PacketIntermediary, SelfNetworkRole,
-	SuccessfulConnect,
+	generated, net_channels::{InboundNetMsgs, SessionChannels}, netmsg::{CiphertextEnvelope, CiphertextMessage, MessageSidedness}, reliable_udp::{LaminarConfig, LaminarConnectionManager, LaminarWrapperError}, MessageCounter, NetMsgDomain, OuterEnvelope, PacketIntermediary, SelfNetworkRole, SuccessfulConnect
 };
 
 pub const SESSION_ID_LEN: usize = 4;
@@ -79,6 +75,9 @@ impl FullSessionName {
 	}
 }
 
+impl ChannelDomain for FullSessionName {}
+impl ChannelDomain for PartialSessionName {}
+
 #[derive(thiserror::Error, Debug)]
 pub enum SessionLayerError {
 	#[error("Reliable-UDP error: {0:?}")]
@@ -94,9 +93,9 @@ pub enum SessionLayerError {
 	#[error("Mutliple errors were detected while handling inbound packets: {0:?}")]
 	ErrorBatch(Vec<SessionLayerError>),
 	#[error("Could not send OuterEnvelope to packet layer: {0:?}")]
-	SendChannelError(#[from] tokio::sync::mpsc::error::SendError<Vec<OuterEnvelope>>),
+	SendChannelError(#[from] SendError),
 	#[error("Could not send decoded message to the rest of the engine: {0:?}")]
-	SendBroadcastError(#[from] tokio::sync::broadcast::error::SendError<Vec<InboundNetMsg>>),
+	SendBroadcastError(SendError),
 	#[error("Connection with {0:?} timed out.")]
 	LaminarTimeout(SocketAddr),
 	#[error("Peer {0:?} disconnected.")]
@@ -117,9 +116,6 @@ pub enum SessionLayerError {
 	ExhaustedCounter(SocketAddr),
 }
 
-pub type PushSender = mpsc::UnboundedSender<Vec<OuterEnvelope>>;
-pub type PushReceiver = mpsc::UnboundedReceiver<Vec<OuterEnvelope>>;
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[netmsg(DISCONNECT_RESERVED, Common, ReliableUnordered)]
 pub struct DisconnectMsg {}
@@ -138,24 +134,23 @@ pub struct Session {
 	pub local_counter: MessageCounter,
 	pub transport_cryptography: snow::StatelessTransportState,
 
-	/// Channel the Session uses to send packets to the UDP socket
-	push_channel: PushSender,
-
 	/// Cached sender handles so we don't have to lock the mutex every time we want to send a message.
-	inbound_channels: FastHashMap<NetMsgDomain, InboundMsgSender>,
+	inbound_channels: FastHashMap<NetMsgDomain, BroadcastSender<InboundNetMsgs>>,
 
 	pub disconnect_deliberate: bool,
 
 	/// Valid NetMsg types for our network role.
 	valid_incoming_messages: FastHashSet<NetMsgId>,
+
+	pub channels: SessionChannels,
 }
 
 impl Session {
 	/// Get a message-passing sender for the given NetMsgDomain, caching so we don't have to lock the mutex constantly.
-	fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut InboundMsgSender {
+	fn get_or_susbscribe_inbound_sender(&mut self, domain: NetMsgDomain) -> &mut BroadcastSender<InboundNetMsgs> {
 		self.inbound_channels.entry(domain).or_insert_with(|| {
 			//add_domain(&INBOUND_NET_MESSAGES, &domain);
-			INBOUND_NET_MESSAGES.sender_subscribe(&domain).unwrap()
+			self.channels.net_msg_inbound.sender_subscribe(&domain).unwrap()
 		})
 	}
 
@@ -165,8 +160,8 @@ impl Session {
 		peer_address: SocketAddr,
 		connection: SuccessfulConnect,
 		laminar_config: LaminarConfig,
-		push_channel: PushSender,
 		time: Instant,
+		channels: SessionChannels,
 	) -> Self {
 		let mut laminar_layer =
 			LaminarConnectionManager::new(connection.peer_address, &laminar_config, time);
@@ -193,7 +188,7 @@ impl Session {
 			session_id: connection.session_id,
 			local_counter: connection.transport_counter,
 			transport_cryptography: connection.transport_cryptography,
-			push_channel,
+			channels,
 			inbound_channels: new_fast_hash_map(),
 			valid_incoming_messages,
 			disconnect_deliberate: false,
@@ -340,8 +335,7 @@ impl Session {
 					_ => {
 						//Non-reserved, game-defined net msg IDs.
 						let channel = self.get_or_susbscribe_inbound_sender(message_type);
-						match channel
-							.send(message_buf)
+						match <BroadcastSender<_> as MessageSender<_>>::send(&channel, message_buf)
 							.map_err(|e| SessionLayerError::SendBroadcastError(e))
 						{
 							Ok(_x) => {
@@ -379,8 +373,9 @@ impl Session {
 			}
 		}
 
-		//Send to UDP socket.
-		match self.push_channel.send(processed_reply_buf) {
+		//Send to UDP socket. 
+		//...insists on using Tokio impls for some reason so we have to use this syntax. 
+		match <MpscSender<_> as MessageSender<_>>::send(&self.channels.push_sender, processed_reply_buf) {
 			Ok(()) => {}
 			Err(e) => errors.push(e.into()),
 		}
@@ -407,7 +402,7 @@ impl Session {
 		}
 
 		//Send to UDP socket.
-		match self.push_channel.send(processed_send) {
+		match <MpscSender<_> as MessageSender<_>>::send(&self.channels.push_sender, processed_send) {
 			Ok(()) => {}
 			Err(e) => errors.push(e.into()),
 		}
@@ -487,8 +482,6 @@ impl Session {
 ///
 pub async fn handle_session(
 	mut session_manager: Session,
-	mut incoming_packets: mpsc::UnboundedReceiver<Vec<CiphertextEnvelope>>,
-	mut from_game: BroadcastReceiver<Vec<PacketIntermediary>>,
 	session_tick: Duration,
 	kill_from_inside: mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
 	mut kill_from_outside: tokio::sync::oneshot::Receiver<()>,

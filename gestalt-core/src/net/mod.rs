@@ -10,6 +10,8 @@ use log::error;
 use log::info;
 use log::trace;
 use log::warn;
+use net_channels::NetSystemChannels;
+use net_channels::SessionChannelsFields;
 use std::collections::HashMap;
 
 use snow::StatelessTransportState;
@@ -21,8 +23,8 @@ use crate::common::identity::IdentityKeyPair;
 use crate::common::identity::NodeIdentity;
 use crate::message::MessageSender;
 use crate::message::QuitReceiver;
-use crate::net::net_channels::net_send_channel;
-use crate::net::net_channels::CONNECTED;
+use crate::BuildSubset;
+use crate::SubsetBuilder;
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
@@ -45,7 +47,6 @@ pub use netmsg::PacketIntermediary;
 pub use netmsg::SelfNetworkRole;
 pub use netmsg::DISCONNECT_RESERVED;
 
-use self::net_channels::INBOUND_NET_MESSAGES;
 use self::netmsg::CiphertextEnvelope;
 use self::netmsg::OuterEnvelopeError;
 use self::reliable_udp::*;
@@ -86,6 +87,29 @@ impl SuccessfulConnect {
 	}
 }
 
+/// Represents a client who we are ready to interact with 
+/// (i.e. UDP session is established and ready to go)
+#[derive(Debug, Clone)]
+pub struct ConnectAnnounce {
+	pub peer_identity: NodeIdentity,
+	pub peer_role: NetworkRole,
+}
+
+impl From<&SuccessfulConnect> for ConnectAnnounce {
+	fn from(value: &SuccessfulConnect) -> Self {
+		ConnectAnnounce { 
+			peer_identity: value.peer_identity.clone(),
+			peer_role: value.peer_role.clone(),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct DisconnectAnnounce { 
+	pub peer_identity: NodeIdentity,
+	pub peer_role: NetworkRole,
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum NetworkError {
 	#[error("Error encountered encoding or decoding an outer envelope: {0:?}")]
@@ -99,7 +123,6 @@ pub enum NetworkError {
 pub struct NetworkSystem {
 	pub our_role: SelfNetworkRole,
 	socket: UdpSocket,
-	pub new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
 	pub local_identity: IdentityKeyPair,
 	pub laminar_config: LaminarConfig,
 	pub session_tick_interval: Duration,
@@ -107,8 +130,7 @@ pub struct NetworkSystem {
 	anticipated_clients: HashMap<PartialSessionName, SuccessfulConnect>,
 	recv_buf: Vec<u8>,
 	send_buf: Vec<u8>,
-	push_sender: PushSender,
-	push_receiver: PushReceiver,
+	channels: NetSystemChannels,
 	/// One receiver for each session. Messages come into this UDP handler from sessions, and we have to send them.
 	/// Remember, "Multiple producer single receiver." This is the single receiver.
 	/// Per-session channels for routing incoming UDP packets to sessions.
@@ -128,12 +150,11 @@ impl NetworkSystem {
 	pub async fn new(
 		our_role: SelfNetworkRole,
 		address: SocketAddr,
-		new_connections: mpsc::UnboundedReceiver<SuccessfulConnect>,
 		local_identity: IdentityKeyPair,
 		laminar_config: LaminarConfig,
 		session_tick_interval: Duration,
+		channels: NetSystemChannels,
 	) -> Result<Self, std::io::Error> {
-		let (push_sender, push_receiver): (PushSender, PushReceiver) = mpsc::unbounded_channel();
 		let (kill_from_inside_session_sender, kill_from_inside_session_receiver) =
 			mpsc::unbounded_channel::<(FullSessionName, Vec<SessionLayerError>)>();
 
@@ -147,15 +168,13 @@ impl NetworkSystem {
 		Ok(Self {
 			our_role,
 			socket,
-			new_connections,
 			local_identity,
 			laminar_config,
 			session_tick_interval,
 			anticipated_clients: HashMap::default(),
 			recv_buf: vec![0u8; MAX_MESSAGE_SIZE],
 			send_buf: vec![0u8; MAX_MESSAGE_SIZE],
-			push_sender,
-			push_receiver,
+			channels,
 			inbound_channels: HashMap::default(),
 			kill_from_inside_session_sender,
 			kill_from_inside_session_receiver,
@@ -176,8 +195,8 @@ impl NetworkSystem {
 		);
 
 		//Communication with the rest of the engine.
-		net_channels::register_peer(&connection.peer_identity);
-		match net_send_channel::subscribe_receiver(&connection.peer_identity) {
+		let resl_peer = self.channels.net_msg_outbound.register_peer(connection.peer_identity.clone());
+		match resl_peer {
 			Ok(receiver) => {
 				let peer_identity = connection.peer_identity.clone();
 				trace!("Sender channel successfully registered for {}", peer_identity.to_base64());
@@ -188,8 +207,10 @@ impl NetworkSystem {
 					actual_address.peer_address,
 					connection,
 					self.laminar_config.clone(),
-					self.push_sender.clone(),
 					Instant::now(),
+					self.channels.build_subset(SubsetBuilder::new(SessionChannelsFields{
+						net_msg_outbound: receiver,
+					})).unwrap()
 				);
 
 				// Make a channel
@@ -503,10 +524,8 @@ mod test {
 	use crate::message::SenderSubscribe;
 	use crate::message_types::JoinDefaultEntry;
 	use crate::net::handshake::approver_no_mismatch;
-	use crate::net::net_channels::net_recv_channel;
-	use crate::net::net_channels::net_recv_channel::NetMsgReceiver;
 
-	use super::net_channels::NetSessionSender;
+	use super::net_channels::NetMsgSender;
 	use super::preprotocol::launch_preprotocol_listener;
 	use super::preprotocol::preprotocol_connect_to_server;
 	use super::*;
@@ -649,7 +668,7 @@ mod test {
 		let test = TestNetMsg {
 			message: String::from("Boop!"),
 		};
-		let client_to_server_sender: NetSessionSender<TestNetMsg> =
+		let client_to_server_sender: NetMsgSender<TestNetMsg> =
 			net_send_channel::subscribe_sender(&server_key_pair.public).unwrap();
 		client_to_server_sender.send(test.clone()).unwrap();
 		info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
@@ -670,7 +689,7 @@ mod test {
 		let test_reply = TestNetMsg {
 			message: String::from("Beep!"),
 		};
-		let server_to_client_sender: NetSessionSender<TestNetMsg> =
+		let server_to_client_sender: NetMsgSender<TestNetMsg> =
 			net_send_channel::subscribe_sender(&client_key_pair.public).unwrap();
 		info!("Attempting to send a message to client {}", client_key_pair.public.to_base64());
 		server_to_client_sender.send(test_reply.clone()).unwrap();

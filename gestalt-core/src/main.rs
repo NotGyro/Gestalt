@@ -7,12 +7,14 @@
 #![feature(int_roundings)]
 #![feature(inherent_associated_types)]
 #![feature(array_try_from_fn)]
+#![feature(trivial_bounds)]
 #![allow(clippy::large_enum_variant)]
 
 #[macro_use]
 pub mod common;
 pub mod main_channels;
 pub use common::message;
+use net::net_channels::NetSystemChannelsFields;
 pub use crate::main_channels::*;
 use gestalt_proc_macros::ChannelSet;
 use semver::Version;
@@ -58,7 +60,7 @@ use crate::{
 	},
 	net::{
 		default_protocol_store_dir,
-		net_channels::{net_recv_channel, net_send_channel, NetSessionSender},
+		net_channels::NetMsgSender,
 		preprotocol::{launch_preprotocol_listener, preprotocol_connect_to_server},
 		reliable_udp::LaminarConfig,
 		NetworkSystem, SelfNetworkRole,
@@ -225,6 +227,11 @@ pub async fn protocol_key_change_approver(
 	}
 }
 
+pub fn init_channels() -> MainChannelSet { 
+	let mut conf = ChannelCapacityConf::new(); 
+	MainChannelSet::new(&conf)
+}
+
 #[allow(unused_must_use)]
 fn main() {
 	// Announce the engine launching, for our command-line friends.
@@ -282,6 +289,10 @@ fn main() {
 	if matches!(level_filter, LevelFilter::Trace) {
 		warn!("Verbose logging CAN, OCCASIONALLY, LEAK PRIVATE INFORMATION. \n It is only recommended for debugging purposes. \n Please do not use it for general play.");
 	}
+
+	info!("Initializing main channel set...");
+	let channels = init_channels();
+	info!("Main channel set ready.");
 
 	let key_dir = PathBuf::from("keys/");
 	let keyfile_name = "identity_key";
@@ -346,8 +357,8 @@ fn main() {
 	info!("Setting up channels.");
 
 	async_runtime.spawn(protocol_key_change_approver(
-		PROTOCOL_KEY_REPORTER.receiver_subscribe(),
-		PROTOCOL_KEY_APPROVER.sender_subscribe(),
+		channels.net_channels.key_mismatch_reporter.receiver_subscribe(),
+		channels.net_channels.key_mismatch_approver.sender_subscribe(),
 	));
 
 	let mut laminar_config = LaminarConfig::default();
@@ -378,11 +389,9 @@ fn main() {
 		async_runtime.spawn(launch_preprotocol_listener(
 			keys,
 			None,
-			connect_sender,
 			3223,
 			protocol_store_dir,
-			PROTOCOL_KEY_REPORTER.clone(),
-			PROTOCOL_KEY_APPROVER.clone(),
+			channels.net_channels.build_subset(SubsetBuilder::new(())).unwrap(),
 		));
 
 		info!("Spawning network system task.");
@@ -391,10 +400,12 @@ fn main() {
 			let mut sys = NetworkSystem::new(
 				SelfNetworkRole::Server,
 				udp_address,
-				connect_receiver,
 				keys_for_net,
 				laminar_config,
 				Duration::from_millis(25),
+				channels.net_channels.build_subset(NetSystemChannelsFields {
+					recv_internal_connections: channels.net_channels.internal_connect.take_receiver().unwrap(),
+				}.into()).unwrap(),
 			)
 			.await
 			.unwrap();
@@ -506,7 +517,7 @@ fn main() {
 
 		std::thread::sleep(Duration::from_millis(50));
 
-		let voxel_event_sender: NetSessionSender<VoxelChangeRequest> =
+		let voxel_event_sender: NetMsgSender<VoxelChangeRequest> =
 			net_send_channel::subscribe_sender(&server_identity).unwrap();
 
 		let mut client_join_receiver_from_server =
@@ -557,8 +568,8 @@ fn main() {
 		);*/
 	} else {
 		let (voxel_event_sender, mut voxel_event_receiver) = tokio::sync::broadcast::channel(4096);
-		let voxel_event_sender: NetSessionSender<VoxelChangeRequest> =
-			NetSessionSender::new(voxel_event_sender);
+		let voxel_event_sender: NetMsgSender<VoxelChangeRequest> =
+			NetMsgSender::new(voxel_event_sender);
 
 		let client_voxel_receiver_from_server =
 			net_recv_channel::subscribe::<VoxelChangeAnnounce>().unwrap();

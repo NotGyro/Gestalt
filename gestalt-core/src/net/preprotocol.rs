@@ -24,12 +24,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
 
 use crate::common::identity::{DecodeIdentityError, IdentityKeyPair};
 use crate::common::identity::NodeIdentity;
-use crate::message::{ReceiverSubscribe, SenderSubscribe};
 use crate::net::handshake::{PROTOCOL_NAME, PROTOCOL_VERSION};
+use crate::{BuildSubset, SubsetBuilder};
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -40,6 +39,7 @@ use super::handshake::{
 	load_noise_local_keys, noise_protocol_dir, HandshakeNext, NewProtocolKeyApprover,
 	NewProtocolKeyReporter,
 };
+use super::net_channels::{PreprotocolChannels, PreprotocolSessionChannels};
 use super::{
 	handshake::{HandshakeError, HandshakeInitiator, HandshakeReceiver},
 	SessionId, SuccessfulConnect,
@@ -365,17 +365,16 @@ pub async fn preprotocol_receiver_session(
 							   but I want to leave it flexible for possible future NAT hole-punching shenanigans.*/
 	peer_address: SocketAddr,
 	mut stream: TcpStream,
-	completed_channel: mpsc::UnboundedSender<SuccessfulConnect>,
 	protocol_dir: PathBuf,
-	mismatch_reporter: NewProtocolKeyReporter,
-	mismatch_approver: NewProtocolKeyApprover,
+	channels: PreprotocolSessionChannels,
 ) {
+	let PreprotocolSessionChannels { internal_connect, key_mismatch_reporter, key_mismatch_approver } = channels;
 	let mut receiver = PreProtocolReceiver::new(
 		our_identity,
 		our_role,
 		protocol_dir,
-		mismatch_reporter,
-		mismatch_approver,
+		key_mismatch_reporter,
+		key_mismatch_approver,
 	);
 	while match read_preprotocol_message(&mut stream).await {
 		Ok(msg) => {
@@ -413,7 +412,7 @@ pub async fn preprotocol_receiver_session(
 													};
 
 													info!("A connection to this server was successfully made by client {}", completed.peer_identity.to_base64());
-													completed_channel.send(completed).unwrap();
+													internal_connect.blocking_send(completed).unwrap();
 													// Done with this part, stop sending.
 													false
 												}
@@ -497,18 +496,13 @@ pub async fn preprotocol_receiver_session(
 }
 
 /// Spawns a thread which listens for pre-protocol connections on TCP.
-pub async fn launch_preprotocol_listener<R, A>(
+pub async fn launch_preprotocol_listener(
 	our_identity: IdentityKeyPair,
 	our_address: Option<SocketAddr>,
-	completed_channel: mpsc::UnboundedSender<SuccessfulConnect>,
 	port: u16,
 	protocol_dir: PathBuf,
-	mismatch_report_channel: R,
-	mismatch_approver_channel: A,
-) where
-	R: SenderSubscribe<NodeIdentity, Sender = NewProtocolKeyReporter>,
-	A: ReceiverSubscribe<(NodeIdentity, bool), Receiver = NewProtocolKeyApprover>,
-{
+	channels: PreprotocolChannels,
+) {
 	let ip = match our_address {
 		Some(value) => value,
 		None => SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
@@ -519,7 +513,6 @@ pub async fn launch_preprotocol_listener<R, A>(
 		match listener.accept().await {
 			Ok((stream, peer_address)) => {
 				trace!("New PreProtocol connection: {}", peer_address);
-				let completed_channel_clone = completed_channel.clone();
 				tokio::spawn(
 					// connection succeeded
 					preprotocol_receiver_session(
@@ -527,10 +520,8 @@ pub async fn launch_preprotocol_listener<R, A>(
 						SelfNetworkRole::Server,
 						peer_address,
 						stream,
-						completed_channel_clone,
 						protocol_dir.clone(),
-						mismatch_report_channel.sender_subscribe(),
-						mismatch_approver_channel.receiver_subscribe(),
+						channels.build_subset(SubsetBuilder::new(())).unwrap(),
 					),
 				);
 			}
@@ -648,9 +639,9 @@ pub async fn preprotocol_connect_to_server(
 	server_address: SocketAddr,
 	connect_timeout: Duration,
 	protocol_dir: PathBuf,
-	report_mismatch: NewProtocolKeyReporter,
-	mismatch_approver: NewProtocolKeyApprover,
-) -> Result<SuccessfulConnect, HandshakeError> {
+	channels: PreprotocolSessionChannels,
+) -> Result<(), HandshakeError> {
+	let PreprotocolSessionChannels { internal_connect, key_mismatch_reporter, key_mismatch_approver } = channels;
 	match tokio::time::timeout(connect_timeout, TcpStream::connect(&server_address)).await {
 		Ok(Ok(mut stream)) => {
 			// TODO figure out how connections where the initiator will be a non-client at some point
@@ -660,8 +651,8 @@ pub async fn preprotocol_connect_to_server(
 				SelfNetworkRole::Client,
 				protocol_dir,
 				server_address,
-				report_mismatch,
-				mismatch_approver,
+				key_mismatch_reporter,
+				key_mismatch_approver,
 			)
 			.await
 			{
@@ -671,7 +662,8 @@ pub async fn preprotocol_connect_to_server(
 						completed_connection.peer_identity.to_base64()
 					);
 					stream.shutdown().await.unwrap();
-					Ok(completed_connection)
+					internal_connect.send(completed_connection).await.unwrap();
+					Ok(())
 				}
 				Err(error) => {
 					error!("Handshake error connecting to server: {:?}", error);
@@ -701,13 +693,10 @@ pub async fn preprotocol_connect_to_server(
 pub mod test {
 	use super::*;
 	use crate::{
-		common::identity::IdentityKeyPair,
-		message::{BroadcastChannel, ReceiverSubscribe, SenderSubscribe},
-		net::handshake::approver_no_mismatch,
+		common::identity::IdentityKeyPair, message::{BroadcastChannel, ReceiverSubscribe, SenderSubscribe}, net::handshake::approver_no_mismatch, MessageReceiverAsync, MpscChannel
 	};
 	use std::{net::Ipv6Addr, time::Duration};
-	use tokio::sync::mpsc;
-
+	
 	async fn find_available_port(range: std::ops::Range<u16>) -> Option<u16> {
 		for i in range {
 			match TcpListener::bind((Ipv6Addr::LOCALHOST, i)).await {
@@ -726,10 +715,22 @@ pub mod test {
 		let protocol_dir = tempfile::tempdir().unwrap();
 
 		//Mismatch approver stuff.
-		let mismatch_report_channel = BroadcastChannel::new(1024);
-		let mismatch_approve_channel = BroadcastChannel::new(1024);
-		let mismatch_report_receiver = mismatch_report_channel.receiver_subscribe();
-		let mismatch_approve_sender = mismatch_approve_channel.sender_subscribe();
+		let server_channels = PreprotocolChannels { 
+			internal_connect: MpscChannel::new(1024),
+			key_mismatch_reporter: BroadcastChannel::new(1024), 
+			key_mismatch_approver: BroadcastChannel::new(1024) 
+		};
+		let mismatch_report_receiver = server_channels.key_mismatch_reporter.receiver_subscribe();
+		let mismatch_approve_sender = server_channels.key_mismatch_approver.sender_subscribe();
+		// Spawn our little "explode if the key isn't new" system.
+		tokio::spawn(approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender));
+		let client_channels = PreprotocolChannels { 
+			internal_connect: MpscChannel::new(1024),
+			key_mismatch_reporter: BroadcastChannel::new(1024), 
+			key_mismatch_approver: BroadcastChannel::new(1024) 
+		};
+		let mismatch_report_receiver = client_channels.key_mismatch_reporter.receiver_subscribe();
+		let mismatch_approve_sender = client_channels.key_mismatch_approver.sender_subscribe();
 		// Spawn our little "explode if the key isn't new" system.
 		tokio::spawn(approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender));
 
@@ -738,8 +739,6 @@ pub mod test {
 
 		let server_key_pair = IdentityKeyPair::generate_for_tests();
 		let client_key_pair = IdentityKeyPair::generate_for_tests();
-		let (serv_completed_sender, mut serv_completed_receiver) = mpsc::unbounded_channel();
-		let (client_completed_sender, mut client_completed_receiver) = mpsc::unbounded_channel();
 		let connect_timeout = Duration::from_secs(2);
 
 		let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
@@ -748,36 +747,33 @@ pub mod test {
 		tokio::spawn(launch_preprotocol_listener(
 			server_key_pair,
 			Some(server_socket_addr),
-			serv_completed_sender,
 			port,
 			PathBuf::from(protocol_dir.path()),
-			mismatch_report_channel.clone(),
-			mismatch_approve_channel.clone(),
+			server_channels.clone(),
 		));
 		//Give it a moment
 		tokio::time::sleep(Duration::from_millis(100)).await;
 		//Try to connect
-		let client_connection = preprotocol_connect_to_server(
+		preprotocol_connect_to_server(
 			client_key_pair,
 			server_socket_addr,
 			connect_timeout,
 			PathBuf::from(protocol_dir.path()),
-			mismatch_report_channel.sender_subscribe(),
-			mismatch_approve_channel.receiver_subscribe(),
+			client_channels.build_subset(SubsetBuilder::new(())).unwrap(),
 		)
 		.await
 		.unwrap();
-		client_completed_sender.send(client_connection).unwrap();
 
 		let success_timeout = Duration::from_secs(2);
 		//Make sure it has a little time to complete this.
+		
 		let successful_server_end =
-			tokio::time::timeout(success_timeout, serv_completed_receiver.recv())
+			tokio::time::timeout(success_timeout, server_channels.internal_connect.take_receiver().unwrap().recv_wait())
 				.await
 				.unwrap()
 				.unwrap();
 		let successful_client_end =
-			tokio::time::timeout(success_timeout, client_completed_receiver.recv())
+			tokio::time::timeout(success_timeout, client_channels.internal_connect.take_receiver().unwrap().recv_wait())
 				.await
 				.unwrap()
 				.unwrap();
