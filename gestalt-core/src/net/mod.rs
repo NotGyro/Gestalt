@@ -492,7 +492,8 @@ impl NetworkSystem {
 #[cfg(test)]
 mod test {
 	use std::net::IpAddr;
-	use std::net::Ipv6Addr;
+	use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 
 	use crate::message::quit_game;
 	use crate::message::MessageReceiverAsync;
@@ -560,10 +561,11 @@ use crate::SubsetBuilder;
 		tokio::spawn(approver_no_mismatch(client_channel_set.key_mismatch_reporter.receiver_subscribe(), client_channel_set.key_mismatch_approver.sender_subscribe()));
 
 		// Port/binding stuff.
-		let start_find_port = tokio::time::Instant::now();
-		let port = find_available_udp_port(54134..54534).await.unwrap();
+		//let start_find_port = tokio::time::Instant::now();
+		// If none of these work, we're probably on GH Actions. 
+		let port = find_available_udp_port(54134..54534).await.unwrap_or(8080);
 		info!("Binding on port {}", port);
-		info!("Finding a port took {:?}", start_find_port.elapsed());
+		//info!("Finding a port took {:?}", start_find_port.elapsed());
 
 		let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
 		let server_socket_addr = SocketAddr::new(server_addr, port);

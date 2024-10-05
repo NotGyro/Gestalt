@@ -742,8 +742,8 @@ pub mod test {
 		// Spawn our little "explode if the key isn't new" system.
 		tokio::spawn(approver_no_mismatch(mismatch_report_receiver, mismatch_approve_sender));
 
-		// Find an available port
-		let port = find_available_port(3223..4223).await.unwrap();
+		// Find an available port. If none of these work, we're probably on GH Actions.
+		let port = find_available_port(3223..4223).await.unwrap_or(8080);
 
 		let server_key_pair = IdentityKeyPair::generate_for_tests();
 		let client_key_pair = IdentityKeyPair::generate_for_tests();
