@@ -1278,8 +1278,8 @@ pub mod test {
 		let player_identity = IdentityKeyPair::generate_for_tests().public;
 		let some_other_player_identity = IdentityKeyPair::generate_for_tests().public;
 
-		TEST_DOMAIN_CHANNEL.init_domain(player_identity.clone());
-		TEST_DOMAIN_CHANNEL.init_domain(some_other_player_identity.clone());
+		let _ = TEST_DOMAIN_CHANNEL.init_domain(player_identity.clone());
+		let _ = TEST_DOMAIN_CHANNEL.init_domain(some_other_player_identity.clone());
 		let sender = TEST_DOMAIN_CHANNEL
 			.sender_subscribe(&player_identity)
 			.unwrap();
@@ -1365,17 +1365,76 @@ pub mod test {
 	}
 	#[tokio::test(flavor = "multi_thread")]
 	async fn channel_set_domains() {
-		static_channel_atom!(DividedChannel, DomainMultiChannel<usize, NodeIdentity, BroadcastChannel<usize>>, usize, NodeIdentity, 128);
+		use super::MessageReceiver;
+		static_channel_atom!(DividedChannel, DomainMultiChannel<String, NodeIdentity, MpscChannel<String>>, String, NodeIdentity, 128);
 	
 		#[derive(ChannelSet)]
 		struct ChannelSetTestA {
-			#[channel(DividedChannel)]
-			pub chan1: <DividedChannel as StaticChannelAtom>::Channel,
+			#[channel(DividedChannel, new_channel)]
+			pub foo: <DividedChannel as StaticChannelAtom>::Channel,
 		}
 		#[derive(ChannelSet)]
-		struct ChannelSetTestB {
-			#[receiver(DividedChannel, domain = "server")]
-			pub bar: <BroadcastChannel<usize> as ReceiverChannel<usize>>::Receiver,
+		struct CChannels {
+			#[take_receiver(DividedChannel, domain = "our_ident")]
+			pub foo: <MpscChannel<String> as ReceiverChannel<String>>::Receiver,
 		}
+		#[derive(ChannelSet)]
+		struct SChannels {
+			#[sender(DividedChannel, domain = "client")]
+			pub bar: <MpscChannel<String> as SenderChannel<String>>::Sender,
+		}
+
+		let parent_set = ChannelSetTestA::new(SubsetBuilder::new(()));
+		let client_a_keys = IdentityKeyPair::generate_for_tests();
+		let client_b_keys = IdentityKeyPair::generate_for_tests();
+		//let server_keys =  = IdentityKeyPair::generate_for_tests();
+
+		parent_set.foo.init_domain(client_a_keys.public.clone()).unwrap();
+		parent_set.foo.init_domain(client_b_keys.public.clone()).unwrap();
+
+		let mut client_a: CChannels = parent_set.build_subset(SubsetBuilder::new(CChannelsFields{
+			our_ident_domain: client_a_keys.public.clone(),
+		})).unwrap();
+
+		let mut client_b: CChannels = parent_set.build_subset(SubsetBuilder::new(CChannelsFields{
+			our_ident_domain: client_b_keys.public.clone(),
+		})).unwrap();
+
+		let server_to_client_a: SChannels = parent_set.build_subset(SubsetBuilder::new(SChannelsFields{
+			client_domain: client_a_keys.public.clone(),
+		})).unwrap();
+		let server_to_client_b: SChannels = parent_set.build_subset(SubsetBuilder::new(SChannelsFields{
+			client_domain: client_b_keys.public.clone(),
+		})).unwrap();
+
+		let message_to_a = String::from("William Lawrence");
+		let message_to_b = String::from("Temeraire");
+
+		server_to_client_a.bar.send(message_to_a.clone()).unwrap();
+
+		assert_eq!(client_a.foo.recv_poll().as_ref().map(|o| o.as_ref()), Ok(Some(&message_to_a)));
+		// Only one message.
+		assert_eq!(client_a.foo.recv_poll(), Ok(None));
+		// Only to one domain. 
+		assert_eq!(client_b.foo.recv_poll(), Ok(None));
+
+		server_to_client_b.bar.send(message_to_b.clone()).unwrap();
+
+		assert_eq!(client_b.foo.recv_poll().as_ref().map(|o| o.as_ref()), Ok(Some(&message_to_b)));
+		// Only one message.
+		assert_eq!(client_b.foo.recv_poll(), Ok(None));
+		// Only to one domain. 
+		assert_eq!(client_a.foo.recv_poll(), Ok(None));
+
+		let broadcaster = parent_set.foo.sender_subscribe_all();
+
+		let message = String::from("Vizlet");
+
+		broadcaster.send_to_all(message.clone()).unwrap(); 
+		assert_eq!(client_a.foo.recv_poll().as_ref().map(|o| o.as_ref()), Ok(Some(&message)));
+		assert_eq!(client_b.foo.recv_poll().as_ref().map(|o| o.as_ref()), Ok(Some(&message)));
+		assert_eq!(client_a.foo.recv_poll(), Ok(None));
+		assert_eq!(client_b.foo.recv_poll(), Ok(None));
+
 	}
 }
