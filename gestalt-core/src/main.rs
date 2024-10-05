@@ -315,7 +315,7 @@ fn main() {
 								//world_space.set(event.pos, event.new_tile).unwrap();
 								info!("Received {:?} from {}", &event, ident.to_base64());
 								let announce: VoxelChangeAnnounce = event.into();
-								net_msg_broadcast.send(MessageIgnoreEndpoint{inner_message: vec![announce.clone().construct_packet().unwrap()], ignore_domain: Some(ident.clone())}).unwrap();
+								net_msg_broadcast.send_to_all_except(vec![announce.clone().construct_packet().unwrap()], &ident).unwrap();
 								total_changes.push(announce);
 							}
 						}
@@ -328,7 +328,7 @@ fn main() {
 									display_name: event.display_name,
 									identity: ident,
 								};
-								net_msg_broadcast.send(MessageIgnoreEndpoint{inner_message: vec![announce.clone().construct_packet().unwrap()], ignore_domain: Some(ident.clone())}).unwrap();
+								net_msg_broadcast.send_to_all_except(vec![announce.clone().construct_packet().unwrap()], &ident).unwrap();
 								info!("Sending all previous changes to the newly-joined user.");
 
 								let sender_to_new_join = net_channels.net_msg_outbound.sender_subscribe_domain(&ident).unwrap();

@@ -619,162 +619,57 @@ where
 	AlreadyExists(D),
 }
 
-// Janky hack to permit send_to_all_except() to work over the broadcast "all" sender.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MessageIgnoreEndpoint<T,D> {
-	pub inner_message: T,
-	pub ignore_domain: Option<D>,
-}
-impl<T,D> MessageIgnoreEndpoint<T,D> { 
-	/// WARNING: Skips ignoring `ignore_domain` so make sure your behavior really doesn't rely
-	/// on that, or that you've done this checking elsewhere.
-	pub fn inner(self) -> T { 
-		self.inner_message
-	}
-}
-
-impl<T,D> From<T> for MessageIgnoreEndpoint<T,D> {
-	fn from(value: T) -> Self {
-		MessageIgnoreEndpoint { 
-			inner_message: value,
-			ignore_domain: None,
-		}
-	}
-}
-
 #[derive(Clone)]
-pub struct AllAndOneSender<T, D, C>
-where
+pub struct MultiDomainSender<T, D, C> where
 	T: Message,
-	D: ChannelDomain,
-	C: MessageSender<T> {
-	pub domain: D,
-	pub(super) primary_channel: C,
-	pub(super) all_channel: BroadcastSender<MessageIgnoreEndpoint<T, D>>,
+	D: ChannelDomain, {
+	channels: Arc<ChannelMutex<std::collections::HashMap<D, C>>>,
+	_message_ty_phantom: PhantomData<T>,
 }
 
-impl<T,D,C> MessageSender<T> for AllAndOneSender<T, D, C> 
-where
+impl<T,D,C> From<Arc<ChannelMutex<std::collections::HashMap<D, C>>>> for MultiDomainSender<T,D,C>  where
 	T: Message,
-	D: ChannelDomain,
-	C: MessageSender<T> {
-	fn send(&self, message: T) -> Result<(), SendError> {
-		AllAndOneSender::send(self, message)
-	}
-}
-
-impl<T, D, C>  AllAndOneSender<T, D, C> 
-where
-	T: Message,
-	D: ChannelDomain,
-	C: MessageSender<T> {
-	pub fn send(&self, message: T) -> Result<(), SendError> {
-		self.primary_channel.send(message.into())
-	}
-
-	pub fn send_to_all(&self, message: T) -> Result<usize, SendError> {
-		self.all_channel.send(message.into()).map_err(|e| e.into())
-	}
-
-	pub fn send_to_all_except(&self, message: T, exclude: &D) -> Result<usize, SendError> {
-		self.all_channel.send(MessageIgnoreEndpoint { 
-			inner_message: message, 
-			ignore_domain: Some(exclude.clone())
-		}).map_err(|e| e.into())
-	}
-}
-
-pub struct AllAndOneReceiver<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: MessageReceiver<T> {
-	pub domain: D,
-	pub(super) last_was_primary: bool,
-	pub(super) primary_channel: C,
-	pub(super) all_channel: BroadcastReceiver<MessageIgnoreEndpoint<T, D>>,
-}
-
-impl<T, D, C> AllAndOneReceiver<T,D,C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: MessageReceiver<T> {
-	pub fn new(inner: C, all: BroadcastReceiver<MessageIgnoreEndpoint<T, D>>, domain: D) -> Self {
-		Self {
-			domain,
-			last_was_primary: false,
-			primary_channel: inner,
-			all_channel: all,
+	D: ChannelDomain, {
+	fn from(value: Arc<ChannelMutex<std::collections::HashMap<D, C>>>) -> Self {
+		Self { 
+			channels: value, 
+			_message_ty_phantom: PhantomData,
 		}
 	}
 }
 
-impl<T, D, C> MessageReceiver<T> for AllAndOneReceiver<T, D, C> 
+impl<T,D,C> DomainMessageSender<T, D> for MultiDomainSender<T, D, C>
 where
 	T: Message + Clone,
 	D: ChannelDomain,
-	C: MessageReceiver<T> {
-	fn recv_poll(&mut self) -> Result<Option<T>, RecvError> {
-		// Loop check broadcast channel until it either provides a message we can use or is empty.
-		// If it is empty, or if our previous message was from broadcast, try primary_channel.
-		// The intent is to round-robin viable messages.
-		while self.last_was_primary {
-			match self.all_channel.recv_poll()? { 
-				Some(msg) => { 
-					// Only propagate this copy of the message if it's not excluding us. 
-					if msg.ignore_domain.as_ref() != Some(&self.domain) { 
-						// Only set last_was_primary to false and break out of the loop if we actually find something.
-						self.last_was_primary = false;
-						return Ok(Some(msg.inner_message));
-					}
-				}
-				None => {
-					// Empty receiver, break loop and check primary.
-					break;
-				}
+	C: ChannelInit + MessageSender<T>,
+{
+	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError> {
+		match self.channels.lock().get(domain) {
+			Some(chan) => chan
+				.send(message)
+				.map_err(|_e| SendError::NoReceivers)
+				.map(|_val| ()),
+			None => Err(SendError::MissingDomain(format!("{:?}", domain))),
+		}
+	}
+
+	fn send_to_all(&self, message: T) -> Result<(), SendError> {
+		for chan in self.channels.lock().values() {
+			chan.send(message.clone())?;
+		}
+		Ok(())
+	}
+
+	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError> {
+		for (domain, chan) in self.channels.lock().iter() {
+			if domain != exclude {
+				chan.send(message.clone())?;
 			}
 		}
-		self.last_was_primary = true;
-		self.primary_channel.recv_poll()
+		Ok(())
 	}
 }
-
-impl<T, D, C> MessageReceiverAsync<T> for AllAndOneReceiver<T, D, C> 
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: MessageReceiverAsync<T> {
-	fn recv_wait(&mut self) -> impl Future<Output = Result<T, RecvError>> + '_ {
-		let self_domain = self.domain.clone();
-		// See if we perhaps do not need to wait at all.
-		let initial_poll_result = self.recv_poll();
-		async move {
-			match initial_poll_result {
-				Ok(Some(value)) => Ok(value),
-				Err(e) => Err(e),
-				Ok(None) => {
-					loop {
-						tokio::select! {
-							resl = self.primary_channel.recv_wait() => {
-								return resl;
-							}
-							resl = self.all_channel.recv_wait() => {
-								if resl.as_ref().is_ok_and(|v| v.ignore_domain.as_ref() == Some(&self_domain)) {
-									continue;
-								}
-								else { 
-									return resl.map(|v| v.inner_message);
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
 #[derive(Clone)]
 pub struct DomainMultiChannel<T, D, C>
 where
@@ -804,15 +699,9 @@ where
 			.sender_subscribe())
 	}
 
-	/*
-	pub fn sender_subscribe_all(&mut self) -> MultiDomainSender<T,D> {
-		let subscribe_all: HashMap<D, MessageSender<T>> = self.channels.iter_mut().map(|(k, v)| {
-			(k.clone(), v.sender_subscribe())
-		}).collect();
-		MultiDomainSender::new(subscribe_all,
-			self.new_domain_sender.subscribe(),
-			self.dropped_domain_sender.subscribe())
-	}*/
+	pub fn sender_subscribe_all(&self) -> MultiDomainSender<T,D, C> {
+		MultiDomainSender::from(self.channels.clone())
+	}
 
 	/// Adds a new domain if it isn't there yet, takes no action if one is already present.
 	pub fn init_domain(&self, domain: D) -> Result<(), NewDomainErr<D>> {
@@ -936,121 +825,6 @@ where
 		}
 	}
 }
-#[derive(Clone)]
-pub struct DomainBroadcastChannel<T, D, C>
-where
-	T: Message,
-	D: ChannelDomain,
-{
-	inner: DomainMultiChannel<T, D, C>, 
-	broadcaster: BroadcastChannel<MessageIgnoreEndpoint<T, D>>,
-}
-
-impl<T, D, C> DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: SenderSubscribe<T> + ChannelInit,
-{
-	/// Construct a Domain Multichannel system.
-	pub fn new(capacity: usize) -> Self {
-		DomainBroadcastChannel {
-			inner: DomainMultiChannel::new(capacity),
-			broadcaster: BroadcastChannel::new(capacity),
-		}
-	}
-
-	pub fn sender_subscribe(&self, domain: &D) -> Result<AllAndOneSender<T, D, C::Sender>, DomainSubscribeErr<D>> {
-		let inner_channel = self.inner.sender_subscribe(domain)?;
-		Ok(AllAndOneSender {
-			domain: domain.clone(),
-			primary_channel: inner_channel,
-			all_channel: self.broadcaster.sender_subscribe(),
-		})
-	}
-
-	pub fn sender_subscribe_all(&self) -> BroadcastSender<MessageIgnoreEndpoint<T, D>> {
-		self.broadcaster.sender_subscribe()
-	}
-	pub fn receiver_subscribe_all(&self) -> BroadcastReceiver<MessageIgnoreEndpoint<T, D>> {
-		self.broadcaster.receiver_subscribe()
-	}
-
-	/// Adds a new domain if it isn't there yet, takes no action if one is already present.
-	pub fn init_domain(&self, domain: D) -> Result<(), NewDomainErr<D>> {
-		self.inner.init_domain(domain)
-	}
-	/// Adds a channel generated externally to this domain-multi-channel
-	pub fn add_channel(&self, domain: D, channel: C) -> Result<(), NewDomainErr<D>> { 
-		self.inner.add_channel(domain, channel)
-	}
-
-	pub fn drop_domain(&self, domain: &D) {
-		self.inner.drop_domain(domain);
-	}
-
-	pub fn get_capacity(&self) -> usize { 
-		self.inner.get_capacity()
-	}
-}
-
-impl<T, D, C> DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: ReceiverSubscribe<T> + ChannelInit,
-	<C as ReceiverChannel<T>>::Receiver: MessageReceiver<T>,
-{
-	pub fn receiver_subscribe(&self, domain: &D) -> Result<AllAndOneReceiver<T, D, C::Receiver>, DomainSubscribeErr<D>> {
-		let inner_receiver = self.inner.receiver_subscribe(domain)?; 
-		Ok(AllAndOneReceiver{ 
-			domain: domain.clone(), 
-			last_was_primary: false,
-			primary_channel: inner_receiver,
-			all_channel: self.broadcaster.receiver_subscribe()
-		})
-	}
-}
-
-impl<T, D, C> DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: TakeReceiver<T>,
-	<C as ReceiverChannel<T>>::Receiver: MessageReceiver<T>,
-{
-	pub fn take_receiver(&self, domain: &D) -> Result<AllAndOneReceiver<T, D, C::Receiver>, DomainSubscribeErr<D>> {
-		let inner_receiver = self.inner.take_receiver(domain)?; 
-		Ok(AllAndOneReceiver{ 
-			domain: domain.clone(), 
-			last_was_primary: false,
-			primary_channel: inner_receiver,
-			all_channel: self.broadcaster.receiver_subscribe()
-		})
-	}
-}
-
-impl<T, D, C> DomainMessageSender<T, D> for DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: SenderSubscribe<T> + ChannelInit + MessageSender<T>,
-{
-	fn send_to(&self, message: T, domain: &D) -> Result<(), SendError> {
-		self.inner.send_to(message, domain)
-	}
-
-	fn send_to_all(&self, message: T) -> Result<(), SendError> {
-		self.broadcaster.send(message).map_err(|e| e.into())
-	}
-
-	fn send_to_all_except(&self, message: T, exclude: &D) -> Result<(), SendError> {
-		self.broadcaster.send(MessageIgnoreEndpoint{ 
-			inner_message: message, 
-			ignore_domain: Some(exclude.clone()),
-		}).map_err(|e| e.into())
-	}
-}
 
 impl<T, D, C> SenderChannel<T> for DomainMultiChannel<T, D, C>
 where
@@ -1068,24 +842,6 @@ where
 	C: ReceiverChannel<T>,
 {
 	type Receiver = C::Receiver;
-}
-
-impl<T, D, C> SenderChannel<T> for DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: SenderChannel<T>,
-{
-	type Sender = AllAndOneSender<T, D, C::Sender>;
-}
-
-impl<T, D, C> ReceiverChannel<T> for DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: ReceiverChannel<T>,
-{
-	type Receiver = AllAndOneReceiver<T, D, C::Receiver>;
 }
 
 pub trait DomainSenderSubscribe<T, D> : SenderChannel<T>
@@ -1107,26 +863,6 @@ where
 	// receiver is not something we can subscribe to.
 
 	fn receiver_subscribe_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>>;
-}
-impl<T, D, C> DomainSenderSubscribe<T,D> for DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: SenderSubscribe<T> + ChannelInit,
-{
-	fn sender_subscribe_domain(&self, domain: &D) -> Result<Self::Sender, DomainSubscribeErr<D>> {
-		DomainBroadcastChannel::sender_subscribe(self, domain)
-	}
-}
-impl<T, D, C> DomainReceiverSubscribe<T, D> for DomainBroadcastChannel<T, D, C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: ReceiverSubscribe<T> + ChannelInit,
-{
-	fn receiver_subscribe_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
-		DomainBroadcastChannel::receiver_subscribe(self, domain)
-	}
 }
 
 impl<T, D, C> DomainSenderSubscribe<T, D> for DomainMultiChannel<T, D, C>
@@ -1157,16 +893,6 @@ where
 }
 
 impl<T, D, C> DomainTakeReceiver<T, D> for DomainMultiChannel<T,D,C>
-where
-	T: Message + Clone,
-	D: ChannelDomain,
-	C: TakeReceiver<T>,
-{
-	fn take_receiver_domain(&self, domain: &D) -> Result<Self::Receiver, DomainSubscribeErr<D>> {
-		self.take_receiver(domain)
-	}
-}
-impl<T, D, C> DomainTakeReceiver<T, D> for DomainBroadcastChannel<T,D,C>
 where
 	T: Message + Clone,
 	D: ChannelDomain,
@@ -1639,7 +1365,7 @@ pub mod test {
 	}
 	#[tokio::test(flavor = "multi_thread")]
 	async fn channel_set_domains() {
-		static_channel_atom!(DividedChannel, DomainBroadcastChannel<usize, NodeIdentity, BroadcastChannel<usize>>, usize, NodeIdentity, 128);
+		static_channel_atom!(DividedChannel, DomainMultiChannel<usize, NodeIdentity, BroadcastChannel<usize>>, usize, NodeIdentity, 128);
 	
 		#[derive(ChannelSet)]
 		struct ChannelSetTestA {
@@ -1649,7 +1375,7 @@ pub mod test {
 		#[derive(ChannelSet)]
 		struct ChannelSetTestB {
 			#[receiver(DividedChannel, domain = "server")]
-			pub bar: AllAndOneReceiver<usize, NodeIdentity, BroadcastReceiver<usize>>,
+			pub bar: <BroadcastChannel<usize> as ReceiverChannel<usize>>::Receiver,
 		}
 	}
 }

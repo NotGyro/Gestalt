@@ -17,7 +17,6 @@ use std::collections::HashMap;
 
 use snow::StatelessTransportState;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::common::identity::IdentityKeyPair;
@@ -29,7 +28,6 @@ use crate::DomainMessageSender;
 use crate::MessageReceiver;
 use crate::MessageReceiverAsync;
 use crate::MpscReceiver;
-use crate::SubsetBuilder;
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 
@@ -138,17 +136,8 @@ pub struct NetworkSystem {
 	channels: NetSystemChannels,
 	/// Taken from channels.session_to_socket for convenience.
 	push_receiver: MpscReceiver<OutboundRawPackets>,
-	/// One receiver for each session. Messages come into this UDP handler from sessions, and we have to send them.
-	/// Remember, "Multiple producer single receiver." This is the single receiver.
-	/// Per-session channels for routing incoming UDP packets to sessions.
-	inbound_channels: HashMap<FullSessionName, mpsc::UnboundedSender<Vec<CiphertextEnvelope>>>,
-	/// This is how the session objects let us know it's their time to go.
-	kill_from_inside_session_sender:
-		mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
-	kill_from_inside_session_receiver:
-		mpsc::UnboundedReceiver<(FullSessionName, Vec<SessionLayerError>)>,
-	/// This is how we shoot the other task in the head.
-	session_kill_from_outside: HashMap<FullSessionName, tokio::sync::oneshot::Sender<()>>,
+	/// Taken from channels.session_to_socket for convenience.
+	kill_from_session: MpscReceiver<(session::FullSessionName, Vec<session::SessionLayerError>)>,
 	session_to_identity: HashMap<FullSessionName, NodeIdentity>,
 	join_handles: Vec<JoinHandle<()>>,
 }
@@ -162,9 +151,7 @@ impl NetworkSystem {
 		session_tick_interval: Duration,
 		channels: NetSystemChannels,
 	) -> Result<Self, std::io::Error> {
-		let (kill_from_inside_session_sender, kill_from_inside_session_receiver) =
-			mpsc::unbounded_channel::<(FullSessionName, Vec<SessionLayerError>)>();
-
+		
 		let socket = match our_role {
 			SelfNetworkRole::Server => UdpSocket::bind(address).await?,
 			SelfNetworkRole::Client => {
@@ -182,11 +169,8 @@ impl NetworkSystem {
 			recv_buf: vec![0u8; MAX_MESSAGE_SIZE],
 			send_buf: vec![0u8; MAX_MESSAGE_SIZE],
 			push_receiver: channels.session_to_socket.take_receiver().unwrap(),
+			kill_from_session: channels.kill_from_session.take_receiver().unwrap(),
 			channels,
-			inbound_channels: HashMap::default(),
-			kill_from_inside_session_sender,
-			kill_from_inside_session_receiver,
-			session_kill_from_outside: HashMap::default(),
 			session_to_identity: HashMap::default(),
 			join_handles: Vec::default(),
 		})
@@ -202,7 +186,8 @@ impl NetworkSystem {
 			&connection.transport_counter
 		);
 		let peer_role = connection.peer_role.clone();
-		self.channels.net_msg_outbound.init_peer(connection.peer_identity.clone());
+		self.channels.init_peer(actual_address.clone(), connection.peer_identity.clone());
+		let system_kill_session = self.channels.system_kill_session.take_receiver(&actual_address).unwrap();
 		//Communication with the rest of the engine.
 		let resl_channels = self.channels.build_subset(SessionChannelsFields{
 			// session ID
@@ -225,20 +210,6 @@ impl NetworkSystem {
 					channels,
 				);
 
-				// Make a channel
-				let (from_net_sender, from_net_receiver) = mpsc::unbounded_channel();
-				self.inbound_channels
-					.insert(actual_address, from_net_sender);
-
-				let (kill_from_outside_sender, kill_from_outside_receiver) =
-					tokio::sync::oneshot::channel::<()>();
-				self.session_kill_from_outside
-					.insert(session.get_session_name(), kill_from_outside_sender);
-
-				let killer_clone = self.kill_from_inside_session_sender.clone();
-				self.session_to_identity
-					.insert(session.get_session_name(), session.peer_identity.clone());
-
 				let session_tick_interval = self.session_tick_interval.clone();
 				let our_role = self.our_role.clone();
 				let jh = tokio::spawn(async move {
@@ -253,8 +224,7 @@ impl NetworkSystem {
 					handle_session(
 						session,
 						session_tick_interval,
-						killer_clone,
-						kill_from_outside_receiver,
+						system_kill_session
 					)
 					.await
 				});
@@ -298,14 +268,10 @@ impl NetworkSystem {
                 }
 			}
 		}
-		let nuke: Vec<_> = self.session_kill_from_outside.drain().collect();
 		// Notify sessions we're done.
-		for (session, channel) in nuke {
-			info!(
-				"Terminating session with peer {}",
-				self.session_to_identity.get(&session).unwrap().to_base64()
-			);
-			channel.send(()).unwrap();
+		for (session, ident) in self.session_to_identity.iter() {
+			info!("Terminating session with peer {ident:#?}");
+			self.channels.system_kill_session.send_to((), session).unwrap();
 		}
 		tokio::time::sleep(Duration::from_millis(10)).await;
 		for jh in &self.join_handles {
@@ -315,7 +281,7 @@ impl NetworkSystem {
 		info!("Network system should be safe to shut down.");
 	}
 	pub async fn wait_for_ready(&mut self) -> Result<(), NetworkError> {
-		match (self.our_role, self.inbound_channels.len()) {
+		match (self.our_role, self.session_to_identity.len()) {
 			// We're a client (i.e. not listening) and have no connections yet,
 			// make sure we are connected so we don't try to receive from nobody.
 			(SelfNetworkRole::Client, 0) => {
@@ -415,14 +381,14 @@ impl NetworkSystem {
 								Ok((message, len_message)) => {
 									assert_eq!(len_read, len_message); //TODO: Figure out if the socket will ever act in a way which breaks this assumption.
 									let OuterEnvelope{session: session_name, body: message_body} = message;
-									match self.inbound_channels.get(&message.session) {
-										Some(sender) => {
+									match self.channels.raw_to_session.sender_subscribe(&message.session) {
+										Ok(sender) => {
 											sender.send(vec!(CiphertextEnvelope{
 												session: session_name,
 												body: message_body
 											})).expect("Unable to send ciphertext envelope on session.");
 										},
-										None => {
+										Err(_) => {
 											if self.our_role == SelfNetworkRole::Server {
 												// Reconstruct the partial session name so we can do a lookup with it.
 												let partial_session_name = PartialSessionName {
@@ -439,7 +405,7 @@ impl NetworkSystem {
 														match self.add_new_session(session_name, connection).await {
 															Ok(()) => {
 																// Push the message we just got from the rest of the engine out to the network.
-																if let Some(sender) = self.inbound_channels.get(&session_name) {
+																if let Ok(sender) = self.channels.raw_to_session.sender_subscribe(&session_name) {
 																	sender.send(vec!(CiphertextEnvelope{
 																		session: session_name,
 																		body: message_body
@@ -455,7 +421,7 @@ impl NetworkSystem {
 														}
 													},
 													None => {
-														error!("No session established yet for {:?}", &session_name);
+														error!("Client sent session name {:?}, but no session has yet been established!", &session_name);
 													},
 												}
 											}
@@ -498,8 +464,8 @@ impl NetworkSystem {
 					}
 				}
 				// Has one of our sessions failed or disconnected?
-				kill_maybe = (&mut self.kill_from_inside_session_receiver).recv() => {
-					if let Some((session_kill, errors)) = kill_maybe {
+				kill_maybe = (&mut self.kill_from_session).recv_wait() => {
+					if let Ok((session_kill, errors)) = kill_maybe {
 						let ident = self.session_to_identity.get(&session_kill).unwrap().clone();
 						if errors.is_empty() {
 							info!("Closing connection for a session with {:?}.", &ident);
@@ -507,10 +473,9 @@ impl NetworkSystem {
 						else {
 							info!("Closing connection for a session with {:?}, due to errors: {:?}", &ident, errors);
 						}
-						self.inbound_channels.remove(&session_kill);
-						self.session_kill_from_outside.remove(&session_kill);
+						// Todo: self.channels.drop_peer
+						self.channels.drop_peer(&session_kill, &ident);
 						let _ = self.session_to_identity.remove(&session_kill);
-						self.channels.net_msg_outbound.drop_peer(&ident);
 					}
 				}
 				quit_ready_indicator = quit_reciever.wait_for_quit() => {
@@ -538,6 +503,7 @@ mod test {
 	use crate::net::handshake::approver_no_mismatch;
 	use crate::ChannelCapacityConf;
 	use crate::DomainSenderSubscribe;
+use crate::SubsetBuilder;
 	use super::preprotocol::launch_preprotocol_listener;
 	use super::preprotocol::preprotocol_connect_to_server;
 	use super::*;

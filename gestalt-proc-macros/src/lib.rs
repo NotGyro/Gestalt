@@ -6,7 +6,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenTree;
 use quote::{quote, ToTokens, format_ident};
 use syn::parse::{Parse, ParseStream};
-use syn::{parse_macro_input, DeriveInput, Field, Ident, LitInt, MetaList, Token, Type};
+use syn::{parse_macro_input, DeriveInput, Ident, LitInt, MetaList, Token, Type};
 extern crate proc_macro2;
 
 struct NetMsgAttr {
@@ -333,7 +333,7 @@ impl IdentifiedChannel {
 			},
 		})
 	}
-	pub fn static_builder_field(&self) -> Option<proc_macro2::TokenStream> {
+	pub fn static_builder_field(&self, domain_already_impl: &mut HashSet<Ident>) -> Option<proc_macro2::TokenStream> {
 		let field_name = &self.field_name;
 		let field_ty = &self.ty;
 		match &self.header.init_kind {
@@ -345,6 +345,14 @@ impl IdentifiedChannel {
 			Some(ChannelInitKind::NewChannel) => None,
 			None => {
 				let static_channel = &self.header.static_channel;
+				if let Some(domain) = self.header.domain.as_ref() {
+					if domain_already_impl.contains(domain) { 
+						return None;
+					}
+					else {
+						domain_already_impl.insert(domain.clone());
+					}
+				}
 				self.header.domain.as_ref().map(|inner_value| {
 					quote!{pub #inner_value: <#static_channel as crate::common::message::StaticDomainChannelAtom>::Domain,}
 				})
@@ -429,6 +437,8 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 		let mut at_least_one_new = false;
 
 		let mut channel_already_impl: HashSet<Ident> = HashSet::new();
+
+		let mut domain_already_impl: HashSet<Ident> = HashSet::new();
 		// Loop through, appending each HasChannel impl to our implementations.
 		// Find fields with #[channel(T)] attributes
 		for field in struct_data.fields.iter() {
@@ -454,7 +464,7 @@ pub fn impl_channel_set(channel_set: TokenStream) -> TokenStream {
 						ty: field.ty.clone(),
 					};
 					// Our part of static_fields
-					if let Some(value) = identified_channel.static_builder_field() { 
+					if let Some(value) = identified_channel.static_builder_field(&mut domain_already_impl) { 
 						static_builder_fields.push(value);
 					}
 					if identified_channel.requires_subset() { 

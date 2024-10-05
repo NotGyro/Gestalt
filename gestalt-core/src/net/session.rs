@@ -4,7 +4,7 @@ use std::{
 	time::{Duration, Instant},
 };
 
-use crate::{common::message::{MessageReceiverAsync, MessageSender}, MpscSender, SendError};
+use crate::{common::message::{MessageReceiverAsync, MessageSender}, MpscReceiver, MpscSender, SendError};
 use gestalt_proc_macros::netmsg;
 use laminar::ConnectionMessenger;
 use log::{error, info, trace};
@@ -482,15 +482,15 @@ impl Session {
 pub async fn handle_session(
 	mut session_manager: Session,
 	session_tick: Duration,
-	kill_from_inside: tokio::sync::mpsc::UnboundedSender<(FullSessionName, Vec<SessionLayerError>)>,
-	mut kill_from_outside: tokio::sync::oneshot::Receiver<()>,
+	mut system_kill_session: MpscReceiver<()>,
 ) {
 	let mut ticker = tokio::time::interval(session_tick);
 	ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 	info!("Handling session for peer {}...", session_manager.peer_identity.to_base64());
-	
+
 	let peer_address = session_manager.peer_address.clone();
 	loop {
+		let mut kill_recv = Box::pin(system_kill_session.recv_wait());
 		tokio::select! {
 			// Inbound packets
 			// Per tokio documentation - "This method is cancel safe. If recv is used as the event in a tokio::select! statement and some other branch completes first, it is guaranteed that no messages were received on this channel."
@@ -505,18 +505,18 @@ pub async fn handle_session(
 								built_string.push_str(to_append.as_str());
 							}
 							error!("Errors encountered parsing inbound packets in a session with {}: \n {}", session_manager.peer_identity.to_base64(), built_string);
-							kill_from_inside.send((session_manager.get_session_name() ,  ingest_results)).unwrap();
+							session_manager.channels.kill_session.send((session_manager.get_session_name() ,  ingest_results)).unwrap();
 							break;
 						}
 					},
 					Err(e) => {
 						info!("Connection closed for {} due to {e:?}, dropping session state.", session_manager.peer_identity.to_base64());
-						kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+						session_manager.channels.kill_session.send((session_manager.get_session_name(), vec![])).unwrap();
 						break;
 					}
 				}
 				if session_manager.disconnect_deliberate {
-					kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+					session_manager.channels.kill_session.send((session_manager.get_session_name(), vec![])).unwrap();
 					break;
 				}
 			},
@@ -527,18 +527,18 @@ pub async fn handle_session(
 						let serialize_results = session_manager.process_outbound(send_packets.into_iter().map(|intermediary| intermediary.make_full_packet(peer_address)), Instant::now());
 						if let Err(e) = serialize_results {
 							error!("Error encountered attempting to send a packet to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
-							kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
+							session_manager.channels.kill_session.send((session_manager.get_session_name(), vec![e])).unwrap();
 							break;
 						}
 					},
 					Err(e) => {
 						info!("Connection closed for {} due to {:?}, dropping session state.", session_manager.peer_identity.to_base64(), e);
-						kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+						session_manager.channels.kill_session.send((session_manager.get_session_name(), vec![])).unwrap();
 						break;
 					}
 				}
 				if session_manager.disconnect_deliberate {
-					kill_from_inside.send((session_manager.get_session_name(), vec![])).unwrap();
+					session_manager.channels.kill_session.send((session_manager.get_session_name(), vec![])).unwrap();
 					break;
 				}
 			},
@@ -547,11 +547,11 @@ pub async fn handle_session(
 				if let Err(e) = update_results {
 					trace!("Connection indicated as should_drop(). packets_in_flight() is {} and last_heard() is {:?}. Established? : {}", session_manager.laminar.connection_state.packets_in_flight(), session_manager.laminar.connection_state.last_heard(Instant::now()), session_manager.laminar.connection_state.is_established());
 					error!("Error encountered while ticking network connection to peer {}: {:?}", session_manager.peer_identity.to_base64(), e);
-					kill_from_inside.send((session_manager.get_session_name(), vec![e])).unwrap();
+					session_manager.channels.kill_session.send((session_manager.get_session_name(), vec![e])).unwrap();
 					break;
 				}
 			}
-			_ = (&mut kill_from_outside) => {
+			_ = (&mut kill_recv) => {
 				info!("Shutting down session with user {}", session_manager.peer_identity.to_base64() );
 				break;
 			}
