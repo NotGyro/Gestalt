@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use gestalt_proc_macros::ChannelSet;
+use log::warn;
 
 use crate::{
 	common::identity::NodeIdentity, message::{MessageSender, MpscSender, SendError}, BroadcastChannel, BroadcastReceiver, BroadcastSender, ChannelCapacityConf, ChannelInit, DomainMessageSender, DomainMultiChannel, DomainSenderSubscribe, DomainSubscribeErr, DomainTakeReceiver, MessageReceiver, MessageReceiverAsync, MpscChannel, MpscReceiver, MultiDomainSender, NewDomainErr, ReceiverChannel, SenderChannel, StaticChannelAtom
@@ -325,8 +326,12 @@ pub struct NetSystemChannels {
 impl NetSystemChannels { 
 	pub fn init_peer(&self, session: FullSessionName, ident: NodeIdentity) {
 		self.net_msg_outbound.init_peer(ident);
-		self.raw_to_session.init_domain(session.clone());
-		self.system_kill_session.init_domain(session);
+		if let Err(_) = self.raw_to_session.init_domain(session.clone()) { 
+			warn!("Session {session:?} was already initialized, but an attempt was made to initialize it again. This should proceed without problems but may be a sign of bugs elsewhere.")
+		}
+		if let Err(_) = self.system_kill_session.init_domain(session) { 
+			warn!("Session {session:?} was already initialized, but an attempt was made to initialize it again. This should proceed without problems but may be a sign of bugs elsewhere.")
+		}
 	}
 	pub fn drop_peer(&self, session: &FullSessionName, ident: &NodeIdentity) {
 		self.net_msg_outbound.drop_peer(ident);

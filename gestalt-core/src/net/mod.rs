@@ -536,12 +536,12 @@ use crate::SubsetBuilder;
 	}
 
 	#[tokio::test]
-	#[ignore] //Ignored until cause of GH Actions test flakiness can be ascertained.
+	//#[ignore] //Ignored until cause of GH Actions test flakiness can be ascertained.
 	async fn session_with_localhost() {
 		// Init stuff
 		let mutex_guard = NET_TEST_MUTEX.lock().await;
 		let _log = TermLogger::init(
-			LevelFilter::Trace,
+			LevelFilter::Info,
 			simplelog::Config::default(),
 			simplelog::TerminalMode::Mixed,
 			simplelog::ColorChoice::Auto,
@@ -560,19 +560,24 @@ use crate::SubsetBuilder;
 		tokio::spawn(approver_no_mismatch(client_channel_set.key_mismatch_reporter.receiver_subscribe(), client_channel_set.key_mismatch_approver.sender_subscribe()));
 
 		// Port/binding stuff.
+		let start_find_port = tokio::time::Instant::now();
 		let port = find_available_udp_port(54134..54534).await.unwrap();
 		info!("Binding on port {}", port);
+		info!("Finding a port took {:?}", start_find_port.elapsed());
 
 		let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
 		let server_socket_addr = SocketAddr::new(server_addr, port);
 
+		let start_netmsgs = tokio::time::Instant::now();
 		let test_table = tokio::task::spawn_blocking(|| generated::get_netmsg_table())
 			.await
 			.unwrap();
 		println!("Counted {} registered NetMsg types.", test_table.len());
+		info!("Building a netmsg table took {:?}", start_netmsgs.elapsed());
 
 		//Actually start doing the test here:
 		//Launch server
+		let server_start = tokio::time::Instant::now();
 		let subset = server_channel_set.build_subset(SubsetBuilder::new(())).unwrap();
 		let join_handle_s = tokio::spawn(async move {
 			let mut sys = NetworkSystem::new(
@@ -621,9 +626,15 @@ use crate::SubsetBuilder;
 		)
 		.await
 		.unwrap();
-		
+		info!("Starting a client and a server, and connecting the client to the server, took {:?}", server_start.elapsed());
+		let recv_connected = tokio::time::Instant::now();
 		let connected_peer = connected_to_client.recv_wait().await.unwrap();
 		assert!(connected_peer.peer_identity == server_key_pair.public);
+		info!("Waiting for the server to notify the client that we're connected took {:?}", recv_connected.elapsed());
+
+		info!("Client connected to peer {:?} with role, {:?}", &connected_peer.peer_identity, &connected_peer.peer_role);
+
+		let post_handshake = tokio::time::Instant::now();
 
 		let client_net_send = client_channel_set.net_msg_outbound.sender_subscribe_domain(&connected_peer.peer_identity).unwrap();
 		client_net_send.send(
@@ -632,7 +643,8 @@ use crate::SubsetBuilder;
 			}.construct_packet().unwrap()
 		).unwrap();
 
-		let mut test_receiver = client_channel_set.net_msg_inbound.receiver_typed::<TestNetMsg>().unwrap();
+		let mut server_test_receiver = server_channel_set.net_msg_inbound.receiver_typed::<TestNetMsg>().unwrap();
+		let mut client_test_receiver = client_channel_set.net_msg_inbound.receiver_typed::<TestNetMsg>().unwrap();
 
 		let test = TestNetMsg {
 			message: String::from("Boop!"),
@@ -642,7 +654,7 @@ use crate::SubsetBuilder;
 		info!("Attempting to send a message to server {}", server_key_pair.public.to_base64());
 
 		{
-			let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait())
+			let out = tokio::time::timeout(Duration::from_secs(5), server_test_receiver.recv_wait())
 				.await
 				.unwrap()
 				.unwrap();
@@ -662,7 +674,7 @@ use crate::SubsetBuilder;
 		server_to_client_sender.send(test_reply.construct_packet().unwrap()).unwrap();
 
 		{
-			let out = tokio::time::timeout(Duration::from_secs(5), test_receiver.recv_wait())
+			let out = tokio::time::timeout(Duration::from_secs(5), client_test_receiver.recv_wait())
 				.await
 				.unwrap()
 				.unwrap();
@@ -674,7 +686,9 @@ use crate::SubsetBuilder;
 			assert_eq!(out.message, test_reply.message);
 		}
 
-		quit_game(Duration::from_millis(500)).await.unwrap();
+		info!("All behavior between the end of init&handshake, and the beginning of shutdown, took {:?}", post_handshake.elapsed());
+
+		quit_game(Duration::from_millis(50)).await.unwrap();
 
 		let _ = join_handle_s.abort();
 		let _ = join_handle_c.abort();

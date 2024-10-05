@@ -11,6 +11,7 @@ use log::{error, info, trace};
 use tokio::sync::broadcast::error::TryRecvError as BroadcastTryRecvError;
 use tokio::sync::mpsc::error::TryRecvError as MpscTryRecvError;
 use tokio::sync::{broadcast, mpsc};
+use tokio::time::Instant;
 
 use crate::world::WorldId;
 
@@ -995,28 +996,27 @@ pub async fn quit_game(deadline: Duration) -> Result<(), SendError> {
 		num_receivers
 	);
 
-	let mut timeout_future = Box::pin(tokio::time::sleep(deadline));
-
 	let mut count_received = 0;
 
+	let start = Instant::now();
+	let timeout_deadline = start + deadline;
+
 	while count_received < num_receivers {
-		tokio::select! {
-			reply_maybe = ready_receiver.recv_wait() => {
-				match reply_maybe {
-					Ok(_) => {
-						trace!("Received {} quit ready notifications.", count_received);
-						count_received += 1;
-					}
-					Err(e) => {
-						error!("Error polling for READY_FOR_QUIT messages, exiting immediately. Error was: {:?}", e);
-						return Ok(());
-					}
+		match tokio::time::timeout_at(timeout_deadline,ready_receiver.recv_wait()).await {
+			Ok(reply_maybe) => match reply_maybe {
+				Ok(_) => {
+					trace!("Received {} quit ready notifications.", count_received);
+					count_received += 1;
 				}
-			}
-			_ = (&mut timeout_future) => {
-				error!("Waiting for disparate parts of the engine to be ready for quit took longer than {:?}, exiting immediately.", deadline);
+				Err(e) => {
+					error!("Error polling for READY_FOR_QUIT messages, exiting immediately. Error was: {:?}", e);
+					return Ok(());
+				}
+			},
+			Err(_e) => {
+				error!("Waiting for disparate parts of the engine to be ready for quit took longer than {timeout_deadline:?}, exiting immediately.");
 				return Ok(());
-			}
+			},
 		}
 	}
 

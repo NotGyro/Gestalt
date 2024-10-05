@@ -394,8 +394,6 @@ fn main() {
 			connect_receiver.recv_wait().await
 		}).unwrap();
 
-		std::thread::sleep(Duration::from_millis(50));
-
 		let mut peer_joins_notif = channels.net_channels.net_msg_inbound.receiver_typed::<JoinAnnounce>().unwrap();
 
 		async_runtime.spawn(async move {

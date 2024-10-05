@@ -21,6 +21,7 @@ use log::{error, info, trace};
 use parking_lot::Mutex;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -193,6 +194,7 @@ pub struct PreProtocolReceiver {
 	peer_role: Option<NetworkRole>,
 	mismatch_reporter: Option<NewProtocolKeyReporter>,
 	mismatch_approver: Option<NewProtocolKeyApprover>,
+	start_time: Instant,
 }
 
 impl PreProtocolReceiver {
@@ -210,7 +212,11 @@ impl PreProtocolReceiver {
 			peer_role: None,
 			mismatch_reporter: Some(mismatch_reporter),
 			mismatch_approver: Some(mismatch_approver),
+			start_time: Instant::now(),
 		}
+	}
+	pub fn elapsed(&self) -> Duration {
+		self.start_time.elapsed()
 	}
 	pub fn is_handshake_done(&self) -> bool {
 		match &self.state {
@@ -411,7 +417,7 @@ pub async fn preprotocol_receiver_session(
 														transport_counter: seq as u32,
 													};
 
-													info!("A connection to this server was successfully made by client {}", completed.peer_identity.to_base64());
+													info!("A connection to this server was successfully made by client {}, which took {:?}", completed.peer_identity.to_base64(), receiver.elapsed());
 													internal_connect.send(completed).unwrap();
 													// Done with this part, stop sending.
 													false
@@ -642,6 +648,7 @@ pub async fn preprotocol_connect_to_server(
 	channels: PreprotocolSessionChannels,
 ) -> Result<(), HandshakeError> {
 	let PreprotocolSessionChannels { internal_connect, key_mismatch_reporter, key_mismatch_approver } = channels;
+	let start_time = tokio::time::Instant::now();
 	match tokio::time::timeout(connect_timeout, TcpStream::connect(&server_address)).await {
 		Ok(Ok(mut stream)) => {
 			// TODO figure out how connections where the initiator will be a non-client at some point
@@ -658,8 +665,9 @@ pub async fn preprotocol_connect_to_server(
 			{
 				Ok(completed_connection) => {
 					info!(
-						"Successfully initiated connection to a server with identity {}",
-						completed_connection.peer_identity.to_base64()
+						"Successfully initiated connection to a server with identity {}, which took {:?}",
+						completed_connection.peer_identity.to_base64(),
+						start_time.elapsed(),
 					);
 					stream.shutdown().await.unwrap();
 					internal_connect.send(completed_connection).unwrap();
@@ -752,7 +760,7 @@ pub mod test {
 			server_channels.clone(),
 		));
 		//Give it a moment
-		tokio::time::sleep(Duration::from_millis(100)).await;
+		tokio::time::sleep(Duration::from_millis(10)).await;
 		//Try to connect
 		preprotocol_connect_to_server(
 			client_key_pair,
