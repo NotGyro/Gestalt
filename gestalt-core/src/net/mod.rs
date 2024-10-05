@@ -1,4 +1,5 @@
 use std::fs;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -155,7 +156,10 @@ impl NetworkSystem {
 		let socket = match our_role {
 			SelfNetworkRole::Server => UdpSocket::bind(address).await?,
 			SelfNetworkRole::Client => {
-				UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).await?
+				match address.is_ipv6() {
+					true => UdpSocket::bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))).await?,
+					false => UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))).await?,
+				}
 			}
 		};
 
@@ -451,13 +455,19 @@ impl NetworkSystem {
 					for message in to_send {
 						match message.encode(&mut self.send_buf) {
 							Ok(encoded_len) => {
-								trace!("Sending {}-byte packet to {:?}", encoded_len, &message.session);
+								trace!("Sending {}-byte packet to {:#?}", encoded_len, &message.session);
 								//Push
-								let resl: Result<usize, std::io::Error> = match self.our_role {
-									SelfNetworkRole::Client => self.socket.send_to(&self.send_buf[0..encoded_len], message.session.peer_address).await,
-									_ => self.socket.send_to(&self.send_buf[0..encoded_len], message.session.peer_address).await
-								};
-								trace!("{:?}", resl);
+								match self.socket.send_to(&self.send_buf[0..encoded_len], message.session.peer_address).await {
+									Ok(length) => trace!("Wrote {length} bytes to socket for {:?}", message.session),
+									Err(e) => { 
+										error!("Error encountered while sending to a socket for {:?}: {e:#?}\nClosing connection.", message.session);
+										let _ = self.channels.system_kill_session.send_to((), &message.session);
+										if let Some(ident) = self.session_to_identity.get(&message.session) {
+											self.channels.drop_peer(&message.session, &ident);
+										}
+										let _ = self.session_to_identity.remove(&message.session);
+									}
+								}
 							},
 							Err(e) => error!("Error encountered encoding an outer envelope: {:?}", e),
 						}
@@ -473,7 +483,6 @@ impl NetworkSystem {
 						else {
 							info!("Closing connection for a session with {:?}, due to errors: {:?}", &ident, errors);
 						}
-						// Todo: self.channels.drop_peer
 						self.channels.drop_peer(&session_kill, &ident);
 						let _ = self.session_to_identity.remove(&session_kill);
 					}
@@ -542,7 +551,7 @@ use crate::SubsetBuilder;
 		// Init stuff
 		let mutex_guard = NET_TEST_MUTEX.lock().await;
 		let _log = TermLogger::init(
-			LevelFilter::Info,
+			LevelFilter::Trace,
 			simplelog::Config::default(),
 			simplelog::TerminalMode::Mixed,
 			simplelog::ColorChoice::Auto,
@@ -567,7 +576,7 @@ use crate::SubsetBuilder;
 		info!("Binding on port {}", port);
 		//info!("Finding a port took {:?}", start_find_port.elapsed());
 
-		let server_addr = IpAddr::V6(Ipv6Addr::LOCALHOST);
+		let server_addr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 		let server_socket_addr = SocketAddr::new(server_addr, port);
 
 		let start_netmsgs = tokio::time::Instant::now();
@@ -608,7 +617,7 @@ use crate::SubsetBuilder;
 		let join_handle_c = tokio::spawn(async move {
 			let mut sys = NetworkSystem::new(
 				SelfNetworkRole::Client,
-				server_socket_addr,
+				SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
 				client_key_pair.clone(),
 				LaminarConfig::default(),
 				Duration::from_millis(50),
