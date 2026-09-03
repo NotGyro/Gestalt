@@ -153,46 +153,6 @@ pub struct CiphertextMessage {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ProtocolMessageError {
-	#[error("Unrecognized protocol message type: {0}")]
-	UnrecognizedType(u8),
-	#[error("Buffer not large enough to contain a protocol message- {0} bytes were provided and we need {1}.")]
-	NotEnoughBuffer(usize, usize),
-	#[error("Attempted to read a zero-length slice as a protocol message.")]
-	CannotReadZeroLength,
-}
-
-/// Any message internal to the network system (not used by / propagatated through to the game engine).
-#[derive(Debug, Clone)]
-pub enum ProtocolMessage {
-	Todo = 0,
-}
-
-impl ProtocolMessage {
-	pub fn encode(&self, send_buf: &mut [u8]) -> Result<usize, ProtocolMessageError> {
-		match self {
-			ProtocolMessage::Todo => {
-				if send_buf.len() == 0 {
-					return Err(ProtocolMessageError::NotEnoughBuffer(0, 1));
-				}
-				send_buf[0] = 0;
-				Ok(1)
-			}
-		}
-	}
-	pub fn decode(recv_buf: &[u8]) -> Result<(Self, usize), ProtocolMessageError> {
-		if recv_buf.len() == 0 {
-			return Err(ProtocolMessageError::NotEnoughBuffer(0, 1));
-		}
-		let variant = recv_buf[0];
-		match variant {
-			0 => Ok((Self::Todo, 1)),
-			_ => Err(ProtocolMessageError::UnrecognizedType(variant)),
-		}
-	}
-}
-
-#[derive(thiserror::Error, Debug)]
 pub enum OuterEnvelopeError {
 	#[error("Attempted to encode an OuterEnvelope to a buffer not large enough to contain it - {0} bytes were provided and we need {1}.")]
 	NotEnoughBuffer(usize, usize),
@@ -360,22 +320,9 @@ pub struct NetMsgType {
 pub struct InboundNetMsg {
 	pub peer_identity: NodeIdentity,
 	pub message_type_id: NetMsgId,
-	// Our MsgPack-encoded actual NetMsg.
+	// Our MsgPack (for normal messages - bulk transfers do something different)-encoded actual NetMsg.
 	pub payload: Vec<u8>,
 }
-
-/*
-impl MessageWithDomain<NodeIdentity> for InboundNetMsg {
-	fn get_domain(&self) -> &NodeIdentity {
-		&self.peer_identity
-	}
-}
-
-impl MessageWithDomain<NetMsgId> for InboundNetMsg {
-	fn get_domain(&self) -> &NetMsgId {
-		&self.message_type_id
-	}
-}*/
 
 pub type NetMsgDomain = NetMsgId;
 

@@ -33,6 +33,7 @@ client.ron
 /logs/
 /protocol/
 /worlds/
+/resources/
 #Running tests from inside of VSCodium does this sometimes. 
 /gestalt-core/protocol/
 /gestalt-core/keys/
@@ -40,6 +41,7 @@ client.ron
 /gestalt-core/worlds/
 /gestalt-core/temp/
 /gestalt-core/cache/
+/gestalt-core/resources/
 
 # Logs
 log.csv

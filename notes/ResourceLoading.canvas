@@ -1,0 +1,39 @@
+{
+	"nodes":[
+		{"id":"d9959fcd9862b826","type":"text","text":"# Game code requests resources","x":-220,"y":-840,"width":560,"height":100},
+		{"id":"18eebeb70efa0501","type":"text","text":"Message to async worker thread","x":-284,"y":-80,"width":208,"height":180},
+		{"id":"d694a084e15dbeee","type":"text","text":"Message to async worker thread\n(contains hint on which node to load it from i.e. server we're connected to)","x":-284,"y":-80,"width":208,"height":180},
+		{"id":"0f60831559a9047f","type":"text","text":"Loaded & parsed image-holding global.\nChecks incoming messasges from async loading system on fetch() call. (for later streaming support?). Parses when ready.","x":-660,"y":-80,"width":229,"height":240},
+		{"id":"475e735c7b08f4be","type":"text","text":"Message to async worker thread\n(contains hint on which node to load it from i.e. server we're connected to)","x":216,"y":-80,"width":208,"height":180},
+		{"id":"480cc7d15ad8c780","type":"text","text":"```Rust\nIMAGE_LOADER.lock().fetch(&id, &node)\n```\nPlain old synchronous function call on a global.\nCan return `Ready(Arc<Image>)` if cached or\n`Pending` or `Error`  or perhaps `Streaming` when I implement it","x":-380,"y":-560,"width":401,"height":180},
+		{"id":"f34db02774d0d945","type":"text","text":"```Rust\nSOUND_LOADER.lock().fetch(&id, &node)\n```\nPlain old synchronous function call on a global.\nCan return `Ready(Arc<Sound>)` if cached or\n`Pending` or `Error`   or perhaps `Streaming` when I implement it","x":120,"y":-560,"width":400,"height":180},
+		{"id":"73454043224e478d","type":"text","text":"# etc","x":640,"y":-560,"width":250,"height":60},
+		{"id":"881d78352f9487d3","type":"text","text":"LoadBuf enum which can be `Buffer(ResouceId, Vec<u8>)` or `FinalBuffer(ResouceId, Vec<u8>)`","x":-713,"y":220,"width":335,"height":140},
+		{"id":"6d84b2c973cccd6c","type":"text","text":"Loaded & parsed sound-holding global.\nChecks incoming messasges from async loading system on fetch() call. (for later streaming support?).  Parses when ready.","x":573,"y":-80,"width":229,"height":240},
+		{"id":"83abda14473edd95","type":"text","text":"LoadBuf enum which can be `Buffer(ResouceId, Vec<u8>)` or `FinalBuffer(ResouceId, Vec<u8>)`","x":520,"y":220,"width":335,"height":140},
+		{"id":"0321bca83ee417c1","type":"text","text":"Is present on disk?","x":-55,"y":520,"width":208,"height":60},
+		{"id":"2e6d8ef8e91d1d98","type":"text","text":"Determine which existing session(s) (or later when more distributed / ipfs-*like* features / bittorrent like behavior are implemented, which IP address for a not-currently-connected peer) to send the resource requests to.","x":49,"y":711,"width":300,"height":220},
+		{"id":"4df18c66967f2403","type":"text","text":"In new Tokio task: \nLoad raw bytes from disk in (configurable size?) buffer on heap and send each full buffer out, owned, no copy.","x":-359,"y":520,"width":240,"height":219},
+		{"id":"60439910a1cebecc","type":"text","text":"Per-session file transfer manager (as in, lives in the `Session` struct in `src/net/session.rs`)\nabout which transfers are in progress, which parameters have been negotiated, and how far along we are, handling requests and responses and file chunks and missing file chunks (lost packet) and etc.","x":-100,"y":980,"width":299,"height":280}
+	],
+	"edges":[
+		{"id":"0f530afd4665828a","fromNode":"d9959fcd9862b826","fromSide":"bottom","toNode":"480cc7d15ad8c780","toSide":"top"},
+		{"id":"0fc6f6cd7ba0ab29","fromNode":"d9959fcd9862b826","fromSide":"bottom","toNode":"f34db02774d0d945","toSide":"top"},
+		{"id":"cbce6710599df2c1","fromNode":"73454043224e478d","fromSide":"top","toNode":"d9959fcd9862b826","toSide":"bottom"},
+		{"id":"9b345f74d0b9e227","fromNode":"475e735c7b08f4be","fromSide":"bottom","toNode":"0321bca83ee417c1","toSide":"top","color":"6"},
+		{"id":"618518da992c60a0","fromNode":"18eebeb70efa0501","fromSide":"bottom","toNode":"0321bca83ee417c1","toSide":"top","color":"6"},
+		{"id":"93c118de1e2b164b","fromNode":"0321bca83ee417c1","fromSide":"bottom","toNode":"4df18c66967f2403","toSide":"right","label":"yes"},
+		{"id":"cdd1b1368aa64273","fromNode":"4df18c66967f2403","fromSide":"top","toNode":"83abda14473edd95","toSide":"bottom","color":"6"},
+		{"id":"95229b3d4e841686","fromNode":"f34db02774d0d945","fromSide":"bottom","toNode":"6d84b2c973cccd6c","toSide":"top","label":"cached"},
+		{"id":"de710c4ac8a60288","fromNode":"f34db02774d0d945","fromSide":"bottom","toNode":"475e735c7b08f4be","toSide":"top","label":"not cached"},
+		{"id":"96ba7269d14fcd73","fromNode":"480cc7d15ad8c780","fromSide":"bottom","toNode":"18eebeb70efa0501","toSide":"top","label":"not cached"},
+		{"id":"eba5e8c920ee40a5","fromNode":"480cc7d15ad8c780","fromSide":"bottom","toNode":"0f60831559a9047f","toSide":"top","label":"cached"},
+		{"id":"06fa2eb4e898bc39","fromNode":"0321bca83ee417c1","fromSide":"bottom","toNode":"2e6d8ef8e91d1d98","toSide":"top","label":"no"},
+		{"id":"05bc8f24cd17a6b3","fromNode":"2e6d8ef8e91d1d98","fromSide":"bottom","toNode":"60439910a1cebecc","toSide":"top","color":"6"},
+		{"id":"54e0b0d7fbbeeb4a","fromNode":"0f60831559a9047f","fromSide":"bottom","toNode":"881d78352f9487d3","toSide":"top","fromEnd":"arrow"},
+		{"id":"723c8a1539c05a01","fromNode":"83abda14473edd95","fromSide":"top","toNode":"6d84b2c973cccd6c","toSide":"bottom"},
+		{"id":"9c876ecd2021db0d","fromNode":"4df18c66967f2403","fromSide":"top","toNode":"881d78352f9487d3","toSide":"bottom","color":"6"},
+		{"id":"d99a6aeed996a0c3","fromNode":"60439910a1cebecc","fromSide":"right","toNode":"83abda14473edd95","toSide":"bottom","color":"6"},
+		{"id":"c5eab58f54925db3","fromNode":"60439910a1cebecc","fromSide":"left","toNode":"881d78352f9487d3","toSide":"bottom","color":"6"}
+	]
+}

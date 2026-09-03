@@ -72,21 +72,12 @@ impl LaminarConnectionManager {
 		//let mut at_least_one = false;
 		let messenger = &mut self.messenger;
 		for payload in inbound_messages.into_iter() {
-			//at_least_one = true;
-			//let was_est = self.connection_state.is_established();
 			//Processing inbound
 			self.connection_state
 				.process_packet(messenger, payload.as_ref(), time);
-			//if !was_est && self.connection_state.is_established() {
-			//    info!("Connection established with {:?}", self.peer_address);
-			//}
 		}
 
 		self.connection_state.update(messenger, time);
-
-		//if at_least_one {
-		//    self.connection_state.last_heard = time.clone();
-		//}
 
 		match self.connection_state.should_drop(messenger, time) {
 			false => Ok(()),

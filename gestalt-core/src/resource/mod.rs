@@ -1,3 +1,4 @@
+use crate::common::directories::GestaltDirectories;
 use crate::common::identity::{NodeIdentity, PublicKey};
 use crate::common::{new_fast_hash_map, FastHashMap};
 use crate::message::RecvError;
@@ -6,9 +7,11 @@ use base64::Engine;
 use ed25519::Signature;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::{cmp::PartialEq, hash::Hash};
 
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
@@ -244,6 +247,7 @@ pub enum LinkProvenanceShort {
 #[repr(C)]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct ResourceLinkShort {
+	pub version: u8,
 	pub auth: LinkProvenanceShort,
 	pub revision: u64,
 	// Todo: string-interner strings for this maybe!!
@@ -270,7 +274,7 @@ pub enum ResourceLocation {
 
 impl ResourceLocation {
 	/// Intended for internal / engine use - does not necessarily correspond to metadata / original filename.
-	pub(crate) fn file_name(&self) -> ResourceFilelike {
+	pub(crate) fn engine_filename(&self) -> ResourceFilelike {
 		match self {
 			ResourceLocation::Caid(id) => ResourceFilelike::File(PathBuf::from(id.to_string())),
 			ResourceLocation::Local(loc) => match loc {
@@ -287,38 +291,66 @@ pub(crate) enum ResourceFilelike {
 	Internal(String),
 }
 
+fn path_for_resource(
+	id: &ResourceLocation,
+	_origin_identity: &NodeIdentity,
+	_self_identity: &NodeIdentity,
+	directories: Arc<GestaltDirectories>,
+) -> ResourceFilelike {
+	match id.engine_filename() {
+		ResourceFilelike::File(file_name) => {
+			let parent_dir = match id {
+				ResourceLocation::Caid(caid) => { 
+					&directories.resources_cache_buckets[resource_id_to_prefix(caid)]
+				},
+				ResourceLocation::Local(local_res) => match local_res {
+						LocalResource::User(user) => &directories.resources_user.join(user),
+						LocalResource::Internal(_) =>  unreachable!("id.engine_filename() on an Internal resource should never return ResourceFilelike::File()"),
+					},
+				ResourceLocation::Link(_link) => todo!(),
+			};
+			ResourceFilelike::File(parent_dir.join(file_name))
+		},
+		ResourceFilelike::Internal(internal) => ResourceFilelike::Internal(internal),
+	}
+}
+
 /// Used to keep track of a resource locally
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResourceInfo {
 	/// Which resource?
-	pub id: Caid,
-	/// What did the "creator" user call this resource?
+	pub id: ResourceLocation,
+	/// Claimed filename of the resource per original uploader. If authored *inside* Gestalt,
+	/// filename will be generated with a timestamp. For user interface and error messages
+	/// mostly, not for locating files (this is done by CAID).
 	pub filename: String,
-	/// Which user claims to have "made" this resource? Who signed it, who is the authority on it?
-	pub creator: NodeIdentity,
+	// Which user claims to have "made" this resource, not in the sense of authorship but in 
+	// the sense of who added it to the network? Who signed it, who is the authority on it?
+	pub host: NodeIdentity,
 	/// Expected type. MIME Type for PlainOldData, @{ManifestType} for manifest types e.g. @Module
 	pub resource_type: String,
 	/// Name of creator user and friends who made this resource.
-	pub authors: String,
-	/// What does the author have to say about this one?
-	pub description: Option<String>,
-	// /// Is there anything else we need to make use of this resource? I love recursion.
-	// pub dependencies: Option<Vec<Box<ResourceInfo>>>,
-	/// Signature verifying our binary blob (referred to by ResourceId) as good, signed with the public key from creator's NodeIdentity.
-	pub signature: Signature,
+	pub authors: Vec<String>,
+	// Signature verifying our binary blob (referred to by ResourceId) as good, signed with the public key from creator's NodeIdentity.
+	// i.e. self.creator.verify(&self.signature)
+	// pub signature: Signature,
+	/// User-defined & other optional metadata
+	pub fields: HashMap<String, String>,
 }
 
+// TODO - ResourceInfo should not be used in place of ResourceId. 
 impl Hash for ResourceInfo {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
 		self.id.hash(state);
-		self.creator.hash(state);
+		self.host.hash(state);
 	}
 }
 
 impl PartialEq for ResourceInfo {
 	fn eq(&self, other: &Self) -> bool {
 		//Elide name.
-		self.creator == other.creator && self.id == other.id
+		//self.creator == other.creator && 
+		self.id == other.id
 		//The naive form of this would be self.id == other.id && self.origin == other.origin && self.name == other.name
 		//but we want equality to be entirely based on origin and hash.
 	}
@@ -340,6 +372,8 @@ pub enum ResourceRetrievalError {
 	Verification(Caid, VerifyResourceError),
 	#[error("Message-passing error while trying to load resource {0:?}: {1}.")]
 	ChannelError(ResourceLocation, String),
+	#[error("Unable to decode a resource:")]
+	DecodeError(String),
 }
 
 pub enum ResourceError<E>
@@ -447,63 +481,6 @@ pub(self) fn resource_id_to_prefix(resource: &Caid) -> usize {
 		resource.hash[0] as usize
 	}
 }
-// Intended to be used as a const (global)
-struct ResourceStorage<T: Send + Sized> {
-	buckets: once_cell::sync::Lazy<[tokio::sync::RwLock<FastHashMap<Caid, T>>; 256]>,
-}
-
-impl<T> ResourceStorage<T>
-where
-	T: Send + Sized + Clone,
-{
-	pub const fn new() -> Self {
-		Self {
-			buckets: once_cell::sync::Lazy::new(|| {
-				std::array::from_fn(|_i| tokio::sync::RwLock::new(new_fast_hash_map()))
-			}),
-		}
-	}
-	pub async fn get(&self, id: &Caid) -> Option<T> {
-		let guard = self.buckets[resource_id_to_prefix(id)].read().await;
-		guard.get(id).cloned()
-	}
-	pub fn get_blocking(&self, id: &Caid) -> Option<T> {
-		let guard = self.buckets[resource_id_to_prefix(id)].blocking_read();
-		guard.get(id).cloned()
-	}
-	pub async fn insert(&self, id: Caid, value: T) -> Option<T> {
-		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
-		guard.insert(id, value)
-	}
-	pub fn insert_blocking(&self, id: Caid, value: T) -> Option<T> {
-		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
-		guard.insert(id, value)
-	}
-	pub async fn remove(&self, id: &Caid) -> Option<T> {
-		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
-		guard.remove(&id)
-	}
-	pub fn remove_blocking(&self, id: &Caid) -> Option<T> {
-		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
-		guard.remove(&id)
-	}
-	pub async fn update(&self, id: &Caid, new: T) {
-		let mut guard = self.buckets[resource_id_to_prefix(&id)].write().await;
-		let reference = guard.get_mut(id);
-		match reference {
-			Some(inner) => *inner = new,
-			None => _ = guard.insert(id.clone(), new),
-		}
-	}
-	pub fn update_blocking(&self, id: &Caid, new: T) {
-		let mut guard = self.buckets[resource_id_to_prefix(&id)].blocking_write();
-		let reference = guard.get_mut(id);
-		match reference {
-			Some(inner) => *inner = new,
-			None => _ = guard.insert(id.clone(), new),
-		}
-	}
-}
 
 pub enum ResourcePoll<T, E>
 where
@@ -528,16 +505,6 @@ where
 	}
 }
 
-static RESOURCE_METADATA: ResourceStorage<ResourceInfo> = ResourceStorage::new();
-
-pub fn update_global_resource_metadata(id: &Caid, info: ResourceInfo) {
-	RESOURCE_METADATA.update_blocking(id, info);
-}
-
-pub fn get_resource_metadata(id: &Caid) -> Option<ResourceInfo> {
-	RESOURCE_METADATA.get_blocking(id)
-}
-
 #[derive(Clone)]
 pub enum ResourceIdOrMeta {
 	Id(Caid),
@@ -548,7 +515,7 @@ impl ResourceIdOrMeta {
 		match self {
 			ResourceIdOrMeta::Id(id) => format!("ResourceId {} (metadata not found)", id),
 			ResourceIdOrMeta::Meta(meta) => {
-				format!("{} (from user {:?})", meta.filename, meta.creator)
+				format!("ResourceId {:?} which is file {}", &meta.id, &meta.filename)
 			}
 		}
 	}

@@ -56,7 +56,7 @@ wgpu = { version = "0.15", features = ["spirv"] } # Add renderdoc when it gets s
 winit = "0.28"
 
 # Image loading
-image = "0.24"
+image = "0.25"
 
 # Cryptography
 ed25519-dalek = { version = "^2.1", features = ["serde", "alloc", "batch"]}

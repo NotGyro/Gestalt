@@ -1,11 +1,12 @@
-use futures::Future;
-use image::{ImageError, RgbaImage};
+use std::{collections::HashMap, io::Cursor, sync::Arc};
 
-use crate::common::identity::NodeIdentity;
+use image::{DynamicImage, ImageError, RgbaImage, ImageReader};
+use log::error;
+
+use crate::{MessageReceiverAsync, MessageSender, MpscReceiver, MpscSender};
 
 use super::{
-	provider::{RawResourceProvider, ResourceProvider},
-	ResourceError, Caid, ResourceLocation, ResourcePoll, ResourceRetrievalError,
+	channels::FetchResponse, retrieval::InternalTransfer, Caid, ResourceError, ResourceLocation, ResourceRetrievalError
 };
 
 pub const ID_MISSING_TEXTURE: Caid = Caid {
@@ -29,8 +30,10 @@ pub const ID_ERROR_TEXTURE: Caid = Caid {
 pub enum LoadImageError {
 	#[error("Error while decoding or transcoding an image: {0:?}")]
 	EncodeDecodeError(#[from] ImageError),
-	#[error("Tried to access a image named {0}, which does not appear to exist.")]
-	DoesNotExist(String),
+	#[error("Channel for image load request can no longer be polled.")]
+	ChannelDead,
+	#[error("Unable to send requested image to the part of the program that needs it.")]
+	SenderDead,
 }
 
 impl From<ResourceError<ResourceRetrievalError>> for ResourceError<LoadImageError> {
@@ -45,70 +48,69 @@ impl From<ResourceError<ResourceRetrievalError>> for ResourceError<LoadImageErro
 
 pub type InternalImage = RgbaImage;
 
-pub struct ImageProvider {
-	inner: RawResourceProvider,
-}
-
-impl ImageProvider {
-	pub fn new(return_channel_capacity: usize) -> Self {
-		Self {
-			inner: RawResourceProvider::new(return_channel_capacity),
-		}
+pub(super) async fn load_images(mut expected: Vec<ResourceLocation>, mut bytes_in: MpscReceiver<InternalTransfer>, images_out: MpscSender<FetchResponse<DynamicImage>>) -> Result<(), LoadImageError> {
+	let mut in_progress = HashMap::new();
+	for resource in expected.drain(..) {
+		let buffer: Vec<u8> = Vec::new();
+		in_progress.insert(resource, buffer);
 	}
-
-	async fn recv_wait_inner(
-		&mut self,
-	) -> Result<(ResourceLocation, InternalImage), ResourceError<LoadImageError>> {
-		match self.inner.recv_wait().await {
-			Ok((id, buf)) => match image::load_from_memory(buf.as_slice()) {
-				Ok(image) => Ok((id, image.into_rgba8())),
-				Err(e) => Err(ResourceError::Parse(id, e.into())),
+	while in_progress.len() > 0 {
+		match bytes_in.recv_wait().await {
+			Ok(msg) => {
+				match msg {
+					// Metadata, potentially useful for guessing at file type.
+					InternalTransfer::Metadata(_resource_info) => todo!("Metadata not yet implemented"),
+					// WIP buffer. Currently pretty useless as there's just about nothing
+					// that works by streaming a single non-video image.
+					InternalTransfer::Buffer(resource_location, mut buf) => {
+						in_progress.entry(resource_location)
+							.and_modify(|val| val.append(&mut buf))
+							.or_insert(buf);
+					},
+					// Last buffer, actually process our image here.
+					InternalTransfer::FinalBuffer(resource_location, buf_maybe) => {
+						match buf_maybe { 
+							Ok(mut final_buffer) => {
+								let bytes = match in_progress.remove(&resource_location) {
+									Some(mut value) => {
+										value.append(&mut final_buffer);
+										value
+									},
+									None => {
+										final_buffer
+									}
+								};
+								let reader = ImageReader::new(Cursor::new(bytes))
+									.with_guessed_format()
+									.expect("Cursor io should never fail");
+								// Actually parse as an image
+								let resl = reader.decode()
+									.map(|image| Arc::new(image))
+									.map_err(|e| ResourceRetrievalError::DecodeError(
+										format!("Resource {resource_location:?} failed to decode due to {e}")
+									));
+								//if let Ok(image) = resl {
+								// TODO: Interact with the global here.
+								//}
+								images_out.send(FetchResponse { id: resource_location, resource: resl })
+									.map_err(|_e| LoadImageError::SenderDead)?;
+							}
+							// We have been sent an error from the other end.
+							Err(e) => {
+								in_progress.remove(&resource_location);
+								error!("Failed to retrieve {resource_location:?} due to {e}");
+								images_out.send(FetchResponse { id: resource_location, resource: Err(e) })
+									.map_err(|_e| LoadImageError::SenderDead)?;
+							}
+						}
+					},
+				}
 			},
-			Err(e) => Err(e.into()),
+			Err(e) => { 
+				error!("Channel for image load request can no longer be polled due to {e}, cannot load following resources: {expected:#?}");
+				return Err(LoadImageError::ChannelDead);
+			}
 		}
 	}
-}
-
-impl ResourceProvider<InternalImage> for ImageProvider {
-	type ParseError = LoadImageError;
-
-	/// Returns the subset of these resources that are ready *now.*
-	/// If it returns an empty vec, that means all resources are pending.
-	fn request_batch(
-		&mut self,
-		resources: Vec<ResourceLocation>,
-		expected_source: NodeIdentity,
-	) -> Vec<Result<(ResourceLocation, InternalImage), ResourceError<LoadImageError>>> {
-		self.inner
-			.request_batch(resources, expected_source)
-			.iter()
-			.map(|value| match value {
-				Ok(_) => todo!(),
-				Err(_) => todo!(),
-			})
-			.collect()
-	}
-	/// Request that we download files, except that there isn't any immediate need to use them
-	/// (i.e. retrieve the files but do not send them along a channel to this ResourceProvider)
-	fn preload_batch(&mut self, resources: Vec<ResourceLocation>, expected_source: NodeIdentity) {
-		self.inner.preload_batch(resources, expected_source)
-	}
-
-	fn recv_poll(&mut self) -> ResourcePoll<InternalImage, Self::ParseError> {
-		match self.inner.recv_poll() {
-			ResourcePoll::Ready(id, buf) => match image::load_from_memory(buf.as_slice()) {
-				Ok(image) => ResourcePoll::Ready(id, image.into_rgba8()),
-				Err(e) => ResourcePoll::Err(super::ResourceError::Parse(id, e.into())),
-			},
-			ResourcePoll::Err(e) => ResourcePoll::Err(e.into()),
-			ResourcePoll::None => ResourcePoll::None,
-		}
-	}
-
-	fn recv_wait(
-		&mut self,
-	) -> impl Future<Output = Result<(ResourceLocation, InternalImage), ResourceError<Self::ParseError>>> + '_
-	{
-		self.recv_wait_inner()
-	}
+	Ok(())
 }
