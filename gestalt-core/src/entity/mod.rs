@@ -148,7 +148,7 @@ impl EntityVelocity {
 }
 
 pub fn tick_movement_system(world: &mut EcsWorld, seconds_per_tick: TickLength) {
-	for (_entity, (position, velocity, last_pos_maybe)) in
+	for (position, velocity, last_pos_maybe) in
 		world.query_mut::<(&mut EntityPos, &EntityVelocity, Option<&mut LastPos>)>()
 	{
 		let position = position;

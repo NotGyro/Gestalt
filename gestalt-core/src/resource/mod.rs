@@ -105,7 +105,7 @@ impl Caid {
 		hasher.update(buf);
 		let buffer_hash = hasher.finalize();
 
-		if buffer_hash != self.hash.into() {
+		if buffer_hash != self.hash {
 			return Err(VerifyResourceError::HashesDontMatch);
 		}
 
@@ -544,17 +544,17 @@ macro_rules! resource_debug {
 
 #[test]
 fn resource_id_generate() {
-	use rand::rngs::OsRng;
-	use rand::Rng;
+	use getrandom::SysRng;
+	use rand::TryRng;
 
-	let mut rng = OsRng::default();
+	let mut rng = SysRng::default();
 
 	let mut buf1: [u8; 1024] = [0; 1024];
 	let mut buf2: [u8; 1024] = [0; 1024];
 
 	{
-		rng.fill(&mut buf1);
-		rng.fill(&mut buf2);
+		rng.try_fill_bytes(&mut buf1);
+		rng.try_fill_bytes(&mut buf2);
 	}
 
 	let rid1 = Caid::from_buf(&buf1);
@@ -572,17 +572,17 @@ fn resource_id_generate() {
 
 #[test]
 fn resource_id_to_string() {
-	use rand::rngs::OsRng;
-	use rand::Rng;
+	use getrandom::SysRng;
+	use rand::TryRng;
 
-	let mut rng = OsRng::default();
+	let mut rng = SysRng::default();
 
 	const BUF_SIZE: usize = 2048;
 
 	let mut buf1: [u8; BUF_SIZE] = [0; BUF_SIZE];
 
 	{
-		rng.fill(&mut buf1);
+		rng.try_fill_bytes(&mut buf1);
 	}
 
 	let rid1 = Caid::from_buf(&buf1);

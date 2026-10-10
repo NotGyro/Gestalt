@@ -461,8 +461,8 @@ impl<T: Voxel> Chunk<T> {
 					panic!("Attempted to set_raw() on a Uniform chunk!")
 				}
 			}
-			ChunkInner::Small(ref mut inner) => inner.set_raw(pos, value.get() as u8),
-			ChunkInner::Large(ref mut inner) => inner.set_raw(pos, value),
+			ChunkInner::Small(inner) => inner.set_raw(pos, value.get() as u8),
+			ChunkInner::Large(inner) => inner.set_raw(pos, value),
 		};
 	}
 	#[inline(always)]
@@ -505,8 +505,8 @@ impl<T: Voxel> Chunk<T> {
 	pub fn mark_palette_dirty_status(&mut self, set_to: bool) {
 		match &mut self.tiles {
 			ChunkInner::Uniform(_) => {}
-			ChunkInner::Small(ref mut inner) => inner.palette_dirty = set_to,
-			ChunkInner::Large(ref mut inner) => inner.palette_dirty = set_to,
+			ChunkInner::Small(inner) => inner.palette_dirty = set_to,
+			ChunkInner::Large(inner) => inner.palette_dirty = set_to,
 		}
 	}
 	#[inline]
@@ -667,13 +667,13 @@ impl LargePaletteEntry {
 
 #[test]
 fn chunk_index_reverse() {
-	use rand::Rng;
+	use rand::RngExt;
 
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 	for _ in 0..4096 {
-		let x = rng.gen_range(0..CHUNK_SIZE);
-		let y = rng.gen_range(0..CHUNK_SIZE);
-		let z = rng.gen_range(0..CHUNK_SIZE);
+		let x = rng.random_range(0..CHUNK_SIZE);
+		let y = rng.random_range(0..CHUNK_SIZE);
+		let z = rng.random_range(0..CHUNK_SIZE);
 
 		let i_value = crate::world::voxelarray::chunk_xyz_to_i(x, y, z, CHUNK_SIZE);
 		let (x1, y1, z1) = crate::world::voxelarray::chunk_i_to_xyz(i_value, CHUNK_SIZE);
@@ -700,8 +700,8 @@ fn chunk_index_bounds() {
 
 #[test]
 fn assignemnts_to_chunk() {
-	use rand::Rng;
-
+	use rand::RngExt;
+	
 	let u1 = String::from("air");
 	let u2 = String::from("stone");
 	let mut test_chunk = Chunk {
@@ -761,13 +761,13 @@ fn assignemnts_to_chunk() {
 		}
 	}
 
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 
 	{
 		for i in 0..253 {
-			let x = rng.gen_range(0..CHUNK_SIZE);
-			let y = rng.gen_range(0..CHUNK_SIZE);
-			let z = rng.gen_range(0..CHUNK_SIZE);
+			let x = rng.random_range(0..CHUNK_SIZE);
+			let y = rng.random_range(0..CHUNK_SIZE);
+			let z = rng.random_range(0..CHUNK_SIZE);
 			let pos = vpos!(x as u8, y as u8, z as u8);
 
 			let tile = format!("{}.test", i);
@@ -797,9 +797,9 @@ fn assignemnts_to_chunk() {
 
 	{
 		for i in 253..1024 {
-			let x = rng.gen_range(0..CHUNK_SIZE);
-			let y = rng.gen_range(0..CHUNK_SIZE);
-			let z = rng.gen_range(0..CHUNK_SIZE);
+			let x = rng.random_range(0..CHUNK_SIZE);
+			let y = rng.random_range(0..CHUNK_SIZE);
+			let z = rng.random_range(0..CHUNK_SIZE);
 			let pos = vpos!(x as u8, y as u8, z as u8);
 
 			let tile = format!("{}.test", i);

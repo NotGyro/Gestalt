@@ -387,14 +387,14 @@ fn test_array_iterative() {
 
 #[test]
 fn chunk_index_reverse() {
-	use rand::Rng;
+	use rand::RngExt;
 
 	let chunk_sz = 16_usize;
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 	for _ in 0..4096 {
-		let x = rng.gen_range(0..16);
-		let y = rng.gen_range(0..16);
-		let z = rng.gen_range(0..16);
+		let x = rng.random_range(0..16);
+		let y = rng.random_range(0..16);
+		let z = rng.random_range(0..16);
 
 		let i_value = chunk_xyz_to_i(x, y, z, chunk_sz);
 		let (x1, y1, z1) = chunk_i_to_xyz(i_value, chunk_sz);

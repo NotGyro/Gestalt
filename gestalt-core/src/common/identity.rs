@@ -6,8 +6,8 @@ use aes_gcm::{
 use argon2::Argon2;
 use base64::engine::general_purpose::URL_SAFE as BASE_64;
 use base64::Engine;
-use rand::Rng;
-use rand_core::CryptoRngCore;
+use rand::{Rng, RngExt, TryCryptoRng, TryRng};
+use rand_core::CryptoRng;
 use serde_with_macros::serde_as;
 use signature::{Signer, Verifier};
 
@@ -18,6 +18,8 @@ use std::{
 	io::Write,
 	path::PathBuf,
 };
+
+use crate::common::identity::KeyPairLoadError::FailedRandomness;
 
 /// The length of a ed25519 `Signature`, in bytes.
 pub const SIGNATURE_LENGTH: usize = ed25519::Signature::BYTE_SIZE;
@@ -142,8 +144,11 @@ pub struct IdentityKeyPair {
 impl IdentityKeyPair {
 	#[cfg(test)]
 	pub fn generate_for_tests() -> Self {
-		let mut rng = rand_core::OsRng::default();
-		let keys_dalek = ed25519_dalek::SigningKey::generate(&mut rng);
+		let mut rng = getrandom::SysRng::default();
+		let mut secret = ed25519_dalek::SecretKey::default();
+		rng.try_fill_bytes(&mut secret).unwrap();
+		let keys_dalek = ed25519_dalek::SigningKey::from_bytes(&secret);
+		let keys: IdentityKeyPair = (&keys_dalek).into();
 		(&keys_dalek).into()
 	}
 }
@@ -202,13 +207,16 @@ impl KeyFileEncryption {
 	/// Returns (Self, nonce)
 	pub(crate) fn generate<R>(rng: &mut R) -> Result<(Self, [u8; 12]), KeyPairLoadError>
 	where
-		R: Rng + CryptoRngCore,
+		R: TryCryptoRng
 	{
 		let mut salt_bytes: [u8; 16] = [0; 16];
-		rng.fill(&mut salt_bytes);
+		rng.try_fill_bytes(&mut salt_bytes)
+			.map_err(|e| KeyPairLoadError::FailedRandomness( format!("{e}")))?;
 		let salt_vec = Vec::from(salt_bytes);
 
-		let nonce_bytes: [u8; 12] = Aes256Gcm::generate_nonce(rng).into();
+		let mut nonce_bytes: [u8; 12] = [0; 12];
+		rng.try_fill_bytes(&mut nonce_bytes)
+			.map_err(|e| KeyPairLoadError::FailedRandomness( format!("{e}")))?;
 		let nonce_vec = Vec::from(nonce_bytes);
 
 		Ok((
@@ -274,6 +282,8 @@ pub enum KeyPairLoadError {
 	ArgonHashError(argon2::Error),
 	#[error("Hasher produced no output")]
 	NoHashOut,
+	#[error("Failed to generate entropy: {0}")]
+	FailedRandomness(String),
 }
 impl From<aes_gcm::Error> for KeyPairLoadError {
 	fn from(value: aes_gcm::Error) -> Self {
@@ -375,10 +385,12 @@ pub fn do_keys_need_generating(keys_directory: PathBuf, expected_filename: &str)
 pub fn generate_local_keys(
 	passphrase: Option<&str>,
 ) -> Result<(IdentityKeyPair, VersionedKeyFile), Box<dyn std::error::Error>> {
-	let mut rng = rand_core::OsRng::default();
+	let mut rng = getrandom::SysRng::default();
 
 	//Generate
-	let keys_dalek = ed25519_dalek::SigningKey::generate(&mut rng);
+	let mut secret = ed25519_dalek::SecretKey::default();
+	rng.try_fill_bytes(&mut secret)?;
+	let keys_dalek = ed25519_dalek::SigningKey::from_bytes(&secret);
 	let keys: IdentityKeyPair = (&keys_dalek).into();
 
 	//Serialize private key

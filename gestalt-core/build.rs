@@ -23,10 +23,10 @@ fn main() {
 	.unwrap();
 
 	let mut output = r#"use std::collections::HashMap;
-use toolbelt::once::InitOnce;
+use std::sync::OnceLock;
 use crate::net::netmsg::{NetMsg, NetMsgId, NetMsgType};
 
-static NETMSG_LOOKUP_TABLE: InitOnce<HashMap<NetMsgId, NetMsgType>> = InitOnce::uninitialized();
+static NETMSG_LOOKUP_TABLE: OnceLock<HashMap<NetMsgId, NetMsgType>> = OnceLock::new();
 
 pub(crate) fn get_netmsg_table() -> &'static HashMap<NetMsgId, NetMsgType> {
     NETMSG_LOOKUP_TABLE.get_or_init(|| {
@@ -81,7 +81,7 @@ pub(crate) fn get_netmsg_table() -> &'static HashMap<NetMsgId, NetMsgType> {
 	output.push_str(
 		r#"
         msgs
-    }).unwrap()
+    })
 }
 "#,
 	);

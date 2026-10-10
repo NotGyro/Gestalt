@@ -1,4 +1,5 @@
 use base64::Engine;
+use getrandom::Error;
 use semver::Version;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -6,7 +7,7 @@ use tokio::fs::OpenOptions;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use log::{error, info, trace};
-use rand::Rng;
+use rand::{Rng, TryRng};
 use serde::{Deserialize, Serialize};
 use snow::params::NoiseParams;
 
@@ -97,6 +98,8 @@ pub enum HandshakeError {
 	NoMismatchChannels,
 	#[error("Bad signature length. Expected 64 bytes, got: {0}")]
 	SignatureLengthWrong(usize),
+	#[error("Unable to generate entropy for signing: {0}")]
+	FailedRandomness(String),
 }
 
 fn buf_to_64(buf: &Vec<u8>) -> Result<[u8; 64], usize> {
@@ -415,7 +418,7 @@ pub fn initiate_handshake(
 ) -> Result<(snow::HandshakeState, HandshakeStepMessage), HandshakeError> {
 	let builder: snow::Builder<'_> = snow::Builder::new(NOISE_PARAMS.clone());
 	let mut noise = builder
-		.local_private_key(&local_noise_keys.private)
+		.local_private_key(&local_noise_keys.private)?
 		.build_initiator()?;
 
 	// Generate "-> e" message
@@ -448,7 +451,7 @@ pub fn receive_initial(
 
 		let builder: snow::Builder<'_> = snow::Builder::new(NOISE_PARAMS.clone());
 		let mut state = builder
-			.local_private_key(&local_noise_keys.private)
+			.local_private_key(&local_noise_keys.private)?
 			.build_responder()?;
 
 		// Read their message.
@@ -534,9 +537,11 @@ pub async fn initiator_reply(
 	}
 }
 
-fn make_signing_nonce() -> [u8; 32] {
-	let mut rng = rand_core::OsRng::default();
-	rng.r#gen()
+fn make_signing_nonce() -> Result<[u8; 32], getrandom::Error> {
+	let mut bytes: [u8; 32] = [0; 32];
+	let mut rng = getrandom::SysRng::default();
+	rng.try_fill_bytes(&mut bytes)?;
+	Ok(bytes)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -613,7 +618,8 @@ pub async fn receive_last_noise(
 		let transport = state.into_stateless_transport_mode()?;
 
 		// Build a HandshakeMessage asking for a signature.
-		let nonce = make_signing_nonce();
+		let nonce = make_signing_nonce()
+			.map_err(|e| HandshakeError::FailedRandomness( format!("{e}")))?;
 		let base64_nonce = BASE_64.encode(&nonce);
 		let challenge = KeyChallenge {
 			static_challenge_name: CHALLENGE_NAME.to_string(),
@@ -697,7 +703,8 @@ pub fn initiator_sign_buf(
 		}
 
 		// Build a HandshakeMessage asking for a signature.
-		let nonce = make_signing_nonce();
+		let nonce = make_signing_nonce()
+			.map_err(|e| HandshakeError::FailedRandomness( format!("{e}")))?;
 		let base64_nonce = BASE_64.encode(&nonce);
 		let challenge = KeyChallenge {
 			static_challenge_name: CHALLENGE_NAME.to_string(),
