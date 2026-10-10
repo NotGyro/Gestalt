@@ -8,6 +8,7 @@ use crate::{common::message::{MessageReceiverAsync, MessageSender}, MpscReceiver
 use gestalt_proc_macros::netmsg;
 use laminar::ConnectionMessenger;
 use log::{error, info, trace};
+use rand::distr::weighted::Weight;
 use serde::{Deserialize, Serialize};
 use tokio::time::MissedTickBehavior;
 
@@ -206,8 +207,8 @@ impl Session {
 		plaintext: T,
 	) -> Result<OuterEnvelope, SessionLayerError> {
 		self.local_counter
-			.checked_add(1)
-			.ok_or(SessionLayerError::ExhaustedCounter(self.peer_address.clone()))?;
+			.checked_add_assign(&1)
+			.map_err( |_e| SessionLayerError::ExhaustedCounter(self.peer_address.clone()))?;
 		let mut buffer = vec![0u8; ((plaintext.as_ref().len() as usize) * 3) + 64];
 		let len_written = self.transport_cryptography.write_message(
 			self.local_counter as u64,
